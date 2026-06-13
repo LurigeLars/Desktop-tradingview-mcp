@@ -49,7 +49,11 @@ export async function openPanel({ panel, action }) {
           else { if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
           performed = 'opened';
         } else if (action === 'close' || (action === 'toggle' && isOpen)) {
+          // hideWidget(name) was removed in newer TradingView builds; fall back to
+          // close() (minimizes the bottom panel) and then hide() (hides the bar).
           if (typeof bwb.hideWidget === 'function') bwb.hideWidget(widgetName);
+          else if (typeof bwb.close === 'function') bwb.close();
+          else if (typeof bwb.hide === 'function') bwb.hide();
           performed = 'closed';
         }
         return { was_open: isOpen, performed: performed };
