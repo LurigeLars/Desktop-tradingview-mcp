@@ -2,7 +2,9 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
+// 127.0.0.1, not localhost: on some Windows machines localhost resolves to ::1
+// first, and Electron's --remote-debugging-port only listens on IPv4.
+const CDP_HOST = '127.0.0.1';
 const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
