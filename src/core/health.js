@@ -1,7 +1,7 @@
 /**
  * Core health/discovery/launch logic.
  */
-import { getClient, getTargetInfo, evaluate } from '../connection.js';
+import { getClient, getTargetInfo, evaluate, CDP_HOST, CDP_PORT } from '../connection.js';
 import { existsSync, cpSync, rmSync, readdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 import { dirname, basename, join } from 'path';
@@ -176,11 +176,9 @@ function _resolveLaunchDeps(deps) {
 }
 
 async function _probeCdp(cdpPort) {
-  // 127.0.0.1, not localhost: on some Windows machines localhost resolves to ::1
-  // first, and Electron's debug server only listens on IPv4.
   const http = await import('http');
   return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:${cdpPort}/json/version`, (res) => {
+    const req = http.get(`http://${CDP_HOST}:${cdpPort}/json/version`, (res) => {
       let data = '';
       res.on('data', (chunk) => data += chunk);
       res.on('end', () => resolve(data));
@@ -248,7 +246,7 @@ function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync
 
 export async function launch({ port, kill_existing, _deps } = {}) {
   const deps = _resolveLaunchDeps(_deps);
-  const cdpPort = port || 9222;
+  const cdpPort = port || CDP_PORT;
   const killFirst = kill_existing !== false;
   const platform = process.platform;
 
@@ -350,7 +348,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   if (info) {
     return {
       success: true, platform, binary: tvPath, pid: child.pid,
-      cdp_port: cdpPort, cdp_url: `http://127.0.0.1:${cdpPort}`,
+      cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
       ...(usedLocalCopy && { msix_local_copy: true }),
     };
