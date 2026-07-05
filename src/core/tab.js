@@ -19,14 +19,17 @@ export async function list() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
 
+  // Chart tabs plus new-tab landing pages (layout picker), so every tab in the
+  // top bar is listable and switchable.
   const tabs = targets
-    .filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
+    .filter(t => t.type === 'page' && (/tradingview\.com\/chart/i.test(t.url) || t.title === 'New tab'))
     .map((t, i) => ({
       index: i,
       id: t.id,
       title: t.title.replace(/^Live stock.*charts on /, ''),
       url: t.url,
       chart_id: t.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
+      is_chart: /tradingview\.com\/chart/i.test(t.url),
     }));
 
   return { success: true, tab_count: tabs.length, tabs };
@@ -80,34 +83,166 @@ async function isTargetVisible(targetId) {
   }
 }
 
+/** Find an open new-tab landing page target (shows the layout picker). */
+async function findLandingTarget() {
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const targets = await resp.json();
+  return targets.find(t => t.type === 'page' && t.title === 'New tab') || null;
+}
+
+/** Run fn with an eval helper attached to a specific target. */
+async function withTarget(targetId, fn) {
+  let c = null;
+  try {
+    c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
+    return await fn(async (expression) => {
+      const { result } = await c.Runtime.evaluate({ expression, returnByValue: true });
+      return result?.value;
+    });
+  } finally {
+    try { if (c) await c.close(); } catch { /* already gone */ }
+  }
+}
+
 /**
  * Open a new chart tab by clicking the shell window's new-tab button.
+ * With `layout`, also picks from the landing page's layout list:
+ *   layout: 'new'    -> click "Create new layout" (blank chart, saved as Unnamed)
+ *   layout: '<name>' -> open the saved layout whose title contains <name>
+ * Reuses an already-open landing tab instead of opening another one.
  */
-export async function newTab() {
-  const result = await withShell(async (evalIn) => {
-    const before = await evalIn(`document.querySelectorAll('.tabs-container .tab').length`);
-    const clicked = await evalIn(`
+export async function newTab({ layout, name } = {}) {
+  let landing = await findLandingTarget();
+  let shellCounts = null;
+
+  if (!landing) {
+    shellCounts = await withShell(async (evalIn) => {
+      const before = await evalIn(`document.querySelectorAll('.tabs-container .tab').length`);
+      const clicked = await evalIn(`
+        (function() {
+          var btn = document.querySelector('[class*="create-new-tab"]');
+          if (!btn) return false;
+          btn.click();
+          return true;
+        })()
+      `);
+      if (!clicked) throw new Error('New-tab button not found in shell window.');
+      await new Promise(r => setTimeout(r, 1500));
+      const after = await evalIn(`document.querySelectorAll('.tabs-container .tab').length`);
+      return { before, after };
+    });
+    landing = await findLandingTarget();
+  }
+
+  if (!layout) {
+    const state = await list();
+    return {
+      success: shellCounts ? shellCounts.after > shellCounts.before : !!landing,
+      action: 'new_tab_opened',
+      note: 'Tab is on the layout picker. Call tab_new with layout: "new" or a saved layout name to open a chart in it.',
+      ...state,
+    };
+  }
+
+  if (!landing) throw new Error('New tab opened but its landing page target was not found.');
+
+  // Snapshot existing chart targets so we can spot the one the pick creates.
+  const beforeResp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const chartIdsBefore = new Set(
+    (await beforeResp.json())
+      .filter(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
+      .map(t => t.id)
+  );
+
+  const wantNew = String(layout).trim().toLowerCase() === 'new';
+  const layoutName = name || 'New layout';
+  const picked = await withTarget(landing.id, async (evalIn) => {
+    if (wantNew) {
+      // "Create new layout" opens a naming dialog; the Create button stays
+      // disabled until the name input is filled (React controlled input, so
+      // the native value setter + input event are required).
+      await evalIn(`(function(){ var b = document.querySelector('.create-new-layout-button'); if (b) b.click(); })()`);
+      await new Promise(r => setTimeout(r, 700));
+      const filled = await evalIn(`
+        (function() {
+          // The dialog's name field (not the landing page's Search box).
+          var inp = document.querySelector('input[placeholder="My layout"]');
+          if (!inp) {
+            var dlg = document.querySelector('[class*="dialog"], [role="dialog"]');
+            if (dlg) inp = dlg.querySelector('input');
+          }
+          if (!inp) return 'no-dialog-input';
+          var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          setter.call(inp, ${JSON.stringify(name || 'New layout')});
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          return 'filled';
+        })()
+      `);
+      if (filled !== 'filled') throw new Error(`Create-layout dialog did not open as expected (${filled}).`);
+      await new Promise(r => setTimeout(r, 400));
+      const created = await evalIn(`
+        (function() {
+          var scope = document.querySelector('[class*="dialog"], [role="dialog"]') || document;
+          var btns = scope.querySelectorAll('button');
+          for (var i = 0; i < btns.length; i++) {
+            var t = (btns[i].textContent || '').trim().toLowerCase();
+            if (t === 'create' && !btns[i].disabled) { btns[i].click(); return true; }
+          }
+          return false;
+        })()
+      `);
+      if (!created) throw new Error('Create button not found or still disabled in the layout dialog.');
+      return layoutName;
+    }
+    const clickByTitle = `
       (function() {
-        var btn = document.querySelector('[class*="create-new-tab"]');
-        if (!btn) return false;
-        btn.click();
-        return true;
+        var q = ${JSON.stringify(String(layout).toLowerCase())};
+        var items = document.querySelectorAll('.layout-list-item');
+        for (var i = 0; i < items.length; i++) {
+          var t = items[i].querySelector('.layout-list-item-title');
+          if (t && t.textContent.trim().toLowerCase().indexOf(q) !== -1) {
+            items[i].click();
+            return t.textContent.trim();
+          }
+        }
+        return null;
       })()
-    `);
-    if (!clicked) throw new Error('New-tab button not found in shell window.');
-    await new Promise(r => setTimeout(r, 1500));
-    const after = await evalIn(`document.querySelectorAll('.tabs-container .tab').length`);
-    return { before, after };
+    `;
+    let foundTitle = await evalIn(clickByTitle);
+    if (!foundTitle) {
+      // Not in the recents — expand the full layout list and retry.
+      await evalIn(`(function(){ var b = document.querySelector('.layout-list-expand-button'); if (b) b.click(); })()`);
+      await new Promise(r => setTimeout(r, 800));
+      foundTitle = await evalIn(clickByTitle);
+    }
+    return foundTitle;
   });
 
-  const state = await list();
+  if (!picked) throw new Error(`Layout matching "${layout}" not found in the layout list.`);
+
+  // The chart loads under a NEW CDP target: the file:// landing -> https://
+  // chart navigation swaps renderer processes, so the target id changes.
+  // Wait for a chart target that wasn't there before the pick.
+  let chartTarget = null;
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+    const targets = await resp.json();
+    chartTarget = targets.find(x =>
+      x.type === 'page' && /tradingview\.com\/chart/i.test(x.url) && !chartIdsBefore.has(x.id)
+    ) || targets.find(x => x.id === landing.id && /tradingview\.com\/chart/i.test(x.url)) || null;
+    if (chartTarget) break;
+  }
+  if (!chartTarget) throw new Error(`Picked "${picked}" but no new chart target appeared.`);
+
+  // Give the chart a moment to boot, then follow it.
+  await new Promise(r => setTimeout(r, 2000));
+  await reconnectTo(chartTarget.id);
   return {
-    success: result.after > result.before,
-    action: result.after > result.before ? 'new_tab_opened' : 'new_tab_click_had_no_effect',
-    shell_tabs_before: result.before,
-    shell_tabs_after: result.after,
-    note: 'New tabs open on a landing page; they appear in tab_list once a chart is opened in them.',
-    ...state,
+    success: true,
+    action: wantNew ? 'new_layout_created' : 'layout_opened_in_new_tab',
+    layout: picked,
+    chart_id: chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
   };
 }
 
