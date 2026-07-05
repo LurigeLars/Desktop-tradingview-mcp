@@ -520,7 +520,13 @@ export async function getStudyValues() {
               }
             }
           } catch(e) {}
-          if (Object.keys(values).length > 0) results.push({ name: name, values: values });
+          // Include id + inputs so multiple instances of the same indicator
+          // (e.g. two EMAs with different lengths) are distinguishable (#143).
+          var id = null;
+          try { id = s.id ? s.id() : null; } catch(e) {}
+          var inputs = null;
+          try { var ip = s.inputs ? s.inputs() : null; if (ip && Object.keys(ip).length) inputs = ip; } catch(e) {}
+          if (Object.keys(values).length > 0) results.push({ id: id, name: name, inputs: inputs, values: values });
         } catch(e) {}
       }
       return results;
