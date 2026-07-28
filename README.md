@@ -1,5 +1,7 @@
 # TradingView MCP Bridge
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Ftradesdontlie%2Ftradingview-mcp.svg)](https://mcptoplist.com/server/glama%2Ftradesdontlie%2Ftradingview-mcp)
+
 Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
 
 > [!WARNING]
