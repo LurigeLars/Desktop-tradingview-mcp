@@ -6,7 +6,7 @@ let targetInfo = null;
 // Default is 127.0.0.1, not localhost: on some Windows machines localhost
 // resolves to ::1 first, and Electron's --remote-debugging-port only listens on IPv4.
 export const CDP_HOST = process.env.TV_CDP_HOST || process.env.CDP_HOST || '127.0.0.1';
-export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) || 9222;
+export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) || 9333;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -31,19 +31,10 @@ const KNOWN_PATHS = {
 
 export { KNOWN_PATHS };
 
-/**
- * Sanitize a string for safe interpolation into JavaScript code evaluated via CDP.
- * Uses JSON.stringify to produce a properly escaped JS string literal (with quotes).
- * Prevents injection via quotes, backticks, template literals, or control chars.
- */
 export function safeString(str) {
   return JSON.stringify(String(str));
 }
 
-/**
- * Validate that a value is a finite number. Throws if NaN, Infinity, or non-numeric.
- * Prevents corrupt values from reaching TradingView APIs that persist to cloud state.
- */
 export function requireFinite(value, name) {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(`${name} must be a finite number, got: ${value}`);
@@ -53,7 +44,6 @@ export function requireFinite(value, name) {
 export async function getClient() {
   if (client) {
     try {
-      // Quick liveness check
       await client.Runtime.evaluate({ expression: '1', returnByValue: true });
       return client;
     } catch {
@@ -77,7 +67,6 @@ export async function connect(targetId = null) {
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
-      // Enable required domains
       await client.Runtime.enable();
       await client.Page.enable();
       await client.DOM.enable();
@@ -92,12 +81,6 @@ export async function connect(targetId = null) {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
-/**
- * Re-attach the cached CDP client to a specific target id.
- * Used by tab_switch so subsequent reads (chart_get_state, data_get_*,
- * quote_get, screenshots) follow the activated tab instead of staying
- * glued to the target picked at first connect.
- */
 export async function reconnectTo(targetId) {
   if (client) {
     try { await client.close(); } catch { /* already gone */ }
@@ -107,13 +90,29 @@ export async function reconnectTo(targetId) {
   return connect(targetId);
 }
 
+export function isTradingViewUrl(value) {
+  try {
+    const url = new URL(String(value));
+    const hostname = url.hostname.toLowerCase();
+    return hostname === 'tradingview.com' || hostname.endsWith('.tradingview.com');
+  } catch {
+    return false;
+  }
+}
+
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+
+  const tradingViewPages = targets.filter(t => t.type === 'page' && isTradingViewUrl(t.url));
+
+  return tradingViewPages.find(t => {
+    try {
+      return new URL(t.url).pathname.toLowerCase().startsWith('/chart');
+    } catch {
+      return false;
+    }
+  }) || tradingViewPages[0] || null;
 }
 
 async function findTargetById(id) {
@@ -157,10 +156,6 @@ export async function disconnect() {
     targetInfo = null;
   }
 }
-
-// --- Direct API path helpers ---
-// Each returns the STRING expression path after verifying it exists.
-// Callers use the returned string in their own evaluate() calls.
 
 async function verifyAndReturn(path, name) {
   const exists = await evaluate(`typeof (${path}) !== 'undefined' && (${path}) !== null`);
