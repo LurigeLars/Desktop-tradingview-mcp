@@ -25,7 +25,7 @@ if [ -z "$APP" ]; then
   fi
 fi
 
-if [ -z "$APP" ]; then
+if [ -z "$APP" ] || [ ! -f "$APP" ]; then
   APP=$(find /Applications "$HOME/Applications" -name "TradingView.app" -maxdepth 2 2>/dev/null | head -1)
   if [ -n "$APP" ]; then
     APP="$APP/Contents/MacOS/TradingView"
