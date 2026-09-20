@@ -12,8 +12,6 @@ const MSIX_EXE = 'C:\\Program Files\\WindowsApps\\TradingView.Desktop_3.1.0.7818
 const LOCAL_COPY_EXE = `${process.env.LOCALAPPDATA || ''}\\tradingview-mcp\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\\TradingView.exe`;
 const CDP_VERSION = JSON.stringify({ Browser: 'Chrome/140', 'User-Agent': 'TVDesktop/3.1.0' });
 
-// ── Mock helpers ─────────────────────────────────────────────────────────
-
 function mockChild({ failWith } = {}) {
   const child = new EventEmitter();
   child.pid = 12345;
@@ -22,13 +20,6 @@ function mockChild({ failWith } = {}) {
   return child;
 }
 
-/**
- * Build a _deps bundle simulating a win32 MSIX environment.
- * @param {object} opts
- *   spawnFailures — spawn paths (substring) that emit EACCES
- *   cdpBindsFor  — spawn paths (substring) after which probeCdp starts succeeding
- *   copyExists   — local copy already present
- */
 function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } = {}) {
   const state = { spawned: [], copies: [], removed: [], killed: 0, cdpUp: false };
   const deps = {
@@ -59,7 +50,6 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
   return { deps, state };
 }
 
-// launch() only takes the MSIX code path on win32; skip elsewhere.
 const onWindows = process.platform === 'win32';
 
 describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
@@ -70,7 +60,7 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.equal(result.binary, MSIX_EXE);
     assert.equal(result.msix_local_copy, undefined);
     assert.equal(state.copies.length, 0);
-    assert.equal(result.cdp_url, 'http://127.0.0.1:9222');
+    assert.equal(result.cdp_url, 'http://127.0.0.1:9333');
   });
 
   it('EACCES on direct spawn falls back to local copy', async () => {
@@ -81,10 +71,8 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.equal(result.binary, LOCAL_COPY_EXE);
     assert.equal(state.copies.length, 1);
     assert.match(state.copies[0].src, /WindowsApps/);
-    // stale cached version of another release is cleaned up first
     assert.equal(state.removed.length, 1);
     assert.match(state.removed[0], /3\.0\.0\.7652/);
-    // the CDP-less direct instance is killed before relaunching from the copy
     assert.ok(state.killed >= 2);
   });
 

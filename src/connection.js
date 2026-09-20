@@ -6,7 +6,7 @@ let targetInfo = null;
 // Default is 127.0.0.1, not localhost: on some Windows machines localhost
 // resolves to ::1 first, and Electron's --remote-debugging-port only listens on IPv4.
 export const CDP_HOST = process.env.TV_CDP_HOST || process.env.CDP_HOST || '127.0.0.1';
-export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) || 9222;
+export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) || 9333;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -107,13 +107,30 @@ export async function reconnectTo(targetId) {
   return connect(targetId);
 }
 
+export function isTradingViewUrl(value) {
+  try {
+    const url = new URL(String(value));
+    const hostname = url.hostname.toLowerCase();
+    return hostname === 'tradingview.com' || hostname.endsWith('.tradingview.com');
+  } catch {
+    return false;
+  }
+}
+
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+
+  const tradingViewPages = targets.filter(t => t.type === 'page' && isTradingViewUrl(t.url));
+
+  // Prefer an actual chart URL, then any other TradingView page.
+  return tradingViewPages.find(t => {
+    try {
+      return new URL(t.url).pathname.toLowerCase().startsWith('/chart');
+    } catch {
+      return false;
+    }
+  }) || tradingViewPages[0] || null;
 }
 
 async function findTargetById(id) {
