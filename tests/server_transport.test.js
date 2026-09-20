@@ -9,8 +9,8 @@ import {
   startTradingViewHttpServer,
 } from '../src/server/http.js';
 
-test('project CDP default is 9333', () => {
-  assert.equal(CDP_PORT, 9333);
+test('project CDP default is 9222', () => {
+  assert.equal(CDP_PORT, 9222);
 });
 
 test('TradingView target matching validates the parsed hostname', () => {

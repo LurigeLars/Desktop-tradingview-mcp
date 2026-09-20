@@ -13,7 +13,7 @@ The project has one canonical TradingView MCP implementation and two transport e
 
 ### Local security boundary
 
-- TradingView CDP defaults to `127.0.0.1:9333`.
+- TradingView CDP defaults to `127.0.0.1:9222`.
 - The Streamable HTTP server defaults to `127.0.0.1:8765/mcp`.
 - The HTTP entrypoint refuses non-loopback bind addresses.
 - HTTP request bodies are bounded to 2 MiB by default.

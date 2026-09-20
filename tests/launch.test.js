@@ -60,7 +60,7 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
     assert.equal(result.binary, MSIX_EXE);
     assert.equal(result.msix_local_copy, undefined);
     assert.equal(state.copies.length, 0);
-    assert.equal(result.cdp_url, 'http://127.0.0.1:9333');
+    assert.equal(result.cdp_url, 'http://127.0.0.1:9222');
   });
 
   it('EACCES on direct spawn falls back to local copy', async () => {
