@@ -10,7 +10,7 @@ If you discover a security vulnerability in this project, please report it respo
 
 ## Scope
 
-This project connects to a locally running TradingView Desktop instance via Chrome DevTools Protocol on `localhost:9222`. Security concerns in scope include:
+This project connects to a locally running TradingView Desktop instance via Chrome DevTools Protocol on `localhost:9333`. Security concerns in scope include:
 
 - Code injection via crafted tool inputs
 - Unintended data exposure through tool outputs
@@ -25,7 +25,8 @@ This project connects to a locally running TradingView Desktop instance via Chro
 
 ## Best Practices for Users
 
-- Only run TradingView with `--remote-debugging-port=9222` on localhost
-- Do not expose port 9222 to your network or the internet
+- Only run TradingView with `--remote-debugging-port=9333` on localhost
+- Do not expose port 9333 to your network or the internet
+- Keep the MCP HTTP transport bound to loopback and place authentication/tunneling in front of it for remote access
 - Do not pipe `tv stream` output to external services without reviewing the data
 - Keep your TradingView Desktop and Node.js installations up to date
