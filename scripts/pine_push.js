@@ -2,20 +2,68 @@
 // Push scripts/current.pine → TradingView editor, then compile
 import CDP from 'chrome-remote-interface';
 import { readFileSync } from 'fs';
+import { CDP_HOST, CDP_PORT } from '../src/connection.js';
+
+function isTradingViewTarget(target) {
+  try {
+    const hostname = new URL(target?.url || '').hostname.toLowerCase();
+    return hostname === 'tradingview.com' || hostname.endsWith('.tradingview.com');
+  } catch {
+    return false;
+  }
+}
 
 const srcPath = new URL('../scripts/current.pine', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
 const src = readFileSync(srcPath, 'utf-8');
 
-const targets = await (await fetch('http://localhost:9222/json/list')).json();
-const t = targets.find(t => t.url?.includes('tradingview.com'));
+const targets = await (await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`)).json();
+const t = targets.find(isTradingViewTarget);
 if (!t) { console.error('No TradingView target'); process.exit(1); }
-const c = await CDP({ host: 'localhost', port: 9222, target: t.id });
+
+const c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: t.id });
 await c.Runtime.enable();
 
-// Inject source
-const escaped = JSON.stringify(src);
-const set = (await c.Runtime.evaluate({
-  expression: `(function(){var c=document.querySelector(".monaco-editor.pine-editor-monaco");if(!c)return false;var el=c;var fk;for(var i=0;i<20;i++){if(!el)break;fk=Object.keys(el).find(function(k){return k.startsWith("__reactFiber$")});if(fk)break;el=el.parentElement}if(!fk)return false;var cur=el[fk];for(var d=0;d<15;d++){if(!cur)break;if(cur.memoizedProps&&cur.memoizedProps.value&&cur.memoizedProps.value.monacoEnv){var env=cur.memoizedProps.value.monacoEnv;if(env.editor&&typeof env.editor.getEditors==="function"){var eds=env.editor.getEditors();if(eds.length>0){eds[0].setValue(${escaped});return true}}}cur=cur.return}return false})()`,
+// Pass source as a CDP argument instead of interpolating it into JavaScript source.
+const global = await c.Runtime.evaluate({ expression: 'globalThis' });
+const globalObjectId = global.result?.objectId;
+if (!globalObjectId) {
+  console.error('Could not resolve TradingView page global object');
+  await c.close();
+  process.exit(1);
+}
+
+const set = (await c.Runtime.callFunctionOn({
+  objectId: globalObjectId,
+  functionDeclaration: `function(source){
+    var c=document.querySelector(".monaco-editor.pine-editor-monaco");
+    if(!c)return false;
+    var el=c;
+    var fk;
+    for(var i=0;i<20;i++){
+      if(!el)break;
+      fk=Object.keys(el).find(function(k){return k.startsWith("__reactFiber$")});
+      if(fk)break;
+      el=el.parentElement;
+    }
+    if(!fk)return false;
+    var cur=el[fk];
+    for(var d=0;d<15;d++){
+      if(!cur)break;
+      if(cur.memoizedProps&&cur.memoizedProps.value&&cur.memoizedProps.value.monacoEnv){
+        var env=cur.memoizedProps.value.monacoEnv;
+        if(env.editor&&typeof env.editor.getEditors==="function"){
+          var eds=env.editor.getEditors();
+          if(eds.length>0){
+            eds[0].setValue(source);
+            return true;
+          }
+        }
+      }
+      cur=cur.return;
+    }
+    return false;
+  }`,
+  arguments: [{ value: src }],
   returnByValue: true,
 })).result?.value;
 
