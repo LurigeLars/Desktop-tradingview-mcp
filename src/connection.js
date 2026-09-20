@@ -31,10 +31,19 @@ const KNOWN_PATHS = {
 
 export { KNOWN_PATHS };
 
+/**
+ * Sanitize a string for safe interpolation into JavaScript code evaluated via CDP.
+ * Uses JSON.stringify to produce a properly escaped JS string literal (with quotes).
+ * Prevents injection via quotes, backticks, template literals, or control chars.
+ */
 export function safeString(str) {
   return JSON.stringify(String(str));
 }
 
+/**
+ * Validate that a value is a finite number. Throws if NaN, Infinity, or non-numeric.
+ * Prevents corrupt values from reaching TradingView APIs that persist to cloud state.
+ */
 export function requireFinite(value, name) {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(`${name} must be a finite number, got: ${value}`);
@@ -44,6 +53,7 @@ export function requireFinite(value, name) {
 export async function getClient() {
   if (client) {
     try {
+      // Quick liveness check
       await client.Runtime.evaluate({ expression: '1', returnByValue: true });
       return client;
     } catch {
@@ -67,6 +77,7 @@ export async function connect(targetId = null) {
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
+      // Enable required domains
       await client.Runtime.enable();
       await client.Page.enable();
       await client.DOM.enable();
@@ -81,6 +92,12 @@ export async function connect(targetId = null) {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
+/**
+ * Re-attach the cached CDP client to a specific target id.
+ * Used by tab_switch so subsequent reads (chart_get_state, data_get_*,
+ * quote_get, screenshots) follow the activated tab instead of staying
+ * glued to the target picked at first connect.
+ */
 export async function reconnectTo(targetId) {
   if (client) {
     try { await client.close(); } catch { /* already gone */ }
@@ -106,6 +123,7 @@ async function findChartTarget() {
 
   const tradingViewPages = targets.filter(t => t.type === 'page' && isTradingViewUrl(t.url));
 
+  // Prefer an actual chart URL, then any other TradingView page.
   return tradingViewPages.find(t => {
     try {
       return new URL(t.url).pathname.toLowerCase().startsWith('/chart');
@@ -156,6 +174,10 @@ export async function disconnect() {
     targetInfo = null;
   }
 }
+
+// --- Direct API path helpers ---
+// Each returns the STRING expression path after verifying it exists.
+// Callers use the returned string in their own evaluate() calls.
 
 async function verifyAndReturn(path, name) {
   const exists = await evaluate(`typeof (${path}) !== 'undefined' && (${path}) !== null`);
