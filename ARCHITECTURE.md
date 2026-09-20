@@ -4,8 +4,8 @@
 
 The project has one canonical TradingView MCP implementation and two transport entrypoints:
 
-- `src/server/stdio.js` — stdio transport for local clients such as Claude Code and Codex.
-- `src/server/http.js` — Streamable HTTP transport for a persistent local endpoint used by a protected remote client path.
+- `src/server/stdio.js` — stdio transport for local MCP clients.
+- `src/server/http.js` — Streamable HTTP transport for a persistent loopback endpoint used by a protected remote client path.
 
 `src/server/create-server.js` owns all tool registration. Both transports expose the same tool set and permissions.
 
@@ -20,4 +20,4 @@ The project has one canonical TradingView MCP implementation and two transport e
 - Active HTTP MCP sessions are bounded and idle sessions are expired.
 - The CDP port must never be published to a LAN or the internet.
 
-Remote access is expected to terminate through an authenticated tunnel on the same Windows host and forward only to the loopback HTTP MCP endpoint. The tunnel/authentication layer is deployment configuration, not part of the MCP core.
+Remote access is expected to terminate through an authenticated tunnel on the same host and forward only to the loopback HTTP MCP endpoint. The tunnel/authentication layer is deployment configuration, not part of the MCP core.
