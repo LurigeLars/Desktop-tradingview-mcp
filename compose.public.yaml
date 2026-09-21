@@ -19,7 +19,10 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./public/gateway:/app:ro
-    networks: [edge]
+    networks:
+      edge:
+        aliases:
+          - tradingview-gateway
     read_only: true
     cap_drop: [ALL]
     security_opt:
