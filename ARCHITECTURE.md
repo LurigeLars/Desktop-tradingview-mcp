@@ -19,5 +19,7 @@ The project has one canonical TradingView MCP implementation and two transport e
 - HTTP request bodies are bounded to 2 MiB by default.
 - Active HTTP MCP sessions are bounded and idle sessions are expired.
 - The CDP port must never be published to a LAN or the internet.
+- TradingView Desktop does not need to remain running: clients may start it on demand with `tv_launch` and stop the instance managed by the same MCP process with `tv_close`.
+- `tv_close` never performs a name-wide process kill; it refuses to close instances that were not launched by the current MCP process.
 
 Remote access is expected to terminate through an authenticated tunnel on the same host and forward only to the loopback HTTP MCP endpoint. The tunnel/authentication layer is deployment configuration, not part of the MCP core.

@@ -6,7 +6,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { launch } from '../src/core/health.js';
+import { launch, close } from '../src/core/health.js';
 
 const MSIX_EXE = 'C:\\Program Files\\WindowsApps\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\\TradingView.exe';
 const LOCAL_COPY_EXE = `${process.env.LOCALAPPDATA || ''}\\tradingview-mcp\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\\TradingView.exe`;
@@ -136,3 +136,61 @@ describe('launch() — classic install path', { skip: !onWindows }, () => {
     await assert.rejects(() => launch({ _deps: deps }), /TradingView not found/);
   });
 });
+
+describe('close() — MCP-managed lifecycle', () => {
+  function lifecycleDeps() {
+    const state = { cdpUp: false, kills: [] };
+    const deps = {
+      platform: 'linux',
+      existsSync: (p) => p === '/opt/TradingView/tradingview',
+      execSync: () => { throw new Error('execSync should not be used'); },
+      spawn: () => {
+        state.cdpUp = true;
+        return mockChild();
+      },
+      cpSync: () => {},
+      rmSync: () => {},
+      readdirSync: () => [],
+      delay: async () => {},
+      probeCdp: async () => (state.cdpUp ? CDP_VERSION : null),
+      processKill: (pid, signal) => {
+        state.kills.push({ pid, signal });
+        state.cdpUp = false;
+      },
+    };
+    return { deps, state };
+  }
+
+  it('stops only the process group launched by this MCP process', async () => {
+    const { deps, state } = lifecycleDeps();
+    const started = await launch({ kill_existing: false, _deps: deps });
+    assert.equal(started.managed_by_mcp, true);
+    assert.equal(started.pid, 12345);
+
+    const result = await close({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.closed, true);
+    assert.equal(result.pid, 12345);
+    assert.deepEqual(state.kills, [{ pid: -12345, signal: 'SIGTERM' }]);
+  });
+
+  it('is a no-op when this MCP process has no managed instance', async () => {
+    const { deps, state } = lifecycleDeps();
+    const result = await close({ _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.closed, false);
+    assert.equal(result.reason, 'no_mcp_managed_instance');
+    assert.deepEqual(state.kills, []);
+  });
+
+  it('uses SIGKILL only when force=true', async () => {
+    const { deps, state } = lifecycleDeps();
+    await launch({ kill_existing: false, _deps: deps });
+
+    const result = await close({ force: true, _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.force, true);
+    assert.deepEqual(state.kills, [{ pid: -12345, signal: 'SIGKILL' }]);
+  });
+});
+
