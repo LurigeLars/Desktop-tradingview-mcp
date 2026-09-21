@@ -1,7 +1,7 @@
 /**
  * Core health/discovery/launch logic.
  */
-import { getClient, getTargetInfo, evaluate, CDP_HOST, CDP_PORT } from '../connection.js';
+import { getClient, getTargetInfo, evaluate, disconnect, CDP_HOST, CDP_PORT } from '../connection.js';
 import { existsSync, cpSync, rmSync, readdirSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 import { dirname, basename, join } from 'path';
@@ -10,6 +10,7 @@ import { dirname, basename, join } from 'path';
 // branch on GitHub. Never throws — returns null on any failure (offline,
 // detached HEAD, not a git checkout) so it can't break the health check.
 let _updateCache = null;
+let _managedLaunch = null;
 async function checkForUpdate() {
   if (_updateCache && (Date.now() - _updateCache.at) < 3600_000) return _updateCache.value;
   let value = null;
@@ -211,6 +212,8 @@ function _resolveLaunchDeps(deps) {
     readdirSync: deps?.readdirSync || readdirSync,
     delay: deps?.delay || ((ms) => new Promise((r) => setTimeout(r, ms))),
     probeCdp: deps?.probeCdp || _probeCdp,
+    processKill: deps?.processKill || process.kill.bind(process),
+    platform: deps?.platform || process.platform,
   };
 }
 
@@ -287,7 +290,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   const deps = _resolveLaunchDeps(_deps);
   const cdpPort = port || CDP_PORT;
   const killFirst = kill_existing !== false;
-  const platform = process.platform;
+  const platform = deps.platform;
 
   const pathMap = {
     darwin: [
@@ -357,7 +360,10 @@ export async function launch({ port, kill_existing, _deps } = {}) {
     } catch { /* may not be running */ }
   };
 
-  if (killFirst) await killExisting();
+  if (killFirst) {
+    await killExisting();
+    _managedLaunch = null;
+  }
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
   let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
@@ -384,9 +390,17 @@ export async function launch({ port, kill_existing, _deps } = {}) {
     info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
   }
 
+  _managedLaunch = {
+    pid: child.pid,
+    platform,
+    binary: tvPath,
+    cdpPort,
+    launchedAt: Date.now(),
+  };
+
   if (info) {
     return {
-      success: true, platform, binary: tvPath, pid: child.pid,
+      success: true, platform, binary: tvPath, pid: child.pid, managed_by_mcp: true,
       cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
       ...(usedLocalCopy && { msix_local_copy: true }),
@@ -394,8 +408,82 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   }
 
   return {
-    success: true, platform, binary: tvPath, pid: child.pid, cdp_port: cdpPort, cdp_ready: false,
+    success: true, platform, binary: tvPath, pid: child.pid, managed_by_mcp: true, cdp_port: cdpPort, cdp_ready: false,
     ...(usedLocalCopy && { msix_local_copy: true }),
     warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
   };
 }
+
+export async function close({ force = false, _deps } = {}) {
+  const deps = _resolveLaunchDeps(_deps);
+  const managed = _managedLaunch;
+
+  if (!managed) {
+    return {
+      success: true,
+      closed: false,
+      reason: 'no_mcp_managed_instance',
+      hint: 'tv_close only stops a TradingView instance launched by this MCP process.',
+    };
+  }
+
+  let active = null;
+  try { active = await deps.probeCdp(managed.cdpPort); } catch { /* treat as not reachable */ }
+  if (!active) {
+    _managedLaunch = null;
+    try { await disconnect(); } catch { /* already disconnected */ }
+    return {
+      success: true,
+      closed: true,
+      already_stopped: true,
+      pid: managed.pid,
+      cdp_port: managed.cdpPort,
+    };
+  }
+
+  try { await disconnect(); } catch { /* best-effort before process shutdown */ }
+
+  let terminationError = null;
+  try {
+    if (managed.platform === 'win32') {
+      const forceArg = force ? ' /F' : '';
+      deps.execSync(`taskkill /PID ${managed.pid} /T${forceArg}`, { timeout: 5000, stdio: 'ignore' });
+    } else {
+      deps.processKill(-managed.pid, force ? 'SIGKILL' : 'SIGTERM');
+    }
+  } catch (err) {
+    terminationError = err;
+  }
+
+  let stillActive = true;
+  for (let i = 0; i < 10; i++) {
+    await deps.delay(500);
+    try {
+      stillActive = !!(await deps.probeCdp(managed.cdpPort));
+    } catch {
+      stillActive = false;
+    }
+    if (!stillActive) break;
+  }
+
+  if (!stillActive) {
+    _managedLaunch = null;
+    return {
+      success: true,
+      closed: true,
+      pid: managed.pid,
+      cdp_port: managed.cdpPort,
+      force,
+    };
+  }
+
+  return {
+    success: false,
+    closed: false,
+    pid: managed.pid,
+    cdp_port: managed.cdpPort,
+    error: terminationError?.message || 'TradingView is still reachable after shutdown request.',
+    ...(!force && { hint: 'Retry tv_close with force=true if you want to force-stop the MCP-managed instance.' }),
+  };
+}
+

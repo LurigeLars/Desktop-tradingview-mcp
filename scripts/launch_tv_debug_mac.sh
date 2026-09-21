@@ -18,7 +18,6 @@ for loc in "${LOCATIONS[@]}"; do
   fi
 done
 
-# Fallback: search with mdfind (Spotlight)
 if [ -z "$APP" ]; then
   APP=$(mdfind "kMDItemCFBundleIdentifier == 'com.niceincontact.TradingView'" 2>/dev/null | head -1)
   if [ -n "$APP" ]; then
@@ -26,7 +25,6 @@ if [ -z "$APP" ]; then
   fi
 fi
 
-# Fallback: find any TradingView.app
 if [ -z "$APP" ] || [ ! -f "$APP" ]; then
   APP=$(find /Applications "$HOME/Applications" -name "TradingView.app" -maxdepth 2 2>/dev/null | head -1)
   if [ -n "$APP" ]; then
@@ -43,7 +41,6 @@ if [ -z "$APP" ] || [ ! -f "$APP" ]; then
   exit 1
 fi
 
-# Kill any existing TradingView
 pkill -f "TradingView" 2>/dev/null
 sleep 1
 
@@ -53,7 +50,6 @@ echo "Launching with --remote-debugging-port=$PORT ..."
 TV_PID=$!
 echo "PID: $TV_PID"
 
-# Wait for CDP to be ready
 echo "Waiting for CDP..."
 for i in $(seq 1 15); do
   if curl -s "http://localhost:$PORT/json/version" > /dev/null 2>&1; then

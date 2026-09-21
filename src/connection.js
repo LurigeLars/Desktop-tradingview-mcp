@@ -107,13 +107,30 @@ export async function reconnectTo(targetId) {
   return connect(targetId);
 }
 
+export function isTradingViewUrl(value) {
+  try {
+    const url = new URL(String(value));
+    const hostname = url.hostname.toLowerCase();
+    return hostname === 'tradingview.com' || hostname.endsWith('.tradingview.com');
+  } catch {
+    return false;
+  }
+}
+
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+
+  const tradingViewPages = targets.filter(t => t.type === 'page' && isTradingViewUrl(t.url));
+
+  // Prefer an actual chart URL, then any other TradingView page.
+  return tradingViewPages.find(t => {
+    try {
+      return new URL(t.url).pathname.toLowerCase().startsWith('/chart');
+    } catch {
+      return false;
+    }
+  }) || tradingViewPages[0] || null;
 }
 
 async function findTargetById(id) {
