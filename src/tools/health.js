@@ -27,6 +27,13 @@ export function registerHealthTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('tv_close', 'Stop only the TradingView Desktop instance launched by this MCP process. Does not kill unrelated TradingView sessions. Use force=true only if graceful shutdown does not complete.', {
+    force: z.coerce.boolean().optional().describe('Force-stop the MCP-managed TradingView process if graceful shutdown fails (default false)'),
+  }, async ({ force }) => {
+    try { return jsonResult(await core.close({ force })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('tv_update', 'Update this MCP server to the latest version: git fast-forward of origin/main + npm ci when dependencies changed. Safe by design — refuses on non-git installs, dirty working trees, non-main branches, or diverged history. After a successful update the MCP server must be restarted to load the new code.', {}, async () => {
     try { return jsonResult(await update({})); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
