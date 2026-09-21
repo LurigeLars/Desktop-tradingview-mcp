@@ -1,15 +1,10 @@
 // Minimal lint guard.
 //
-// Primary purpose: catch `no-undef` ("X is not defined") — the exact class of bug
-// that an unfinished refactor introduces silently. When imports are renamed
-// (e.g. `evaluate` -> `_evaluate` behind a `_resolve(_deps)` helper) but a few
-// call sites are missed, the code parses fine and only throws at runtime.
-// `no-undef` flags those statically, so CI blocks the regression at PR time.
-//
-// Globals below are the runtime APIs used across src/ (Node + browser/CDP context).
+// Primary purpose: catch undefined identifiers and other low-cost correctness regressions.
+// The remote Docker gateway is linted with the same rules as the MCP implementation.
 export default [
   {
-    files: ['**/*.js'],
+    files: ['**/*.js', '**/*.mjs'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -18,8 +13,8 @@ export default [
         setInterval: 'readonly', clearInterval: 'readonly', console: 'readonly',
         process: 'readonly', Buffer: 'readonly', URL: 'readonly',
         URLSearchParams: 'readonly', WebSocket: 'readonly', AbortController: 'readonly',
-        TextEncoder: 'readonly', TextDecoder: 'readonly', global: 'readonly',
-        __dirname: 'readonly', structuredClone: 'readonly',
+        AbortSignal: 'readonly', TextEncoder: 'readonly', TextDecoder: 'readonly',
+        global: 'readonly', __dirname: 'readonly', structuredClone: 'readonly',
       },
     },
     rules: {
