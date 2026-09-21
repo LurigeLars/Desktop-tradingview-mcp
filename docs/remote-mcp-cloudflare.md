@@ -35,6 +35,21 @@ forwarding headers are stripped before the request reaches the MCP process.
 Only `GET`, `POST`, and `DELETE` on `/mcp` are forwarded. Request bodies are
 bounded and requests are rate-limited per authenticated email.
 
+## Tool surface and token budget
+
+The authenticated public gateway preserves all 85 TradingView tools by default. This matches
+the intended ChatGPT/Claude Code/Codex capability surface; token optimization must not silently
+remove previously selected functionality.
+
+The gateway instead reduces repeated context by compacting tool descriptions and input-schema
+prose and by removing advertised output schemas. Upstream validation and the underlying MCP
+implementation remain unchanged.
+
+For a deliberately restricted session, an operator can set `ALLOWED_TOOLS=core` or provide
+an explicit comma-separated allowlist in `public/gateway.env`, then recreate only the gateway
+container. `ALLOWED_TOOLS=full` is an explicit alias for the default full surface. Agents cannot
+change this profile themselves.
+
 ## Deployment
 
 1. Start the host HTTP transport with `npm run start:http` and verify it listens only

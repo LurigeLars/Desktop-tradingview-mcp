@@ -2,12 +2,12 @@
 //
 // Patterned after firecrawl-local's gateway policy: the gateway is a small
 // policy/compaction layer in front of the full local MCP server.
-// By default the ChatGPT connector exposes the full 85-tool TradingView surface.
-// ui_evaluate and tv_update remain explicitly annotated as open-world because they
-// can execute arbitrary page JavaScript or reach GitHub/npm respectively.
+// The full capability surface stays available by default; token savings come
+// from descriptor/schema compaction. A deliberately narrower profile remains
+// available as an operator-controlled opt-in.
 import fs from 'node:fs';
 
-export const DEFAULT_ALLOWED_TOOLS = [
+export const FULL_ALLOWED_TOOLS = [
   'tv_health_check', 'tv_discover', 'tv_ui_state', 'tv_launch', 'tv_close', 'tv_update',
   'chart_get_state', 'chart_set_symbol', 'chart_set_timeframe', 'chart_set_type',
   'chart_manage_indicator', 'chart_get_visible_range', 'chart_set_visible_range',
@@ -32,8 +32,35 @@ export const DEFAULT_ALLOWED_TOOLS = [
   'tab_list', 'tab_new', 'layout_new', 'tab_close', 'tab_switch',
 ].join(',');
 
+// Optional operator-controlled reduced profile. It is never selected implicitly.
+export const CORE_ALLOWED_TOOLS = [
+  'tv_health_check', 'tv_launch', 'tv_close',
+  'chart_get_state', 'chart_set_symbol', 'chart_set_timeframe', 'chart_set_type',
+  'chart_manage_indicator', 'chart_scroll_to_date',
+  'symbol_info', 'symbol_search',
+  'data_get_ohlcv', 'data_get_indicator', 'data_get_strategy_results',
+  'quote_get', 'depth_get', 'data_get_pine_lines', 'data_get_pine_labels',
+  'data_get_pine_tables', 'data_get_pine_boxes', 'data_get_study_values',
+  'capture_screenshot',
+  'alert_create', 'alert_list', 'alert_delete',
+  'indicator_set_inputs', 'indicator_toggle_visibility', 'indicator_search', 'indicator_add',
+  'watchlist_get', 'watchlist_add', 'watchlist_add_bulk', 'watchlist_remove',
+  'layout_list', 'layout_switch',
+  'pane_list', 'pane_set_layout', 'pane_focus', 'pane_set_symbol',
+  'tab_list', 'tab_new', 'tab_close', 'tab_switch',
+].join(',');
+
+export const DEFAULT_ALLOWED_TOOLS = FULL_ALLOWED_TOOLS;
+
 export function parseAllowedTools(value) {
-  return new Set((value || DEFAULT_ALLOWED_TOOLS).split(',').map(s => s.trim()).filter(Boolean));
+  const configured = String(value ?? '').trim();
+  if (!configured || configured.toLowerCase() === 'full') {
+    return new Set(FULL_ALLOWED_TOOLS.split(',').map(s => s.trim()).filter(Boolean));
+  }
+  if (configured.toLowerCase() === 'core') {
+    return new Set(CORE_ALLOWED_TOOLS.split(',').map(s => s.trim()).filter(Boolean));
+  }
+  return new Set(configured.split(',').map(s => s.trim()).filter(Boolean));
 }
 
 // Public server instructions are intentionally much shorter than the full local
@@ -80,9 +107,8 @@ export function compactToolDefinition(tool) {
   if (out.description) out.description = compactText(out.description, 180);
   if (out.inputSchema) out.inputSchema = compactSchema(out.inputSchema);
 
-  // Same token-saving choice as DriveMCP: do not advertise output schemas when
-  // the server already returns one plain-text MCP result. This avoids redundant
-  // schema/context overhead and discourages duplicated structured output.
+  // Same token-saving principle as DriveMCP: avoid advertising redundant output
+  // schemas when the MCP result is already delivered through the normal content path.
   delete out.outputSchema;
   return out;
 }
