@@ -2,13 +2,13 @@
 //
 // Patterned after firecrawl-local's gateway policy: the gateway is a small
 // policy/compaction layer in front of the full local MCP server.
-// The public connector is bounded to the TradingView Desktop/account surface.
-// Maintenance tv_update and arbitrary page-context JavaScript ui_evaluate remain
-// local-only and are not exposed through Cloudflare.
+// By default the ChatGPT connector exposes the full 85-tool TradingView surface.
+// ui_evaluate and tv_update remain explicitly annotated as open-world because they
+// can execute arbitrary page JavaScript or reach GitHub/npm respectively.
 import fs from 'node:fs';
 
 export const DEFAULT_ALLOWED_TOOLS = [
-  'tv_health_check', 'tv_discover', 'tv_ui_state', 'tv_launch', 'tv_close',
+  'tv_health_check', 'tv_discover', 'tv_ui_state', 'tv_launch', 'tv_close', 'tv_update',
   'chart_get_state', 'chart_set_symbol', 'chart_set_timeframe', 'chart_set_type',
   'chart_manage_indicator', 'chart_get_visible_range', 'chart_set_visible_range',
   'chart_scroll_to_date', 'symbol_info', 'symbol_search',
@@ -27,6 +27,7 @@ export const DEFAULT_ALLOWED_TOOLS = [
   'watchlist_get', 'watchlist_add', 'watchlist_add_bulk', 'watchlist_remove',
   'ui_click', 'ui_open_panel', 'ui_fullscreen', 'layout_list', 'layout_switch',
   'ui_keyboard', 'ui_type_text', 'ui_hover', 'ui_scroll', 'ui_mouse_click', 'ui_find_element',
+  'ui_evaluate',
   'pane_list', 'pane_set_layout', 'pane_focus', 'pane_set_symbol',
   'tab_list', 'tab_new', 'layout_new', 'tab_close', 'tab_switch',
 ].join(',');
