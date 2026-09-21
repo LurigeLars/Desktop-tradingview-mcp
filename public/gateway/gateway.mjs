@@ -1,5 +1,9 @@
 // Authenticated reverse proxy for the host-side TradingView MCP Streamable HTTP endpoint.
-// This container is intentionally the only origin reachable by cloudflared.
+// Patterned after firecrawl-local's public gateway:
+// - filters tools/list to an explicit public allowlist
+// - blocks direct calls to non-public tools
+// - replaces initialize instructions with concise public guidance
+// - compacts tool descriptors to reduce repeated model-context/token overhead
 // Node standard library only.
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -329,7 +333,8 @@ export function createGatewayServer(env = process.env, dependencies = {}) {
             console.warn(`blocked tool ${message?.params?.name} for ${identity.email}`);
             return sendJson(res, rpcError(message.id, verdict.error));
           }
-          if (message?.method === 'tools/list') {
+
+          if (message?.method === 'tools/list' || message?.method === 'initialize') {
             ctx = { allowedTools: config.allowedTools };
           }
         }

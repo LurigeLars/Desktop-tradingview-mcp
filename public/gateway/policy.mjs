@@ -1,9 +1,12 @@
 // Public ChatGPT policy for the TradingView Desktop MCP server.
 //
-// The public connector is intentionally bounded to the TradingView Desktop
-// application/account surface. Maintenance tv_update and arbitrary
-// page-context JavaScript ui_evaluate remain available locally but are not
-// exposed through Cloudflare.
+// Patterned after firecrawl-local's gateway policy: the gateway is a small
+// policy/compaction layer in front of the full local MCP server.
+// The public connector is bounded to the TradingView Desktop/account surface.
+// Maintenance tv_update and arbitrary page-context JavaScript ui_evaluate remain
+// local-only and are not exposed through Cloudflare.
+import fs from 'node:fs';
+
 export const DEFAULT_ALLOWED_TOOLS = [
   'tv_health_check', 'tv_discover', 'tv_ui_state', 'tv_launch', 'tv_close',
   'chart_get_state', 'chart_set_symbol', 'chart_set_timeframe', 'chart_set_type',
@@ -32,10 +35,71 @@ export function parseAllowedTools(value) {
   return new Set((value || DEFAULT_ALLOWED_TOOLS).split(',').map(s => s.trim()).filter(Boolean));
 }
 
-export function rewriteResponse(message, { allowedTools }) {
-  if (message?.result?.tools) {
-    message.result.tools = message.result.tools.filter(tool => allowedTools.has(tool.name));
+// Public server instructions are intentionally much shorter than the full local
+// server instructions. Read on initialize so edits apply after a connector refresh
+// without changing the upstream MCP implementation.
+export function loadInstructions() {
+  try {
+    return fs.readFileSync(new URL('./instructions.md', import.meta.url), 'utf8').trim() || null;
+  } catch {
+    return null;
   }
+}
+
+function compactText(value, maxChars) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (text.length <= maxChars) return text;
+  const firstSentence = text.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim();
+  if (firstSentence && firstSentence.length <= maxChars) return firstSentence;
+  return text.slice(0, Math.max(1, maxChars - 1)).trimEnd() + '…';
+}
+
+// Keep the actual JSON-schema shape and enums/defaults, but trim prose that is
+// expensive to repeat in the model tool context. This does not change upstream
+// validation because calls still go to the original MCP server.
+export function compactSchema(value) {
+  if (Array.isArray(value)) return value.map(compactSchema);
+  if (!value || typeof value !== 'object') return value;
+
+  const out = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === '$schema' || key === 'title' || key === 'examples') continue;
+    if (key === 'description') {
+      out[key] = compactText(item, 96);
+      continue;
+    }
+    out[key] = compactSchema(item);
+  }
+  return out;
+}
+
+export function compactToolDefinition(tool) {
+  if (!tool || typeof tool !== 'object') return tool;
+  const out = { ...tool };
+  if (out.description) out.description = compactText(out.description, 180);
+  if (out.inputSchema) out.inputSchema = compactSchema(out.inputSchema);
+
+  // Same token-saving choice as DriveMCP: do not advertise output schemas when
+  // the server already returns one plain-text MCP result. This avoids redundant
+  // schema/context overhead and discourages duplicated structured output.
+  delete out.outputSchema;
+  return out;
+}
+
+export function rewriteResponse(message, { allowedTools }) {
+  if (!message || typeof message !== 'object') return message;
+
+  if (message.result?.tools) {
+    message.result.tools = message.result.tools
+      .filter(tool => allowedTools.has(tool.name))
+      .map(compactToolDefinition);
+  }
+
+  if (message.result?.serverInfo) {
+    const instructions = loadInstructions();
+    if (instructions) message.result.instructions = instructions;
+  }
+
   return message;
 }
 
