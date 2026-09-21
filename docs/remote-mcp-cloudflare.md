@@ -35,6 +35,22 @@ forwarding headers are stripped before the request reaches the MCP process.
 Only `GET`, `POST`, and `DELETE` on `/mcp` are forwarded. Request bodies are
 bounded and requests are rate-limited per authenticated email.
 
+## Tool surface and token budget
+
+The authenticated public gateway exposes a token-optimized 43-tool core profile by default.
+The local stdio/HTTP MCP implementation still registers all 85 tools; filtering happens only
+at the public gateway, so upstream functionality and local clients are unchanged.
+
+The default profile keeps live chart state, symbol/quote/OHLCV and indicator data, screenshots,
+alerts, watchlists, layouts, panes and tabs. Heavy Pine-development, replay, drawing, batch and
+generic UI/debug tools are hidden from ChatGPT unless explicitly enabled.
+
+For a temporary full remote surface, set `ALLOWED_TOOLS=full` in `public/gateway.env` and
+recreate only the gateway container. Prefer an explicit comma-separated `ALLOWED_TOOLS`
+list when only a few advanced tools are needed. The gateway also compacts tool descriptions
+and schemas and removes advertised output schemas; upstream validation still occurs in the
+unchanged MCP server.
+
 ## Deployment
 
 1. Start the host HTTP transport with `npm run start:http` and verify it listens only

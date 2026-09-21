@@ -59,23 +59,35 @@ describe('public gateway configuration', () => {
     assert.equal(headers['content-length'], '12');
   });
 
-  it('exposes the full 85-tool TradingView surface by default', () => {
+  it('exposes the token-optimized 43-tool core surface by default', () => {
     const allowed = parseAllowedTools();
-    assert.equal(allowed.size, 85);
+    assert.equal(allowed.size, 43);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('tab_new'), true);
     assert.equal(allowed.has('tv_close'), true);
+    assert.equal(allowed.has('data_get_ohlcv'), true);
+    assert.equal(allowed.has('ui_evaluate'), false);
+    assert.equal(allowed.has('tv_update'), false);
+    assert.equal(allowed.has('pine_set_source'), false);
+    assert.equal(allowed.has('replay_start'), false);
+
+    assert.match(
+      checkRequest({ method: 'tools/call', params: { name: 'ui_evaluate' } }, allowed).error,
+      /not available/
+    );
+    assert.match(
+      checkRequest({ method: 'tools/call', params: { name: 'tv_update' } }, allowed).error,
+      /not available/
+    );
+  });
+
+  it('supports an explicit full-surface override', () => {
+    const allowed = parseAllowedTools('full');
+    assert.equal(allowed.size, 85);
     assert.equal(allowed.has('ui_evaluate'), true);
     assert.equal(allowed.has('tv_update'), true);
-
-    assert.deepEqual(
-      checkRequest({ method: 'tools/call', params: { name: 'ui_evaluate' } }, allowed),
-      {}
-    );
-    assert.deepEqual(
-      checkRequest({ method: 'tools/call', params: { name: 'tv_update' } }, allowed),
-      {}
-    );
+    assert.equal(allowed.has('pine_set_source'), true);
+    assert.equal(allowed.has('replay_start'), true);
   });
 
   it('still supports a stricter ALLOWED_TOOLS override', () => {
@@ -135,7 +147,7 @@ describe('public gateway configuration', () => {
 
     assert.deepEqual(
       response.result.tools.map(tool => tool.name),
-      ['chart_get_state', 'ui_evaluate', 'tv_update']
+      ['chart_get_state']
     );
     assert.match(response.result.instructions, /TradingView Desktop MCP/);
   });
