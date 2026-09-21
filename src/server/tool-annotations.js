@@ -3,25 +3,27 @@ const CLOSED_WRITE = Object.freeze({ readOnlyHint: false, destructiveHint: false
 const CLOSED_SET = Object.freeze({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 const CLOSED_DESTRUCTIVE = Object.freeze({ readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false });
 const CLOSED_DESTRUCTIVE_IDEMPOTENT = Object.freeze({ readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
-const OPEN_READ = Object.freeze({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true });
-const OPEN_WRITE = Object.freeze({ readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
-const OPEN_SET = Object.freeze({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
 const OPEN_DESTRUCTIVE = Object.freeze({ readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
 
 /**
- * Safety annotations for tools still registered through the SDK's legacy
- * server.tool(name, description, inputSchema, handler) helper.
+ * Safety annotations for tools still registered through the SDK legacy
+ * server.tool helper.
  *
- * Every entry is explicit because MCP defaults are intentionally pessimistic
- * (write/destructive/open-world). A missing entry is a registration error so a
- * new tool cannot silently inherit misleading safety labels in ChatGPT.
+ * The public ChatGPT connector is deliberately bounded to the TradingView
+ * Desktop/account surface, so all public app operations are closed-world.
+ * ui_evaluate is the one legacy escape hatch capable of arbitrary page-context
+ * JavaScript and remains open-world locally; the public gateway does not expose it.
+ *
+ * Every entry is explicit because MCP defaults are intentionally pessimistic.
+ * A missing entry is a registration error so new tools cannot silently inherit
+ * misleading safety labels.
  */
 export const LEGACY_TOOL_ANNOTATIONS = Object.freeze({
-  batch_run: OPEN_WRITE,
+  batch_run: CLOSED_WRITE,
   capture_screenshot: CLOSED_WRITE,
 
   chart_get_state: CLOSED_READ,
-  chart_set_symbol: OPEN_SET,
+  chart_set_symbol: CLOSED_SET,
   chart_set_timeframe: CLOSED_SET,
   chart_set_type: CLOSED_SET,
   chart_manage_indicator: CLOSED_DESTRUCTIVE,
@@ -29,14 +31,14 @@ export const LEGACY_TOOL_ANNOTATIONS = Object.freeze({
   chart_set_visible_range: CLOSED_SET,
   chart_scroll_to_date: CLOSED_SET,
   symbol_info: CLOSED_READ,
-  symbol_search: OPEN_READ,
+  symbol_search: CLOSED_READ,
 
   data_get_ohlcv: CLOSED_READ,
   data_get_indicator: CLOSED_READ,
   data_get_strategy_results: CLOSED_WRITE,
   data_get_trades: CLOSED_WRITE,
   data_get_equity: CLOSED_READ,
-  quote_get: OPEN_READ,
+  quote_get: CLOSED_READ,
   depth_get: CLOSED_READ,
   data_get_pine_lines: CLOSED_READ,
   data_get_pine_labels: CLOSED_READ,
@@ -52,13 +54,13 @@ export const LEGACY_TOOL_ANNOTATIONS = Object.freeze({
 
   indicator_set_inputs: CLOSED_DESTRUCTIVE_IDEMPOTENT,
   indicator_toggle_visibility: CLOSED_SET,
-  indicator_search: OPEN_READ,
-  indicator_add: OPEN_WRITE,
+  indicator_search: CLOSED_READ,
+  indicator_add: CLOSED_WRITE,
 
   pane_list: CLOSED_READ,
   pane_set_layout: CLOSED_DESTRUCTIVE_IDEMPOTENT,
   pane_focus: CLOSED_SET,
-  pane_set_symbol: OPEN_SET,
+  pane_set_symbol: CLOSED_SET,
 
   pine_get_source: CLOSED_READ,
   pine_set_source: CLOSED_DESTRUCTIVE,
@@ -94,8 +96,8 @@ export const LEGACY_TOOL_ANNOTATIONS = Object.freeze({
   ui_evaluate: OPEN_DESTRUCTIVE,
 
   watchlist_get: CLOSED_READ,
-  watchlist_add: OPEN_WRITE,
-  watchlist_add_bulk: OPEN_WRITE,
+  watchlist_add: CLOSED_WRITE,
+  watchlist_add_bulk: CLOSED_WRITE,
   watchlist_remove: CLOSED_DESTRUCTIVE_IDEMPOTENT,
 });
 

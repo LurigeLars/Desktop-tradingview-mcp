@@ -28,7 +28,7 @@ test('HTTP transport refuses non-loopback binds', () => {
   );
 });
 
-test('HTTP transport exposes the complete tool surface with explicit safety annotations', async () => {
+test('HTTP transport exposes the complete tool surface with explicit safety annotations and no output schemas', async () => {
   const runtime = await startTradingViewHttpServer({
     host: '127.0.0.1',
     port: 0,
@@ -58,6 +58,7 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
     assert.ok(names.has('capture_screenshot'));
 
     for (const tool of result.tools) {
+      assert.equal(tool.outputSchema, undefined, `${tool.name}: outputSchema should remain absent to avoid tool-definition/result duplication`);
       assert.equal(typeof tool.annotations?.readOnlyHint, 'boolean', `${tool.name}: missing readOnlyHint`);
       assert.equal(typeof tool.annotations?.destructiveHint, 'boolean', `${tool.name}: missing destructiveHint`);
       assert.equal(typeof tool.annotations?.openWorldHint, 'boolean', `${tool.name}: missing openWorldHint`);
@@ -81,10 +82,15 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
       destructiveHint: false,
       openWorldHint: false,
     });
-    assert.equal(byName.get('symbol_search').annotations.openWorldHint, true);
-    assert.equal(byName.get('indicator_search').annotations.openWorldHint, true);
+    assert.equal(byName.get('symbol_search').annotations.openWorldHint, false);
+    assert.equal(byName.get('indicator_search').annotations.openWorldHint, false);
+    assert.equal(byName.get('quote_get').annotations.openWorldHint, false);
+    assert.equal(byName.get('batch_run').annotations.openWorldHint, false);
+    assert.equal(byName.get('chart_set_symbol').annotations.openWorldHint, false);
+    assert.equal(byName.get('pane_set_symbol').annotations.openWorldHint, false);
+
     assert.equal(byName.get('ui_evaluate').annotations.openWorldHint, true);
-    assert.equal(byName.get('chart_get_state').annotations.openWorldHint, false);
+    assert.equal(byName.get('tv_update').annotations.openWorldHint, true);
   } finally {
     try {
       await client.close();

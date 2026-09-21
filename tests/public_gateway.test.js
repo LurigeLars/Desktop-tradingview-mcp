@@ -5,6 +5,11 @@ import {
   isAllowedPath,
   buildUpstreamHeaders,
 } from '../public/gateway/gateway.mjs';
+import {
+  parseAllowedTools,
+  checkRequest,
+  rewriteResponse,
+} from '../public/gateway/policy.mjs';
 
 const baseEnv = {
   ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com',
@@ -51,5 +56,36 @@ describe('public gateway configuration', () => {
     assert.equal(headers['cf-connecting-ip'], undefined);
     assert.equal(headers['mcp-session-id'], 'session-1');
     assert.equal(headers['content-length'], '12');
+  });
+
+  it('exposes only the bounded TradingView public tool surface', () => {
+    const allowed = parseAllowedTools();
+    assert.equal(allowed.size, 83);
+    assert.equal(allowed.has('chart_get_state'), true);
+    assert.equal(allowed.has('tab_new'), true);
+    assert.equal(allowed.has('tv_close'), true);
+    assert.equal(allowed.has('ui_evaluate'), false);
+    assert.equal(allowed.has('tv_update'), false);
+
+    assert.match(
+      checkRequest({ method: 'tools/call', params: { name: 'ui_evaluate' } }, allowed).error,
+      /not available/
+    );
+    assert.deepEqual(
+      checkRequest({ method: 'tools/call', params: { name: 'chart_get_state' } }, allowed),
+      {}
+    );
+
+    const response = rewriteResponse({
+      result: {
+        tools: [
+          { name: 'chart_get_state' },
+          { name: 'ui_evaluate' },
+          { name: 'tv_update' },
+        ],
+      },
+    }, { allowedTools: allowed });
+
+    assert.deepEqual(response.result.tools.map(tool => tool.name), ['chart_get_state']);
   });
 });

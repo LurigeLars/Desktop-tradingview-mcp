@@ -1,23 +1,24 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/health.js';
+import { boundedHealthCheck } from '../core/bounded-health.js';
 import { update } from '../core/update.js';
 import { launchManaged, closeManaged } from '../core/managed-lifecycle.js';
 
 export function registerHealthTools(server) {
   server.registerTool('tv_health_check', {
-    description: 'Check CDP connection to TradingView and return current chart state.',
+    description: 'Check the local TradingView Desktop CDP connection and return current chart state. Does not perform an internet update check.',
     inputSchema: {},
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
-    try { return jsonResult(await core.healthCheck()); }
+    try { return jsonResult(await boundedHealthCheck()); }
     catch (err) { return jsonResult({ success: false, error: err.message, hint: 'TradingView is not running with CDP enabled. Use the tv_launch tool to start it automatically.' }, true); }
   });
 
   server.registerTool('tv_discover', {
     description: 'Report which known TradingView API paths are available and their methods.',
     inputSchema: {},
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
     try { return jsonResult(await core.discover()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
@@ -26,7 +27,7 @@ export function registerHealthTools(server) {
   server.registerTool('tv_ui_state', {
     description: 'Get current TradingView Desktop UI state: which panels are open and which buttons are visible/enabled/disabled.',
     inputSchema: {},
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
     try { return jsonResult(await core.uiState()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
