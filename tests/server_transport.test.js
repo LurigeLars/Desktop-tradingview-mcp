@@ -28,7 +28,7 @@ test('HTTP transport refuses non-loopback binds', () => {
   );
 });
 
-test('HTTP transport exposes the same MCP tool surface without touching CDP', async () => {
+test('HTTP transport exposes the complete tool surface with explicit safety annotations', async () => {
   const runtime = await startTradingViewHttpServer({
     host: '127.0.0.1',
     port: 0,
@@ -57,6 +57,12 @@ test('HTTP transport exposes the same MCP tool surface without touching CDP', as
     assert.ok(names.has('alert_create'));
     assert.ok(names.has('capture_screenshot'));
 
+    for (const tool of result.tools) {
+      assert.equal(typeof tool.annotations?.readOnlyHint, 'boolean', `${tool.name}: missing readOnlyHint`);
+      assert.equal(typeof tool.annotations?.destructiveHint, 'boolean', `${tool.name}: missing destructiveHint`);
+      assert.equal(typeof tool.annotations?.openWorldHint, 'boolean', `${tool.name}: missing openWorldHint`);
+    }
+
     const byName = new Map(result.tools.map(tool => [tool.name, tool]));
     assert.deepEqual(byName.get('alert_create').annotations, {
       readOnlyHint: false,
@@ -75,6 +81,10 @@ test('HTTP transport exposes the same MCP tool surface without touching CDP', as
       destructiveHint: false,
       openWorldHint: false,
     });
+    assert.equal(byName.get('symbol_search').annotations.openWorldHint, true);
+    assert.equal(byName.get('indicator_search').annotations.openWorldHint, true);
+    assert.equal(byName.get('ui_evaluate').annotations.openWorldHint, true);
+    assert.equal(byName.get('chart_get_state').annotations.openWorldHint, false);
   } finally {
     try {
       await client.close();

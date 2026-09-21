@@ -13,6 +13,7 @@ import { registerWatchlistTools } from '../tools/watchlist.js';
 import { registerUiTools } from '../tools/ui.js';
 import { registerPaneTools } from '../tools/pane.js';
 import { registerTabTools } from '../tools/tab.js';
+import { installLegacyToolAnnotationAdapter } from './tool-annotations.js';
 
 export const SERVER_INFO = {
   name: 'tradingview',
@@ -54,9 +55,9 @@ Replay: replay_start → replay_step → replay_trade → replay_status → repl
 Batch: batch_run → run action across multiple symbols/timeframes
 Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
 Alerts: alert_create, alert_list, alert_delete
-Lifecycle: tv_health_check → tv_launch when needed → tv_close when finished (tv_close only stops this MCP process's managed instance)
+Lifecycle: tv_health_check → tv_launch when needed → tv_close when finished. tv_close exits the entire verified MCP-managed TradingView Desktop application, including after an MCP-server restart.
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
-Tabs: tab_list, tab_new, tab_close, tab_switch
+Tabs: tab_list → inspect open tabs; tab_new → open additional tabs; tab_switch → select a tab; tab_close → close only the active tab while keeping TradingView Desktop running.
 
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
@@ -72,6 +73,10 @@ export function createTradingViewServer() {
       instructions: SERVER_INSTRUCTIONS,
     }
   );
+
+  // Legacy server.tool registrations must receive explicit safety metadata.
+  // This adapter fails closed if a newly added legacy tool is not classified.
+  installLegacyToolAnnotationAdapter(server);
 
   registerHealthTools(server);
   registerChartTools(server);
