@@ -20,7 +20,7 @@ export const SERVER_INFO = {
   description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
 };
 
-export const SERVER_INSTRUCTIONS = `TradingView MCP — 84 tools for reading and controlling a live TradingView Desktop chart.
+export const SERVER_INSTRUCTIONS = `TradingView MCP — 85 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -54,7 +54,7 @@ Replay: replay_start → replay_step → replay_trade → replay_status → repl
 Batch: batch_run → run action across multiple symbols/timeframes
 Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
 Alerts: alert_create, alert_list, alert_delete
-Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
+Lifecycle: tv_health_check → tv_launch when needed → tv_close when finished (tv_close only stops this MCP process's managed instance)
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
 Tabs: tab_list, tab_new, tab_close, tab_switch
 
