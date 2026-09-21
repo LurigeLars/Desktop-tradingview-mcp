@@ -2,8 +2,9 @@
 //
 // Patterned after firecrawl-local's gateway policy: the gateway is a small
 // policy/compaction layer in front of the full local MCP server.
-// By default the ChatGPT connector exposes a token-optimized core surface.
-// The full 85-tool surface remains available locally and through an explicit gateway override.
+// The full capability surface stays available by default; token savings come
+// from descriptor/schema compaction. A deliberately narrower profile remains
+// available as an operator-controlled opt-in.
 import fs from 'node:fs';
 
 export const FULL_ALLOWED_TOOLS = [
@@ -31,10 +32,8 @@ export const FULL_ALLOWED_TOOLS = [
   'tab_list', 'tab_new', 'layout_new', 'tab_close', 'tab_switch',
 ].join(',');
 
-// Default public profile: the high-value analysis/navigation surface used by ChatGPT.
-// Heavy development/debug/replay/generic-UI tools stay available locally and can be
-// exposed explicitly with ALLOWED_TOOLS=full or a comma-separated override.
-export const DEFAULT_ALLOWED_TOOLS = [
+// Optional operator-controlled reduced profile. It is never selected implicitly.
+export const CORE_ALLOWED_TOOLS = [
   'tv_health_check', 'tv_launch', 'tv_close',
   'chart_get_state', 'chart_set_symbol', 'chart_set_timeframe', 'chart_set_type',
   'chart_manage_indicator', 'chart_scroll_to_date',
@@ -51,14 +50,17 @@ export const DEFAULT_ALLOWED_TOOLS = [
   'tab_list', 'tab_new', 'tab_close', 'tab_switch',
 ].join(',');
 
+export const DEFAULT_ALLOWED_TOOLS = FULL_ALLOWED_TOOLS;
+
 export function parseAllowedTools(value) {
   const configured = String(value ?? '').trim();
-  const source = !configured
-    ? DEFAULT_ALLOWED_TOOLS
-    : configured.toLowerCase() === 'full'
-      ? FULL_ALLOWED_TOOLS
-      : configured;
-  return new Set(source.split(',').map(s => s.trim()).filter(Boolean));
+  if (!configured || configured.toLowerCase() === 'full') {
+    return new Set(FULL_ALLOWED_TOOLS.split(',').map(s => s.trim()).filter(Boolean));
+  }
+  if (configured.toLowerCase() === 'core') {
+    return new Set(CORE_ALLOWED_TOOLS.split(',').map(s => s.trim()).filter(Boolean));
+  }
+  return new Set(configured.split(',').map(s => s.trim()).filter(Boolean));
 }
 
 // Public server instructions are intentionally much shorter than the full local
@@ -105,9 +107,8 @@ export function compactToolDefinition(tool) {
   if (out.description) out.description = compactText(out.description, 180);
   if (out.inputSchema) out.inputSchema = compactSchema(out.inputSchema);
 
-  // Same token-saving choice as DriveMCP: do not advertise output schemas when
-  // the server already returns one plain-text MCP result. This avoids redundant
-  // schema/context overhead and discourages duplicated structured output.
+  // Same token-saving principle as DriveMCP: avoid advertising redundant output
+  // schemas when the MCP result is already delivered through the normal content path.
   delete out.outputSchema;
   return out;
 }

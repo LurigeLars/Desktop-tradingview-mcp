@@ -59,35 +59,35 @@ describe('public gateway configuration', () => {
     assert.equal(headers['content-length'], '12');
   });
 
-  it('exposes the token-optimized 43-tool core surface by default', () => {
+  it('preserves the full 85-tool TradingView surface by default', () => {
     const allowed = parseAllowedTools();
+    assert.equal(allowed.size, 85);
+    assert.equal(allowed.has('chart_get_state'), true);
+    assert.equal(allowed.has('pine_set_source'), true);
+    assert.equal(allowed.has('replay_start'), true);
+    assert.equal(allowed.has('draw_shape'), true);
+    assert.equal(allowed.has('ui_evaluate'), true);
+    assert.equal(allowed.has('tv_update'), true);
+  });
+
+  it('supports an explicit operator-controlled core profile', () => {
+    const allowed = parseAllowedTools('core');
     assert.equal(allowed.size, 43);
     assert.equal(allowed.has('chart_get_state'), true);
-    assert.equal(allowed.has('tab_new'), true);
-    assert.equal(allowed.has('tv_close'), true);
     assert.equal(allowed.has('data_get_ohlcv'), true);
-    assert.equal(allowed.has('ui_evaluate'), false);
-    assert.equal(allowed.has('tv_update'), false);
     assert.equal(allowed.has('pine_set_source'), false);
     assert.equal(allowed.has('replay_start'), false);
-
     assert.match(
       checkRequest({ method: 'tools/call', params: { name: 'ui_evaluate' } }, allowed).error,
       /not available/
     );
-    assert.match(
-      checkRequest({ method: 'tools/call', params: { name: 'tv_update' } }, allowed).error,
-      /not available/
-    );
   });
 
-  it('supports an explicit full-surface override', () => {
+  it('supports an explicit full profile', () => {
     const allowed = parseAllowedTools('full');
     assert.equal(allowed.size, 85);
     assert.equal(allowed.has('ui_evaluate'), true);
     assert.equal(allowed.has('tv_update'), true);
-    assert.equal(allowed.has('pine_set_source'), true);
-    assert.equal(allowed.has('replay_start'), true);
   });
 
   it('still supports a stricter ALLOWED_TOOLS override', () => {
@@ -127,7 +127,7 @@ describe('public gateway configuration', () => {
     assert.ok(JSON.stringify(compact).length < JSON.stringify(raw).length);
   });
 
-  it('compacts all listed tools and replaces initialize instructions like firecrawl-local', () => {
+  it('compacts the full listed surface and replaces initialize instructions like firecrawl-local', () => {
     const allowed = parseAllowedTools();
     const response = rewriteResponse({
       result: {
@@ -147,7 +147,7 @@ describe('public gateway configuration', () => {
 
     assert.deepEqual(
       response.result.tools.map(tool => tool.name),
-      ['chart_get_state']
+      ['chart_get_state', 'ui_evaluate', 'tv_update']
     );
     assert.match(response.result.instructions, /TradingView Desktop MCP/);
   });

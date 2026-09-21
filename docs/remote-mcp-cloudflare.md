@@ -37,19 +37,18 @@ bounded and requests are rate-limited per authenticated email.
 
 ## Tool surface and token budget
 
-The authenticated public gateway exposes a token-optimized 43-tool core profile by default.
-The local stdio/HTTP MCP implementation still registers all 85 tools; filtering happens only
-at the public gateway, so upstream functionality and local clients are unchanged.
+The authenticated public gateway preserves all 85 TradingView tools by default. This matches
+the intended ChatGPT/Claude Code/Codex capability surface; token optimization must not silently
+remove previously selected functionality.
 
-The default profile keeps live chart state, symbol/quote/OHLCV and indicator data, screenshots,
-alerts, watchlists, layouts, panes and tabs. Heavy Pine-development, replay, drawing, batch and
-generic UI/debug tools are hidden from ChatGPT unless explicitly enabled.
+The gateway instead reduces repeated context by compacting tool descriptions and input-schema
+prose and by removing advertised output schemas. Upstream validation and the underlying MCP
+implementation remain unchanged.
 
-For a temporary full remote surface, set `ALLOWED_TOOLS=full` in `public/gateway.env` and
-recreate only the gateway container. Prefer an explicit comma-separated `ALLOWED_TOOLS`
-list when only a few advanced tools are needed. The gateway also compacts tool descriptions
-and schemas and removes advertised output schemas; upstream validation still occurs in the
-unchanged MCP server.
+For a deliberately restricted session, an operator can set `ALLOWED_TOOLS=core` or provide
+an explicit comma-separated allowlist in `public/gateway.env`, then recreate only the gateway
+container. `ALLOWED_TOOLS=full` is an explicit alias for the default full surface. Agents cannot
+change this profile themselves.
 
 ## Deployment
 
