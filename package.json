@@ -30,6 +30,6 @@
     "chrome-remote-interface": "^0.34.0"
   },
   "devDependencies": {
-    "eslint": "^9.39.4"
+    "eslint": "^10.10.0"
   }
 }
