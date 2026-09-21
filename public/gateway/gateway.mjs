@@ -1,9 +1,19 @@
 // Authenticated reverse proxy for the host-side TradingView MCP Streamable HTTP endpoint.
-// This container is intentionally the only origin reachable by cloudflared.
+// Patterned after firecrawl-local's public gateway:
+// - filters tools/list to an explicit public allowlist
+// - blocks direct calls to non-public tools
+// - replaces initialize instructions with concise public guidance
+// - compacts tool descriptors to reduce repeated model-context/token overhead
 // Node standard library only.
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import {
+  parseAllowedTools,
+  checkRequest,
+  rewriteResponse,
+  rpcError,
+} from './policy.mjs';
 
 export function loadConfig(env = process.env) {
   const accessTeamDomain = String(env.ACCESS_TEAM_DOMAIN ?? '').trim();
@@ -37,6 +47,7 @@ export function loadConfig(env = process.env) {
     accessTeamDomain,
     accessAud,
     allowedEmails,
+    allowedTools: parseAllowedTools(env.ALLOWED_TOOLS),
     accessIssuer: `https://${accessTeamDomain}`,
     upstreamHost: env.UPSTREAM_HOST ?? 'host.docker.internal',
     upstreamPort,
@@ -160,6 +171,14 @@ function send(res, status, body = '') {
   res.end(body);
 }
 
+function sendJson(res, obj) {
+  res.writeHead(200, {
+    'content-type': 'application/json',
+    'cache-control': 'no-store',
+  });
+  res.end(JSON.stringify(obj));
+}
+
 async function readBody(req, maxBodyBytes) {
   const chunks = [];
   let bytes = 0;
@@ -174,7 +193,26 @@ async function readBody(req, maxBodyBytes) {
   return bytes ? Buffer.concat(chunks) : null;
 }
 
-function forward(req, res, body, config) {
+function rewriteJsonText(text, ctx) {
+  try {
+    const parsed = JSON.parse(text);
+    const rewritten = Array.isArray(parsed)
+      ? parsed.map(message => rewriteResponse(message, ctx))
+      : rewriteResponse(parsed, ctx);
+    return JSON.stringify(rewritten);
+  } catch {
+    return text;
+  }
+}
+
+function rewriteSseLine(line, ctx) {
+  if (!line.startsWith('data:')) return line;
+  const raw = line.slice(5).trimStart();
+  const rewritten = rewriteJsonText(raw, ctx);
+  return rewritten === raw ? line : `data: ${rewritten}`;
+}
+
+function forward(req, res, body, config, ctx = null) {
   const headers = buildUpstreamHeaders(req.headers, config, body ? body.length : null);
 
   const upstream = http.request(
@@ -186,8 +224,42 @@ function forward(req, res, body, config) {
       headers,
     },
     upstreamResponse => {
-      res.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
-      upstreamResponse.pipe(res);
+      if (!ctx) {
+        res.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+        upstreamResponse.pipe(res);
+        return;
+      }
+
+      const responseHeaders = { ...upstreamResponse.headers };
+      delete responseHeaders['content-length'];
+
+      if ((upstreamResponse.headers['content-type'] ?? '').includes('text/event-stream')) {
+        res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+        let pending = '';
+        upstreamResponse.setEncoding('utf8');
+        upstreamResponse.on('data', chunk => {
+          pending += chunk;
+          const lines = pending.split('\n');
+          pending = lines.pop();
+          if (lines.length) {
+            res.write(lines.map(line => rewriteSseLine(line, ctx)).join('\n') + '\n');
+          }
+        });
+        upstreamResponse.on('end', () => {
+          res.end(pending ? rewriteSseLine(pending, ctx) : undefined);
+        });
+        return;
+      }
+
+      const chunks = [];
+      upstreamResponse.on('data', chunk => chunks.push(chunk));
+      upstreamResponse.on('end', () => {
+        const out = Buffer.from(rewriteJsonText(Buffer.concat(chunks).toString('utf8'), ctx));
+        delete responseHeaders['transfer-encoding'];
+        responseHeaders['content-length'] = String(out.length);
+        res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+        res.end(out);
+      });
     },
   );
 
@@ -245,8 +317,31 @@ export function createGatewayServer(env = process.env, dependencies = {}) {
       if (rateLimited(identity.email)) return send(res, 429, 'rate limited');
 
       const body = req.method === 'POST' ? await readBody(req, config.maxBodyBytes) : null;
+      let ctx = null;
+
+      if (body) {
+        let messages;
+        try {
+          messages = [JSON.parse(body.toString('utf8'))].flat();
+        } catch {
+          return send(res, 400, 'invalid json');
+        }
+
+        for (const message of messages) {
+          const verdict = checkRequest(message, config.allowedTools);
+          if (verdict.error) {
+            console.warn(`blocked tool ${message?.params?.name} for ${identity.email}`);
+            return sendJson(res, rpcError(message.id, verdict.error));
+          }
+
+          if (message?.method === 'tools/list' || message?.method === 'initialize') {
+            ctx = { allowedTools: config.allowedTools };
+          }
+        }
+      }
+
       console.log(`${new Date().toISOString()} ${identity.email} ${req.method} /mcp`);
-      forward(req, res, body, config);
+      forward(req, res, body, config, ctx);
     } catch (error) {
       const status = Number(error?.status) || 500;
       if (status >= 500) console.warn(error?.stack ?? error);
@@ -262,7 +357,7 @@ export async function startGateway(env = process.env) {
     server.once('error', reject);
     server.listen(config.port, '0.0.0.0', resolve);
   });
-  console.log(`gateway listening on ${config.port}; Access JWT required; upstream ${config.upstreamHost}:${config.upstreamPort}${config.upstreamPath}`);
+  console.log(`gateway listening on ${config.port}; Access JWT required; upstream ${config.upstreamHost}:${config.upstreamPort}${config.upstreamPath}; public tools ${config.allowedTools.size}`);
   return server;
 }
 
