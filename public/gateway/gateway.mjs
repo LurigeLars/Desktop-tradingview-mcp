@@ -1,0 +1,277 @@
+// Authenticated reverse proxy for the host-side TradingView MCP Streamable HTTP endpoint.
+// This container is intentionally the only origin reachable by cloudflared.
+// Node standard library only.
+import http from 'node:http';
+import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+
+export function loadConfig(env = process.env) {
+  const accessTeamDomain = String(env.ACCESS_TEAM_DOMAIN ?? '').trim();
+  const accessAud = String(env.ACCESS_AUD ?? '').trim();
+  const allowedEmails = new Set(
+    String(env.ACCESS_ALLOWED_EMAILS ?? '')
+      .split(',')
+      .map(value => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  if (!accessTeamDomain) throw new Error('ACCESS_TEAM_DOMAIN is required');
+  if (!accessAud) throw new Error('ACCESS_AUD is required');
+  if (allowedEmails.size === 0) throw new Error('ACCESS_ALLOWED_EMAILS must contain at least one address');
+
+  const upstreamPort = Number(env.UPSTREAM_PORT ?? 8765);
+  const port = Number(env.PORT ?? 8080);
+  const ratePerMin = Number(env.RATE_PER_MIN ?? 120);
+  const maxBodyBytes = Number(env.MAX_BODY_BYTES ?? (2 * 1024 * 1024));
+
+  for (const [name, value] of [
+    ['UPSTREAM_PORT', upstreamPort],
+    ['PORT', port],
+    ['RATE_PER_MIN', ratePerMin],
+    ['MAX_BODY_BYTES', maxBodyBytes],
+  ]) {
+    if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  }
+
+  return {
+    accessTeamDomain,
+    accessAud,
+    allowedEmails,
+    accessIssuer: `https://${accessTeamDomain}`,
+    upstreamHost: env.UPSTREAM_HOST ?? 'host.docker.internal',
+    upstreamPort,
+    upstreamPath: env.UPSTREAM_PATH ?? '/mcp',
+    upstreamHostHeader: env.UPSTREAM_HOST_HEADER ?? 'localhost',
+    port,
+    ratePerMin,
+    maxBodyBytes,
+  };
+}
+
+export function isAllowedPath(url) {
+  try {
+    return new URL(url ?? '/', 'http://gateway.invalid').pathname === '/mcp';
+  } catch {
+    return false;
+  }
+}
+
+export function buildUpstreamHeaders(headers, config, bodyLength = null) {
+  const out = { ...headers, host: `${config.upstreamHostHeader}:${config.upstreamPort}` };
+
+  for (const name of [
+    'authorization',
+    'cookie',
+    'cf-access-jwt-assertion',
+    'cf-authorization-token',
+    'cf-connecting-ip',
+    'cf-ipcountry',
+    'cf-ray',
+    'x-forwarded-for',
+    'x-forwarded-host',
+    'x-forwarded-proto',
+    'origin',
+    'referer',
+    'content-length',
+  ]) {
+    delete out[name];
+  }
+
+  if (bodyLength !== null) out['content-length'] = String(bodyLength);
+  return out;
+}
+
+function b64json(segment) {
+  return JSON.parse(Buffer.from(segment, 'base64url').toString('utf8'));
+}
+
+export function createAccessVerifier(config, fetchImpl = fetch) {
+  const cache = { keys: new Map(), fetchedAt: 0 };
+
+  async function accessKey(kid) {
+    const now = Date.now();
+    const stale = now - cache.fetchedAt > 3_600_000;
+    const canRefresh = now - cache.fetchedAt > 30_000;
+
+    if ((stale || !cache.keys.has(kid)) && canRefresh) {
+      cache.fetchedAt = now;
+      const response = await fetchImpl(`${config.accessIssuer}/cdn-cgi/access/certs`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) throw new Error(`certs HTTP ${response.status}`);
+      const { keys = [] } = await response.json();
+      cache.keys = new Map(
+        keys.map(key => [key.kid, crypto.createPublicKey({ key, format: 'jwk' })]),
+      );
+    }
+
+    return cache.keys.get(kid);
+  }
+
+  return async token => {
+    const parts = String(token ?? '').split('.');
+    if (parts.length !== 3) return { ok: false, reason: 'missing token' };
+
+    try {
+      const header = b64json(parts[0]);
+      const claims = b64json(parts[1]);
+
+      if (header.alg !== 'RS256') return { ok: false, reason: `alg ${header.alg}` };
+
+      const key = await accessKey(header.kid);
+      if (!key) return { ok: false, reason: 'unknown kid' };
+
+      const valid = crypto.verify(
+        'RSA-SHA256',
+        Buffer.from(`${parts[0]}.${parts[1]}`),
+        key,
+        Buffer.from(parts[2], 'base64url'),
+      );
+      if (!valid) return { ok: false, reason: 'bad signature' };
+
+      const now = Date.now() / 1000;
+      const audiences = [claims.aud].flat();
+      if (!audiences.includes(config.accessAud)) return { ok: false, reason: 'wrong audience' };
+      if (claims.iss !== config.accessIssuer) return { ok: false, reason: 'wrong issuer' };
+      if (typeof claims.exp !== 'number' || claims.exp < now - 30) return { ok: false, reason: 'expired' };
+      if (typeof claims.nbf === 'number' && claims.nbf > now + 30) return { ok: false, reason: 'not yet valid' };
+
+      const email = String(claims.email ?? '').toLowerCase();
+      if (!config.allowedEmails.has(email)) {
+        return { ok: false, reason: `email not allowed: ${email || '(none)'}` };
+      }
+
+      return { ok: true, email };
+    } catch (error) {
+      return { ok: false, reason: `verify error: ${error.message}` };
+    }
+  };
+}
+
+function clientIp(req) {
+  return req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? 'unknown';
+}
+
+function send(res, status, body = '') {
+  res.writeHead(status, {
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+  });
+  res.end(body);
+}
+
+async function readBody(req, maxBodyBytes) {
+  const chunks = [];
+  let bytes = 0;
+
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.length;
+    if (bytes > maxBodyBytes) throw Object.assign(new Error('request body too large'), { status: 413 });
+    chunks.push(buffer);
+  }
+
+  return bytes ? Buffer.concat(chunks) : null;
+}
+
+function forward(req, res, body, config) {
+  const headers = buildUpstreamHeaders(req.headers, config, body ? body.length : null);
+
+  const upstream = http.request(
+    {
+      host: config.upstreamHost,
+      port: config.upstreamPort,
+      method: req.method,
+      path: config.upstreamPath,
+      headers,
+    },
+    upstreamResponse => {
+      res.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+      upstreamResponse.pipe(res);
+    },
+  );
+
+  upstream.on('error', error => {
+    console.warn(`upstream error: ${error.code ?? error.message}`);
+    if (!res.headersSent) send(res, 502, 'upstream unavailable');
+    else res.destroy();
+  });
+
+  res.on('close', () => {
+    if (!res.writableFinished) upstream.destroy();
+  });
+
+  upstream.end(body ?? undefined);
+}
+
+export function createGatewayServer(env = process.env, dependencies = {}) {
+  const config = loadConfig(env);
+  const verifyAccessJwt = createAccessVerifier(config, dependencies.fetch ?? fetch);
+  const windows = new Map();
+
+  function rateLimited(key) {
+    const now = Date.now();
+    const current = windows.get(key);
+    if (!current || now - current.start >= 60_000) {
+      windows.set(key, { start: now, count: 1 });
+      return false;
+    }
+    current.count += 1;
+    return current.count > config.ratePerMin;
+  }
+
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, window] of windows) {
+      if (now - window.start >= 60_000) windows.delete(key);
+    }
+  }, 60_000);
+  cleanup.unref();
+
+  return http.createServer(async (req, res) => {
+    try {
+      if (!isAllowedPath(req.url)) return send(res, 404);
+      if (!['GET', 'POST', 'DELETE'].includes(req.method ?? '')) {
+        res.setHeader('allow', 'GET, POST, DELETE');
+        return send(res, 405, 'method not allowed');
+      }
+
+      const identity = await verifyAccessJwt(req.headers['cf-access-jwt-assertion']);
+      if (!identity.ok) {
+        console.warn(`access denied from ${clientIp(req)}: ${identity.reason}`);
+        return send(res, 403, 'forbidden');
+      }
+
+      if (rateLimited(identity.email)) return send(res, 429, 'rate limited');
+
+      const body = req.method === 'POST' ? await readBody(req, config.maxBodyBytes) : null;
+      console.log(`${new Date().toISOString()} ${identity.email} ${req.method} /mcp`);
+      forward(req, res, body, config);
+    } catch (error) {
+      const status = Number(error?.status) || 500;
+      if (status >= 500) console.warn(error?.stack ?? error);
+      send(res, status, status === 413 ? 'request body too large' : 'gateway error');
+    }
+  });
+}
+
+export async function startGateway(env = process.env) {
+  const config = loadConfig(env);
+  const server = createGatewayServer(env);
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(config.port, '0.0.0.0', resolve);
+  });
+  console.log(`gateway listening on ${config.port}; Access JWT required; upstream ${config.upstreamHost}:${config.upstreamPort}${config.upstreamPath}`);
+  return server;
+}
+
+const invokedDirectly = process.argv[1]
+  && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedDirectly) {
+  startGateway().catch(error => {
+    console.error(error?.stack ?? error);
+    process.exit(1);
+  });
+}

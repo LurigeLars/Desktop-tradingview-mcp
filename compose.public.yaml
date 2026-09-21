@@ -1,0 +1,40 @@
+# Remote ChatGPT/agent access:
+# Cloudflare Tunnel -> JWT-validating gateway -> host-side TradingView MCP HTTP server.
+# The host MCP remains bound to 127.0.0.1:8765; no host port is published by this compose file.
+name: tradingview-mcp-public
+
+services:
+  gateway:
+    image: node:22.22-alpine
+    container_name: tradingview-mcp-gateway
+    command: ["node", "/app/gateway.mjs"]
+    user: node
+    env_file: public/gateway.env
+    environment:
+      UPSTREAM_HOST: host.docker.internal
+      UPSTREAM_PORT: "8765"
+      UPSTREAM_PATH: /mcp
+      UPSTREAM_HOST_HEADER: localhost
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./public/gateway:/app:ro
+    networks: [edge]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.1
+    container_name: tradingview-mcp-cloudflared
+    command: ["tunnel", "--no-autoupdate", "run"]
+    env_file: public/tunnel.env
+    networks: [edge]
+    depends_on: [gateway]
+    restart: unless-stopped
+
+networks:
+  edge:
+    driver: bridge

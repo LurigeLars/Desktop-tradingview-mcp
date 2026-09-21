@@ -22,4 +22,16 @@ The project has one canonical TradingView MCP implementation and two transport e
 - TradingView Desktop does not need to remain running: clients may start it on demand with `tv_launch` and stop the instance managed by the same MCP process with `tv_close`.
 - `tv_close` never performs a name-wide process kill; it refuses to close instances that were not launched by the current MCP process.
 
-Remote access is expected to terminate through an authenticated tunnel on the same host and forward only to the loopback HTTP MCP endpoint. The tunnel/authentication layer is deployment configuration, not part of the MCP core.
+### Remote edge
+
+The reference remote deployment is intentionally separated from the host MCP runtime:
+
+- `compose.public.yaml` runs a dedicated `cloudflared` container and a small Node gateway.
+- The gateway is not published on a host port.
+- The gateway reaches the host MCP through `host.docker.internal:8765` while setting the upstream `Host` header to `localhost:8765`, preserving the MCP server's loopback host-header guard.
+- Cloudflare Access Managed OAuth authenticates the remote MCP client.
+- The gateway independently validates the resulting Cloudflare Access JWT, including issuer, audience, expiry and an explicit email allowlist, before forwarding.
+- Client credentials and Cloudflare identity headers are stripped before reaching the MCP process.
+- The Cloudflare tunnel is dedicated to this application and can be stopped without affecting local stdio use.
+
+See `docs/remote-mcp-cloudflare.md` for deployment details.
