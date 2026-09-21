@@ -1,5 +1,6 @@
-# Remote ChatGPT/agent access:
+# Remote agent access:
 # Cloudflare Tunnel -> JWT-validating gateway -> host-side TradingView MCP HTTP server.
+# The tunnel origin should target http://gateway:8080 on the shared Docker network.
 # The host MCP remains bound to 127.0.0.1:8765; no host port is published by this compose file.
 name: tradingview-mcp-public
 
@@ -19,10 +20,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./public/gateway:/app:ro
-    networks:
-      edge:
-        aliases:
-          - tradingview-gateway
+    networks: [edge]
     read_only: true
     cap_drop: [ALL]
     security_opt:

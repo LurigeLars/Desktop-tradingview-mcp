@@ -5,5 +5,4 @@ temp_*
 *.log
 discovery-log.json
 rules.json
-public/gateway.env
-public/tunnel.env
+public/*.env
