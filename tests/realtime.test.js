@@ -4,6 +4,7 @@ import {
   normalizeSnapshotOptions,
   realtimeStatusFromDelay,
   filterSnapshotsBySymbols,
+  selectSnapshotsForWorkerEntries,
 } from '../src/core/realtime.js';
 
 test('snapshot options use compact fast defaults', () => {
@@ -58,4 +59,129 @@ test('omitting symbol filters returns every resident snapshot', () => {
     filterSnapshotsBySymbols(snapshots),
     { snapshots, missing: [] },
   );
+});
+
+
+test('worker selection matches exact symbol and normalized timeframe without exposing pane layout', () => {
+  const entry = {
+    handle: 'logical-a',
+    key: 'EX:AAA|5',
+    symbol: 'EX:AAA',
+    timeframe: '5',
+    studies: [],
+    groups: ['group:a'],
+    assignment: null,
+  };
+  const snapshot = {
+    resolved_symbol: 'EX:AAA',
+    resolution: '5m',
+    chart_id: 'chart-1',
+    pane_index: 3,
+    studies: [],
+    success: true,
+  };
+
+  const selected = selectSnapshotsForWorkerEntries([entry], [snapshot]);
+  assert.equal(selected.unmatched.length, 0);
+  assert.equal(selected.snapshots.length, 1);
+  assert.equal(selected.snapshots[0].worker_handle, 'logical-a');
+  assert.deepEqual(selected.snapshots[0].worker_groups, ['group:a']);
+});
+
+test('worker selection prefers persisted chart/pane assignment over duplicate symbol matches', () => {
+  const entry = {
+    handle: 'logical-a',
+    key: 'EX:AAA|5',
+    symbol: 'EX:AAA',
+    timeframe: '5',
+    studies: [],
+    groups: [],
+    assignment: { chart_id: 'chart-2', pane_index: 1 },
+  };
+  const snapshots = [
+    { resolved_symbol: 'EX:AAA', resolution: '5', chart_id: 'chart-1', pane_index: 0, studies: [], success: true },
+    { resolved_symbol: 'EX:AAA', resolution: '5', chart_id: 'chart-2', pane_index: 1, studies: [], success: true },
+  ];
+
+  const selected = selectSnapshotsForWorkerEntries([entry], snapshots);
+  assert.equal(selected.unmatched.length, 0);
+  assert.equal(selected.snapshots[0].chart_id, 'chart-2');
+  assert.equal(selected.snapshots[0].pane_index, 1);
+});
+
+test('worker selection fails closed when resident symbol/timeframe match is ambiguous', () => {
+  const entry = {
+    handle: 'logical-a',
+    key: 'EX:AAA|5',
+    symbol: 'EX:AAA',
+    timeframe: '5',
+    studies: [],
+    groups: [],
+    assignment: null,
+  };
+  const snapshots = [
+    { resolved_symbol: 'EX:AAA', resolution: '5', chart_id: 'chart-1', pane_index: 0, studies: [], success: true },
+    { resolved_symbol: 'EX:AAA', resolution: '5', chart_id: 'chart-2', pane_index: 0, studies: [], success: true },
+  ];
+
+  const selected = selectSnapshotsForWorkerEntries([entry], snapshots);
+  assert.equal(selected.snapshots.length, 0);
+  assert.equal(selected.unmatched[0].reason, 'ambiguous_resident_match');
+});
+
+test('worker selection never collapses a requested expression to a component', () => {
+  const entry = {
+    handle: 'expr',
+    key: 'EX1:AAA/EX2:BBB|5',
+    symbol: 'EX1:AAA/EX2:BBB',
+    timeframe: '5',
+    studies: [],
+    groups: [],
+    assignment: null,
+  };
+  const selected = selectSnapshotsForWorkerEntries([entry], [
+    { resolved_symbol: 'EX2:BBB', resolution: '5', chart_id: 'chart-1', pane_index: 0, studies: [], success: true },
+  ]);
+  assert.equal(selected.snapshots.length, 0);
+  assert.equal(selected.unmatched[0].reason, 'not_resident');
+});
+
+test('required studies can disambiguate otherwise identical resident charts', () => {
+  const entry = {
+    handle: 'study-specific',
+    key: 'EX:AAA|5|ALPHA',
+    symbol: 'EX:AAA',
+    timeframe: '5',
+    studies: ['Alpha'],
+    groups: [],
+    assignment: null,
+  };
+  const snapshots = [
+    { resolved_symbol: 'EX:AAA', resolution: '5', chart_id: 'chart-1', pane_index: 0, studies: [{ name: 'Beta' }], success: true },
+    { resolved_symbol: 'EX:AAA', resolution: '5', chart_id: 'chart-2', pane_index: 0, studies: [{ name: 'Alpha' }], success: true },
+  ];
+  const selected = selectSnapshotsForWorkerEntries([entry], snapshots);
+  assert.equal(selected.unmatched.length, 0);
+  assert.equal(selected.snapshots[0].chart_id, 'chart-2');
+});
+
+
+test('stale persisted assignment is rejected and fallback finds the live matching pane', () => {
+  const entry = {
+    handle: 'logical-a',
+    key: 'EX:AAA|5',
+    symbol: 'EX:AAA',
+    timeframe: '5',
+    studies: [],
+    groups: [],
+    assignment: { chart_id: 'stale-chart', pane_index: 0 },
+  };
+  const snapshots = [
+    { resolved_symbol: 'EX:OTHER', resolution: '5', chart_id: 'stale-chart', pane_index: 0, studies: [], success: true },
+    { resolved_symbol: 'EX:AAA', resolution: '5', chart_id: 'live-chart', pane_index: 2, studies: [], success: true },
+  ];
+
+  const selected = selectSnapshotsForWorkerEntries([entry], snapshots);
+  assert.equal(selected.unmatched.length, 0);
+  assert.equal(selected.snapshots[0].chart_id, 'live-chart');
 });
