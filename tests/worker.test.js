@@ -9,6 +9,7 @@ import {
   resolveWorkerSelection,
   planPaneCounts,
   planWorkerTopology,
+  normalizeStudySpecs,
 } from '../src/core/worker.js';
 
 test('timeframe normalization is generic across seconds, minutes, hours and calendar units', () => {
@@ -159,4 +160,51 @@ test('worker status includes an exact topology plan', () => {
 
 test('per-tab chart limit cannot exceed the configured Premium architecture limit', () => {
   assert.throws(() => planPaneCounts(1, { maxChartsPerTab: 9 }), /from 1 to 8/);
+});
+
+
+test('study specs accept string shorthand and parameterized instances', () => {
+  assert.deepEqual(
+    normalizeStudySpecs([
+      'Example Study',
+      { name: 'Parameterized Study', inputs: { length: 9, source: 'close' } },
+    ]),
+    [
+      { name: 'Example Study' },
+      { name: 'Parameterized Study', inputs: { length: 9, source: 'close' } },
+    ],
+  );
+});
+
+test('study spec input key order does not change worker identity', () => {
+  const a = buildWorkerKey({
+    symbol: 'EX:ABC',
+    timeframe: '5',
+    studies: [{ name: 'Parameterized Study', inputs: { alpha: 1, beta: 2 } }],
+  });
+  const b = buildWorkerKey({
+    symbol: 'ex:abc',
+    timeframe: '5m',
+    studies: [{ name: 'parameterized study', inputs: { beta: 2, alpha: 1 } }],
+  });
+  assert.equal(a, b);
+});
+
+test('different study inputs produce distinct worker entries', () => {
+  const normalized = normalizeWorkerUniverse([
+    { symbol: 'EX:ABC', timeframe: '5', studies: [{ name: 'Parameterized Study', inputs: { length: 9 } }] },
+    { symbol: 'EX:ABC', timeframe: '5', studies: [{ name: 'Parameterized Study', inputs: { length: 20 } }] },
+  ], { capacity: 5 });
+  assert.equal(normalized.entries.length, 2);
+  assert.notEqual(normalized.entries[0].key, normalized.entries[1].key);
+});
+
+test('duplicate equivalent parameterized studies are normalized once', () => {
+  assert.deepEqual(
+    normalizeStudySpecs([
+      { name: 'Study', inputs: { b: 2, a: 1 } },
+      { name: 'study', inputs: { a: 1, b: 2 } },
+    ]),
+    [{ name: 'Study', inputs: { a: 1, b: 2 } }],
+  );
 });

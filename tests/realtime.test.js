@@ -185,3 +185,38 @@ test('stale persisted assignment is rejected and fallback finds the live matchin
   assert.equal(selected.unmatched.length, 0);
   assert.equal(selected.snapshots[0].chart_id, 'live-chart');
 });
+
+
+test('parameterized study inputs disambiguate otherwise identical resident charts', () => {
+  const entry = {
+    handle: 'parameterized',
+    key: 'EX:AAA|5|PARAM',
+    symbol: 'EX:AAA',
+    timeframe: '5',
+    studies: [{ name: 'Parameter Study', inputs: { length: 20 } }],
+    groups: [],
+    assignment: null,
+  };
+  const snapshots = [
+    {
+      resolved_symbol: 'EX:AAA',
+      resolution: '5',
+      chart_id: 'chart-1',
+      pane_index: 0,
+      studies: [{ name: 'Parameter Study', inputs: { length: 9 }, values: {} }],
+      success: true,
+    },
+    {
+      resolved_symbol: 'EX:AAA',
+      resolution: '5',
+      chart_id: 'chart-2',
+      pane_index: 0,
+      studies: [{ name: 'Parameter Study', inputs: { length: 20 }, values: {} }],
+      success: true,
+    },
+  ];
+
+  const selected = selectSnapshotsForWorkerEntries([entry], snapshots);
+  assert.equal(selected.unmatched.length, 0);
+  assert.equal(selected.snapshots[0].chart_id, 'chart-2');
+});

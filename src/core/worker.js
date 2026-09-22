@@ -143,11 +143,62 @@ function uniqueStrings(values, { sort = true } = {}) {
   return sort ? out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })) : out;
 }
 
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const key of Object.keys(value).sort()) out[key] = stableValue(value[key]);
+    return out;
+  }
+  return value;
+}
+
+function stableJson(value) {
+  return JSON.stringify(stableValue(value));
+}
+
+export function normalizeStudySpecs(studies = []) {
+  const byKey = new Map();
+  for (const raw of studies || []) {
+    let name;
+    let inputs;
+
+    if (typeof raw === 'string') {
+      name = raw.trim();
+      inputs = undefined;
+    } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      name = String(raw.name ?? '').trim();
+      if (raw.inputs != null) {
+        if (!raw.inputs || typeof raw.inputs !== 'object' || Array.isArray(raw.inputs)) {
+          throw new Error('study inputs must be an object when provided');
+        }
+        inputs = stableValue(raw.inputs);
+      }
+    } else {
+      throw new Error('Each study must be a name string or {name, inputs} object');
+    }
+
+    if (!name) throw new Error('Each study requires a non-empty name');
+    const key = name.toUpperCase() + '|' + stableJson(inputs ?? {});
+    if (!byKey.has(key)) {
+      byKey.set(key, inputs === undefined ? { name } : { name, inputs });
+    }
+  }
+
+  return [...byKey.values()].sort((a, b) => {
+    const ak = a.name.toUpperCase() + '|' + stableJson(a.inputs ?? {});
+    const bk = b.name.toUpperCase() + '|' + stableJson(b.inputs ?? {});
+    return ak.localeCompare(bk);
+  });
+}
+
 export function buildWorkerKey({ symbol, timeframe, studies = [] }) {
   const normalizedSymbol = String(symbol ?? '').trim();
   if (!normalizedSymbol) throw new Error('symbol is required');
   const normalizedTimeframe = normalizeWorkerTimeframe(timeframe);
-  const normalizedStudies = uniqueStrings(studies).map(value => value.toUpperCase());
+  const normalizedStudies = normalizeStudySpecs(studies).map(study =>
+    study.name.toUpperCase() + ':' + stableJson(study.inputs ?? {})
+  );
   return [
     normalizedSymbol.toUpperCase(),
     normalizedTimeframe.toUpperCase(),
@@ -164,7 +215,7 @@ function normalizeEntry(raw, previousByKey) {
   if (!symbol) throw new Error('Each worker entry requires symbol');
 
   const timeframe = normalizeWorkerTimeframe(raw?.timeframe);
-  const studies = uniqueStrings(raw?.studies);
+  const studies = normalizeStudySpecs(raw?.studies);
   const groups = uniqueStrings(raw?.groups);
   const key = buildWorkerKey({ symbol, timeframe, studies });
   const previous = previousByKey?.get(key) || null;

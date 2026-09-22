@@ -71,20 +71,35 @@ function normalizedResolution(value) {
   catch { return String(value ?? '').trim(); }
 }
 
-function studyNames(snapshot) {
-  return new Set(
-    (snapshot?.studies || [])
-      .map(study => String(study?.name || '').trim().toUpperCase())
-      .filter(Boolean),
+function studySpecName(value) {
+  return typeof value === 'string'
+    ? value.trim()
+    : String(value?.name ?? '').trim();
+}
+
+function studyInputsMatch(requiredInputs, actualInputs) {
+  if (!requiredInputs || Object.keys(requiredInputs).length === 0) return true;
+  if (!actualInputs || typeof actualInputs !== 'object') return false;
+  return Object.entries(requiredInputs).every(([key, value]) =>
+    JSON.stringify(actualInputs[key]) === JSON.stringify(value)
   );
 }
 
 function requiredStudiesPresent(entry, snapshot) {
-  const required = (entry?.studies || []).map(value => String(value).trim().toUpperCase()).filter(Boolean);
+  const required = (entry?.studies || []).filter(Boolean);
   if (!required.length) return true;
-  const present = studyNames(snapshot);
-  if (!present.size) return false;
-  return required.every(name => present.has(name));
+  const present = snapshot?.studies || [];
+  if (!present.length) return false;
+
+  return required.every(spec => {
+    const name = studySpecName(spec).toUpperCase();
+    if (!name) return false;
+    const inputs = typeof spec === 'object' && spec ? spec.inputs : undefined;
+    return present.some(study =>
+      String(study?.name || '').trim().toUpperCase() === name
+      && studyInputsMatch(inputs, study?.inputs)
+    );
+  });
 }
 
 export function selectSnapshotsForWorkerEntries(entries, snapshots) {
@@ -225,8 +240,13 @@ function buildTargetExpression({ bars, includeStudies, studyFilters }) {
 
               if (Object.keys(values).length) {
                 var id = null;
+                var inputs = null;
                 try { id = source.id ? source.id() : null; } catch(e) {}
-                out.push({ id: id, name: name, values: values });
+                try {
+                  inputs = source.inputs ? source.inputs() : null;
+                  if (!inputs || typeof inputs !== 'object') inputs = null;
+                } catch(e) { inputs = null; }
+                out.push({ id: id, name: name, inputs: inputs, values: values });
               }
             } catch(e) {}
           }
