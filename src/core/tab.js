@@ -347,6 +347,7 @@ export async function newTab({ layout, name } = {}) {
     success: true,
     action: wantNew ? 'new_layout_created' : 'layout_opened_in_new_tab',
     layout: picked,
+    target_id: chartTarget.id,
     chart_id: chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
   };
 }
