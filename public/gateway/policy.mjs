@@ -18,7 +18,7 @@ export const FULL_ALLOWED_TOOLS = [
   'data_get_ohlcv', 'data_get_indicator', 'data_get_strategy_results', 'data_get_trades',
   'data_get_equity', 'quote_get', 'depth_get', 'data_get_pine_lines', 'data_get_pine_labels',
   'data_get_pine_tables', 'data_get_pine_boxes', 'data_get_study_values', 'realtime_snapshot',
-  'worker_set_universe', 'worker_status',
+  'worker_set_universe', 'worker_status', 'worker_provision', 'worker_provision',
   'capture_screenshot',
   'draw_shape', 'draw_list', 'draw_clear', 'draw_remove_one', 'draw_get_properties',
   'alert_create', 'alert_list', 'alert_delete',
