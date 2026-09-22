@@ -55,7 +55,7 @@ test('quote age converts TradingView epoch seconds to retrieval milliseconds', (
   assert.equal(ageMsFromEpochSeconds(null, 1002500), null);
 });
 
-test('last-trade freshness at DTV retrieval is explicit and threshold-driven', () => {
+test('last-trade freshness is decision-useful and threshold-driven', () => {
   assert.equal(freshnessFromAge(1999, 5000), 'fresh');
   assert.equal(freshnessFromAge(5000, 5000), 'fresh');
   assert.equal(freshnessFromAge(5001, 5000), 'stale');
