@@ -13,6 +13,7 @@ import { registerWatchlistTools } from '../tools/watchlist.js';
 import { registerUiTools } from '../tools/ui.js';
 import { registerPaneTools } from '../tools/pane.js';
 import { registerTabTools } from '../tools/tab.js';
+import { registerRealtimeTools } from '../tools/realtime.js';
 import { installLegacyToolAnnotationAdapter } from './tool-annotations.js';
 
 export const SERVER_INFO = {
@@ -21,7 +22,7 @@ export const SERVER_INFO = {
   description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
 };
 
-export const SERVER_INSTRUCTIONS = `TradingView MCP — 85 tools for reading and controlling a live TradingView Desktop chart.
+export const SERVER_INSTRUCTIONS = `TradingView MCP — 86 tools for reading and controlling live TradingView Desktop charts.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -53,6 +54,7 @@ Pine Script development:
 Screenshots: capture_screenshot → regions: "full", "chart", "strategy_tester"
 Replay: replay_start → replay_step → replay_trade → replay_status → replay_stop
 Batch: batch_run → run action across multiple symbols/timeframes
+Realtime: realtime_snapshot → read all currently resident open chart panes without symbol switching
 Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
 Alerts: alert_create, alert_list, alert_delete
 Lifecycle: tv_health_check → tv_launch when needed → tv_close when finished. tv_close exits the entire verified MCP-managed TradingView Desktop application, including after an MCP-server restart.
@@ -92,6 +94,7 @@ export function createTradingViewServer() {
   registerUiTools(server);
   registerPaneTools(server);
   registerTabTools(server);
+  registerRealtimeTools(server);
 
   return server;
 }

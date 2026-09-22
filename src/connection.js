@@ -122,10 +122,26 @@ export function isTradingViewUrl(value) {
   }
 }
 
-async function findChartTarget() {
+export async function listCdpTargets() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
+  if (!resp.ok) throw new Error(`CDP target list failed (HTTP ${resp.status})`);
+  return resp.json();
+}
 
+export async function listTradingViewChartTargets() {
+  const targets = await listCdpTargets();
+  return targets.filter(t => {
+    if (t.type !== 'page' || !isTradingViewUrl(t.url)) return false;
+    try {
+      return new URL(t.url).pathname.toLowerCase().startsWith('/chart');
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function findChartTarget() {
+  const targets = await listCdpTargets();
   const tradingViewPages = targets.filter(t => t.type === 'page' && isTradingViewUrl(t.url));
 
   // Prefer an actual chart URL, then any other TradingView page.
@@ -139,8 +155,7 @@ async function findChartTarget() {
 }
 
 async function findTargetById(id) {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
+  const targets = await listCdpTargets();
   return targets.find(t => t.id === id) || null;
 }
 
