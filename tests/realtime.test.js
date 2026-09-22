@@ -164,3 +164,24 @@ test('required studies can disambiguate otherwise identical resident charts', ()
   assert.equal(selected.unmatched.length, 0);
   assert.equal(selected.snapshots[0].chart_id, 'chart-2');
 });
+
+
+test('stale persisted assignment is rejected and fallback finds the live matching pane', () => {
+  const entry = {
+    handle: 'logical-a',
+    key: 'EX:AAA|5',
+    symbol: 'EX:AAA',
+    timeframe: '5',
+    studies: [],
+    groups: [],
+    assignment: { chart_id: 'stale-chart', pane_index: 0 },
+  };
+  const snapshots = [
+    { resolved_symbol: 'EX:OTHER', resolution: '5', chart_id: 'stale-chart', pane_index: 0, studies: [], success: true },
+    { resolved_symbol: 'EX:AAA', resolution: '5', chart_id: 'live-chart', pane_index: 2, studies: [], success: true },
+  ];
+
+  const selected = selectSnapshotsForWorkerEntries([entry], snapshots);
+  assert.equal(selected.unmatched.length, 0);
+  assert.equal(selected.snapshots[0].chart_id, 'live-chart');
+});
