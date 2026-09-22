@@ -9,6 +9,7 @@ export function registerWorkerProvisionTools(server) {
       max_tabs: z.coerce.number().int().min(1).max(8).optional().describe('Maximum worker tabs to provision in this call (default 1).'),
       dry_run: z.coerce.boolean().optional().describe('Return pending topology without changing TradingView or worker assignments.'),
       force: z.coerce.boolean().optional().describe('Reconfigure worker-owned tabs even when recorded assignments look complete.'),
+      adopt_single_existing: z.coerce.boolean().optional().describe('Explicitly adopt the sole existing non-worker TradingView chart as worker slot 0. Useful when consuming the full connection budget.'),
       layout_prefix: z.string().optional().describe('Optional technical name prefix for DTV-owned saved layouts.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
