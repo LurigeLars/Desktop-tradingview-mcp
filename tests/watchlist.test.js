@@ -62,3 +62,11 @@ test('ambiguous bare tickers fail verification instead of guessing', () => {
     { matched: null, verification: 'ambiguous_bare_ticker' },
   );
 });
+
+
+test('bare tickers never suffix-match a formula row', () => {
+  assert.deepEqual(
+    matchWatchlistSymbol('BBB', ['EX1:AAA/EX2:BBB']),
+    { matched: null, verification: 'not_found' },
+  );
+});
