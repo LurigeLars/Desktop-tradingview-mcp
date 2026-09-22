@@ -260,6 +260,7 @@ async function readTarget(target, options) {
     }
 
     const payload = result.result?.value || {};
+    if (payload.error) throw new Error(payload.error);
     const chartId = (() => {
       try { return new URL(target.url).pathname.match(/^\/chart\/([^/]+)/i)?.[1] || null; }
       catch { return null; }
@@ -319,8 +320,12 @@ export async function realtimeSnapshot({
       error: target.error,
     }));
 
+  const failedSnapshots = filtered.snapshots.filter(snapshot => !snapshot.success).length;
+
   return {
-    success: errors.length === 0 && filtered.missing.length === 0,
+    success: targets.length > 0
+      && filtered.missing.length === 0
+      && filtered.snapshots.some(snapshot => snapshot.success),
     mode: options.mode,
     bars_requested: options.bars,
     include_studies: options.includeStudies,
@@ -328,6 +333,7 @@ export async function realtimeSnapshot({
     target_count: targets.length,
     chart_count: allSnapshots.length,
     returned_count: filtered.snapshots.length,
+    failed_count: failedSnapshots,
     requested_symbols: Array.isArray(symbols) ? symbols : [],
     missing: filtered.missing,
     started_at: new Date(startedAt).toISOString(),
