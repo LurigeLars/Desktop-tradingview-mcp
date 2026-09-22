@@ -96,21 +96,24 @@ export function selectSnapshotsForWorkerEntries(entries, snapshots) {
   for (const entry of entries || []) {
     let candidates = [];
 
+    const wantedSymbol = String(entry?.symbol || '').toUpperCase();
+    const wantedTimeframe = normalizedResolution(entry?.timeframe);
+    const contentMatches = snapshot =>
+      String(snapshot.resolved_symbol || '').toUpperCase() === wantedSymbol
+      && normalizedResolution(snapshot.resolution) === wantedTimeframe;
+
     if (entry?.assignment?.chart_id != null && entry?.assignment?.pane_index != null) {
       candidates = available.filter(({ snapshot, index }) =>
         !claimed.has(index)
         && String(snapshot.chart_id || '') === String(entry.assignment.chart_id)
         && Number(snapshot.pane_index) === Number(entry.assignment.pane_index)
+        && contentMatches(snapshot)
       );
     }
 
     if (!candidates.length) {
-      const wantedSymbol = String(entry?.symbol || '').toUpperCase();
-      const wantedTimeframe = normalizedResolution(entry?.timeframe);
       candidates = available.filter(({ snapshot, index }) =>
-        !claimed.has(index)
-        && String(snapshot.resolved_symbol || '').toUpperCase() === wantedSymbol
-        && normalizedResolution(snapshot.resolution) === wantedTimeframe
+        !claimed.has(index) && contentMatches(snapshot)
       );
     }
 
