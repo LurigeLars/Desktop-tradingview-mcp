@@ -95,6 +95,11 @@ test('worker provisioning is resumable one topology tab at a time', async () => 
     status: () => status({ _deps: store.deps }),
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
     listTargets: async () => liveTargets,
+    inspectTargets: async targets => targets.map(target => ({
+      target_id: target.id,
+      chart_id: target.url.match(/\/chart\/([^/]+)/)?.[1] || null,
+      pane_count: 1,
+    })),
     newTab: async ({ name, layout }) => {
       assert.equal(layout, 'new');
       chartCounter += 1;
@@ -167,6 +172,11 @@ test('force provisioning remains resumable and does not report complete early', 
     status: () => status({ _deps: store.deps }),
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
     listTargets: async () => targets,
+    inspectTargets: async items => items.map(target => ({
+      target_id: target.id,
+      chart_id: target.url.match(/\/chart\/([^/]+)/)?.[1] || null,
+      pane_count: target.id === 't1' ? 8 : 2,
+    })),
     newTab: async () => { throw new Error('should reuse live worker tab'); },
     configureTarget: async ({ paneCount }) => ({ success: true, layout_code: layoutCodeForPaneCount(paneCount) }),
     closeTabByChartId: async () => ({ success: true }),
@@ -176,4 +186,198 @@ test('force provisioning remains resumable and does not report complete early', 
   const first = await provisionWorker({ force: true, max_tabs: 1, _deps: runtime });
   assert.equal(first.complete, false);
   assert.deepEqual(first.remaining_tabs, [1]);
+});
+
+
+test('worker provisioning fails closed when external charts would exceed total connection budget', async () => {
+  const store = makeStore();
+  setUniverse({
+    capacity: 5,
+    entries: Array.from({ length: 5 }, (_, index) => ({
+      handle: 'h' + index,
+      symbol: 'EX:S' + index,
+      timeframe: '5',
+    })),
+    _deps: store.deps,
+  });
+
+  const external = [{
+    id: 'external-target',
+    type: 'page',
+    url: 'https://www.tradingview.com/chart/external-chart/',
+  }];
+
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => external,
+    inspectTargets: async () => [{
+      target_id: 'external-target',
+      chart_id: 'external-chart',
+      pane_count: 1,
+    }],
+    newTab: async () => { throw new Error('must not create tabs above capacity'); },
+    configureTarget: async () => { throw new Error('must not configure above capacity'); },
+    closeTabByChartId: async () => ({ success: true }),
+  };
+
+  await assert.rejects(
+    () => provisionWorker({ dry_run: true, _deps: runtime }),
+    /6 projected chart connections.*exceed 5 usable slots/,
+  );
+});
+
+test('dry-run can explicitly model adoption of the sole existing external chart', async () => {
+  const store = makeStore();
+  setUniverse({
+    capacity: 5,
+    entries: Array.from({ length: 5 }, (_, index) => ({
+      handle: 'h' + index,
+      symbol: 'EX:S' + index,
+      timeframe: '5',
+    })),
+    _deps: store.deps,
+  });
+
+  const external = [{
+    id: 'external-target',
+    type: 'page',
+    url: 'https://www.tradingview.com/chart/external-chart/',
+  }];
+
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => external,
+    inspectTargets: async () => [{
+      target_id: 'external-target',
+      chart_id: 'external-chart',
+      pane_count: 1,
+    }],
+  };
+
+  const plan = await provisionWorker({
+    dry_run: true,
+    adopt_single_existing: true,
+    _deps: runtime,
+  });
+
+  assert.equal(plan.capacity_projection.external_connections, 0);
+  assert.equal(plan.capacity_projection.worker_connections, 5);
+  assert.equal(plan.capacity_projection.projected_connections, 5);
+  assert.equal(plan.adoption_candidate.chart_id, 'external-chart');
+  assert.equal(status({ _deps: store.deps }).worker_tabs.length, 0, 'dry-run must not persist adoption');
+});
+
+test('explicit adoption uses the sole existing chart as worker slot zero', async () => {
+  const store = makeStore();
+  setUniverse({
+    capacity: 5,
+    entries: Array.from({ length: 5 }, (_, index) => ({
+      handle: 'h' + index,
+      symbol: 'EX:S' + index,
+      timeframe: '5',
+    })),
+    _deps: store.deps,
+  });
+
+  const external = [{
+    id: 'external-target',
+    type: 'page',
+    url: 'https://www.tradingview.com/chart/external-chart/',
+  }];
+
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => external,
+    inspectTargets: async () => [{
+      target_id: 'external-target',
+      chart_id: 'external-chart',
+      pane_count: 1,
+    }],
+    newTab: async () => { throw new Error('adopted first tab must be reused'); },
+    configureTarget: async ({ target, paneCount }) => ({
+      success: true,
+      layout_code: layoutCodeForPaneCount(paneCount),
+      target_id: target.id,
+    }),
+    closeTabByChartId: async () => ({ success: true }),
+    now: () => Date.parse('2026-09-22T20:00:00Z'),
+  };
+
+  const first = await provisionWorker({
+    max_tabs: 1,
+    adopt_single_existing: true,
+    _deps: runtime,
+  });
+
+  assert.equal(first.results[0].chart_id, 'external-chart');
+  assert.equal(first.results[0].reused, true);
+  assert.equal(first.complete, false);
+  assert.deepEqual(first.remaining_tabs, [1]);
+  assert.equal(status({ _deps: store.deps }).worker_tabs[0].chart_id, 'external-chart');
+});
+
+test('adoption refuses to guess when multiple external chart targets exist', async () => {
+  const store = makeStore();
+  setUniverse({
+    capacity: 10,
+    entries: [{ handle: 'h0', symbol: 'EX:S0', timeframe: '5' }],
+    _deps: store.deps,
+  });
+
+  const external = [
+    { id: 'a', type: 'page', url: 'https://www.tradingview.com/chart/a/' },
+    { id: 'b', type: 'page', url: 'https://www.tradingview.com/chart/b/' },
+  ];
+
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => external,
+    inspectTargets: async () => [
+      { target_id: 'a', chart_id: 'a', pane_count: 1 },
+      { target_id: 'b', chart_id: 'b', pane_count: 1 },
+    ],
+  };
+
+  await assert.rejects(
+    () => provisionWorker({ dry_run: true, adopt_single_existing: true, _deps: runtime }),
+    /requires exactly one non-worker TradingView chart target; found 2/,
+  );
+});
+
+test('reserved slots reduce the total usable budget including external charts', async () => {
+  const store = makeStore();
+  setUniverse({
+    capacity: 10,
+    reserve_slots: 2,
+    entries: Array.from({ length: 8 }, (_, index) => ({
+      handle: 'h' + index,
+      symbol: 'EX:S' + index,
+      timeframe: '5',
+    })),
+    _deps: store.deps,
+  });
+
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => [{
+      id: 'external',
+      type: 'page',
+      url: 'https://www.tradingview.com/chart/external/',
+    }],
+    inspectTargets: async () => [{
+      target_id: 'external',
+      chart_id: 'external',
+      pane_count: 1,
+    }],
+  };
+
+  await assert.rejects(
+    () => provisionWorker({ dry_run: true, _deps: runtime }),
+    /9 projected chart connections.*exceed 8 usable slots/,
+  );
 });
