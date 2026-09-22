@@ -4,7 +4,7 @@ import { realtimeSnapshot } from '../core/realtime.js';
 
 export function registerRealtimeTools(server) {
   server.registerTool('realtime_snapshot', {
-    description: 'Read realtime snapshots from resident TradingView panes without switching symbols. Bare tickers resolve only when unambiguous; formulas/expressions require exact matching.'
+    description: 'Read realtime snapshots from resident TradingView panes without switching symbols. Bare tickers resolve only when unambiguous; formulas/expressions require exact matching.',
     inputSchema: {
       symbols: z.array(z.string()).optional().describe('Optional symbols/expressions. A bare ticker may resolve to one unique exchange-qualified resident symbol; formulas require exact matching. Do not combine with handles/groups.'),
       handles: z.array(z.string()).optional().describe('Optional logical worker handles from worker_status. Do not combine with symbols.'),
