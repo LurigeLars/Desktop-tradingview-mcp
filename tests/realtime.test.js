@@ -220,3 +220,22 @@ test('parameterized study inputs disambiguate otherwise identical resident chart
   assert.equal(selected.unmatched.length, 0);
   assert.equal(selected.snapshots[0].chart_id, 'chart-2');
 });
+
+
+test('worker selection accepts a uniquely resolved exchange-qualified form for a bare ticker', () => {
+  const entry = {
+    handle: 'bare',
+    key: 'AAA|5',
+    symbol: 'AAA',
+    timeframe: '5',
+    studies: [],
+    groups: [],
+    assignment: null,
+  };
+  const snapshots = [
+    { resolved_symbol: 'EX:AAA', resolution: '5', chart_id: 'chart-1', pane_index: 0, studies: [], success: true },
+  ];
+  const selected = selectSnapshotsForWorkerEntries([entry], snapshots);
+  assert.equal(selected.unmatched.length, 0);
+  assert.equal(selected.snapshots[0].resolved_symbol, 'EX:AAA');
+});
