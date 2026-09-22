@@ -113,10 +113,9 @@ export function filterSnapshotsBySymbols(snapshots, requestedSymbols) {
     if (resolved.verification === 'ambiguous_bare_ticker') {
       ambiguous.push({
         requested_symbol: request,
-        candidates: resolvedValues.filter(value => {
-          const suffix = value.split(':').pop();
-          return suffix && suffix.toUpperCase() === request.toUpperCase();
-        }),
+        candidates: resolvedValues.filter(value =>
+          !!matchWatchlistSymbol(request, [value]).matched
+        ),
       });
       continue;
     }
