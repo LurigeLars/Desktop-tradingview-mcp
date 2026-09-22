@@ -11,7 +11,7 @@ export const DEFAULT_HTTP_PORT = 8765;
 export const DEFAULT_HTTP_PATH = '/mcp';
 export const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_MAX_SESSIONS = 32;
-export const DEFAULT_SESSION_IDLE_MS = 60 * 60 * 1000;
+export const DEFAULT_SESSION_IDLE_MS = 5 * 60 * 1000;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -177,6 +177,20 @@ export async function startTradingViewHttpServer(overrides = {}) {
     await Promise.all(expired.map(closeSession));
   }
 
+  const sessionSweepMs = Math.max(
+    10,
+    Math.min(60_000, Math.floor(config.sessionIdleMs / 2))
+  );
+  let sweepPromise = Promise.resolve();
+  const sweepTimer = setInterval(() => {
+    sweepPromise = sweepPromise
+      .then(() => purgeIdleSessions())
+      .catch(error => {
+        process.stderr.write(`[tradingview-mcp:http] session cleanup failed: ${error?.stack || error}\n`);
+      });
+  }, sessionSweepMs);
+  sweepTimer.unref();
+
   const httpServer = createServer(async (req, res) => {
     try {
       if (!isAllowedHostHeader(req.headers.host)) {
@@ -290,6 +304,8 @@ export async function startTradingViewHttpServer(overrides = {}) {
   const port = typeof address === 'object' && address ? address.port : config.port;
 
   async function close() {
+    clearInterval(sweepTimer);
+    await sweepPromise;
     await Promise.all([...sessions.keys()].map(closeSession));
     if (!httpServer.listening) return;
     await new Promise((resolvePromise, rejectPromise) => {
