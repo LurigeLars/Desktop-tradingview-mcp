@@ -43,6 +43,32 @@ test('recorded tab completeness requires live ownership and exact pane assignmen
   assert.equal(recordedTabComplete(plan, state, new Set(['chart-a'])), false);
 });
 
+test('recorded tab completeness rejects stale live pane content', () => {
+  const plan = { tab_index: 0, pane_count: 1, handles: ['a'] };
+  const state = {
+    worker_tabs: [{ slot: 0, chart_id: 'chart-a', layout_name: 'Worker 01', pane_count: 1 }],
+    entries: [{
+      handle: 'a',
+      symbol: 'EX:AAA',
+      timeframe: '5',
+      studies: [],
+      assignment: { worker_slot: 0, chart_id: 'chart-a', pane_index: 0 },
+    }],
+  };
+  const liveIds = new Set(['chart-a']);
+  const matching = new Map([['chart-a', {
+    chart_id: 'chart-a',
+    panes: [{ resolved_symbol: 'EX:AAA', resolution: '5', studies: [] }],
+  }]]);
+  const stale = new Map([['chart-a', {
+    chart_id: 'chart-a',
+    panes: [{ resolved_symbol: 'EX:BBB', resolution: '5', studies: [] }],
+  }]]);
+
+  assert.equal(recordedTabComplete(plan, state, liveIds, matching), true);
+  assert.equal(recordedTabComplete(plan, state, liveIds, stale), false);
+});
+
 function makeStore() {
   let stored = null;
   const deps = {
