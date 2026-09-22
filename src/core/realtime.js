@@ -6,6 +6,7 @@
  */
 import CDP from 'chrome-remote-interface';
 import { CDP_HOST, CDP_PORT, listTradingViewChartTargets } from '../connection.js';
+import { normalizeWorkerTimeframe, resolveWorkerSelection } from './worker.js';
 
 const MAX_BARS = 100;
 const TARGET_CONCURRENCY = 8;
@@ -63,6 +64,89 @@ export function filterSnapshotsBySymbols(snapshots, requestedSymbols) {
   const found = new Set(matched.map(item => String(item.resolved_symbol || '').toUpperCase()));
   const missing = requested.filter(value => !found.has(value.toUpperCase()));
   return { snapshots: matched, missing };
+}
+
+function normalizedResolution(value) {
+  try { return normalizeWorkerTimeframe(value); }
+  catch { return String(value ?? '').trim(); }
+}
+
+function studyNames(snapshot) {
+  return new Set(
+    (snapshot?.studies || [])
+      .map(study => String(study?.name || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+}
+
+function requiredStudiesPresent(entry, snapshot) {
+  const required = (entry?.studies || []).map(value => String(value).trim().toUpperCase()).filter(Boolean);
+  if (!required.length) return true;
+  const present = studyNames(snapshot);
+  if (!present.size) return false;
+  return required.every(name => present.has(name));
+}
+
+export function selectSnapshotsForWorkerEntries(entries, snapshots) {
+  const available = (snapshots || []).map((snapshot, index) => ({ snapshot, index }));
+  const claimed = new Set();
+  const selected = [];
+  const unmatched = [];
+
+  for (const entry of entries || []) {
+    let candidates = [];
+
+    const wantedSymbol = String(entry?.symbol || '').toUpperCase();
+    const wantedTimeframe = normalizedResolution(entry?.timeframe);
+    const contentMatches = snapshot =>
+      String(snapshot.resolved_symbol || '').toUpperCase() === wantedSymbol
+      && normalizedResolution(snapshot.resolution) === wantedTimeframe;
+
+    if (entry?.assignment?.chart_id != null && entry?.assignment?.pane_index != null) {
+      candidates = available.filter(({ snapshot, index }) =>
+        !claimed.has(index)
+        && String(snapshot.chart_id || '') === String(entry.assignment.chart_id)
+        && Number(snapshot.pane_index) === Number(entry.assignment.pane_index)
+        && contentMatches(snapshot)
+      );
+    }
+
+    if (!candidates.length) {
+      candidates = available.filter(({ snapshot, index }) =>
+        !claimed.has(index) && contentMatches(snapshot)
+      );
+    }
+
+    if (candidates.length > 1 && (entry?.studies || []).length) {
+      const withStudies = candidates.filter(({ snapshot }) => requiredStudiesPresent(entry, snapshot));
+      if (withStudies.length) candidates = withStudies;
+    }
+
+    if (candidates.length !== 1) {
+      unmatched.push({
+        handle: entry?.handle || null,
+        requested_symbol: entry?.symbol || null,
+        timeframe: entry?.timeframe || null,
+        reason: candidates.length === 0 ? 'not_resident' : 'ambiguous_resident_match',
+        candidate_count: candidates.length,
+      });
+      continue;
+    }
+
+    const chosen = candidates[0];
+    claimed.add(chosen.index);
+    selected.push({
+      ...chosen.snapshot,
+      worker_handle: entry.handle,
+      worker_key: entry.key,
+      worker_groups: entry.groups || [],
+      requested_symbol: entry.symbol,
+      requested_timeframe: entry.timeframe,
+      required_studies: entry.studies || [],
+    });
+  }
+
+  return { snapshots: selected, unmatched };
 }
 
 async function mapLimit(items, limit, fn) {
@@ -295,10 +379,13 @@ async function readTarget(target, options) {
 
 export async function realtimeSnapshot({
   symbols,
+  handles,
+  groups,
   mode,
   bars,
   include_studies,
   study_filters,
+  _worker_deps,
 } = {}) {
   const options = normalizeSnapshotOptions({ mode, bars, include_studies, study_filters });
   const startedAt = Date.now();
@@ -311,7 +398,25 @@ export async function realtimeSnapshot({
   );
 
   const allSnapshots = targetResults.flatMap(target => target.panes || []);
-  const filtered = filterSnapshotsBySymbols(allSnapshots, symbols);
+  const hasWorkerSelector = (Array.isArray(handles) && handles.length > 0)
+    || (Array.isArray(groups) && groups.length > 0);
+  const hasSymbolSelector = Array.isArray(symbols) && symbols.length > 0;
+  if (hasWorkerSelector && hasSymbolSelector) {
+    throw new Error('Use either symbols or worker handles/groups in one realtime_snapshot call, not both');
+  }
+
+  let filtered;
+  let workerSelection = null;
+  let unmatchedWorkerEntries = [];
+  if (hasWorkerSelector) {
+    workerSelection = resolveWorkerSelection({ handles, groups, _deps: _worker_deps });
+    const selected = selectSnapshotsForWorkerEntries(workerSelection.entries, allSnapshots);
+    filtered = { snapshots: selected.snapshots, missing: [] };
+    unmatchedWorkerEntries = selected.unmatched;
+  } else {
+    filtered = filterSnapshotsBySymbols(allSnapshots, symbols);
+  }
+
   const errors = targetResults
     .filter(target => !target.success)
     .map(target => ({
@@ -322,10 +427,20 @@ export async function realtimeSnapshot({
 
   const failedSnapshots = filtered.snapshots.filter(snapshot => !snapshot.success).length;
 
+  const missingHandles = workerSelection?.missing_handles || [];
+  const missingGroups = workerSelection?.missing_groups || [];
+  const workerSelectionComplete = !hasWorkerSelector
+    || (missingHandles.length === 0
+      && missingGroups.length === 0
+      && unmatchedWorkerEntries.length === 0
+      && filtered.snapshots.length === workerSelection.entries.length);
+
   return {
     success: targets.length > 0
       && filtered.missing.length === 0
-      && filtered.snapshots.some(snapshot => snapshot.success),
+      && workerSelectionComplete
+      && filtered.snapshots.length > 0
+      && filtered.snapshots.every(snapshot => snapshot.success),
     mode: options.mode,
     bars_requested: options.bars,
     include_studies: options.includeStudies,
@@ -335,7 +450,12 @@ export async function realtimeSnapshot({
     returned_count: filtered.snapshots.length,
     failed_count: failedSnapshots,
     requested_symbols: Array.isArray(symbols) ? symbols : [],
+    requested_handles: Array.isArray(handles) ? handles : [],
+    requested_groups: Array.isArray(groups) ? groups : [],
     missing: filtered.missing,
+    missing_handles: missingHandles,
+    missing_groups: missingGroups,
+    unmatched_worker_entries: unmatchedWorkerEntries,
     started_at: new Date(startedAt).toISOString(),
     completed_at: new Date().toISOString(),
     duration_ms: Date.now() - startedAt,
