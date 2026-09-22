@@ -64,18 +64,35 @@ function workerTabMap(state) {
   return new Map((state.worker_tabs || []).map(tab => [Number(tab.slot), tab]));
 }
 
-export function recordedTabComplete(plan, state, liveChartIds = new Set()) {
+export function recordedTabComplete(
+  plan,
+  state,
+  liveChartIds = new Set(),
+  liveByChartId = null,
+) {
   const tabs = workerTabMap(state);
   const entries = entryMap(state);
   const owned = tabs.get(Number(plan.tab_index));
   if (!owned?.chart_id || !liveChartIds.has(String(owned.chart_id))) return false;
 
+  const live = liveByChartId?.get?.(String(owned.chart_id)) || null;
+
   return plan.handles.every((handle, paneIndex) => {
-    const assignment = entries.get(handle)?.assignment;
-    return assignment
+    const entry = entries.get(handle);
+    const assignment = entry?.assignment;
+    const assignmentMatches = assignment
       && Number(assignment.worker_slot) === Number(plan.tab_index)
       && String(assignment.chart_id || '') === String(owned.chart_id)
       && Number(assignment.pane_index) === paneIndex;
+
+    if (!assignmentMatches) return false;
+
+    // When live pane inspection is available, persisted assignment metadata is
+    // not enough: verify the chart still contains the requested market state.
+    if (Array.isArray(live?.panes)) {
+      return paneMatchesEntry(entry, live.panes[paneIndex]);
+    }
+    return true;
   });
 }
 
@@ -336,10 +353,8 @@ export async function inspectTargetPaneCounts(targets) {
     try {
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
       await client.Runtime.enable();
-      const paneCount = await evaluateValue(
-        client,
-        'window.TradingViewApi && window.TradingViewApi._chartWidgetCollection && window.TradingViewApi._chartWidgetCollection.getAll ? window.TradingViewApi._chartWidgetCollection.getAll().length : 0',
-      );
+      const panes = await evaluateValue(client, readPaneStatesExpression());
+      const paneCount = Array.isArray(panes) ? panes.length : 0;
       if (!Number.isInteger(Number(paneCount)) || Number(paneCount) < 1) {
         throw new Error('Chart target has no active panes');
       }
@@ -347,6 +362,7 @@ export async function inspectTargetPaneCounts(targets) {
         target_id: target.id,
         chart_id: chartIdFromTarget(target),
         pane_count: Number(paneCount),
+        panes,
       });
     } finally {
       try { if (client) await client.close(); } catch { /* best effort */ }
@@ -463,10 +479,15 @@ export async function provisionWorker({
   }
 
   const liveChartIds = new Set(liveTargets.map(chartIdFromTarget).filter(Boolean).map(String));
+  const liveByChartId = new Map(
+    inspectedTargets
+      .filter(item => item.chart_id)
+      .map(item => [String(item.chart_id), item]),
+  );
   const ownedBySlot = workerTabMap(state);
 
   const pending = topology.tabs.filter(plan =>
-    force || !recordedTabComplete(plan, state, liveChartIds)
+    force || !recordedTabComplete(plan, state, liveChartIds, liveByChartId)
   );
 
   const staleOwned = (state.worker_tabs || []).filter(tab =>
@@ -542,6 +563,8 @@ export async function provisionWorker({
           chart_id: chartId,
           pane_index: index,
           layout_name: opened.layoutName,
+          resolved_symbol: configured.verified?.[index]?.resolved_symbol || null,
+          resolution: configured.verified?.[index]?.resolution || null,
           provisioned_at: new Date(deps.now()).toISOString(),
         };
       }
@@ -570,8 +593,14 @@ export async function provisionWorker({
   // recorded assignment. Never close unrelated TradingView tabs.
   const afterTargets = await deps.listTargets();
   const afterIds = new Set(afterTargets.map(chartIdFromTarget).filter(Boolean).map(String));
+  const afterInspected = await deps.inspectTargets(afterTargets);
+  const afterByChartId = new Map(
+    afterInspected
+      .filter(item => item.chart_id)
+      .map(item => [String(item.chart_id), item]),
+  );
   const recordedRemaining = state.topology_plan.tabs.filter(plan =>
-    !recordedTabComplete(plan, state, afterIds)
+    !recordedTabComplete(plan, state, afterIds, afterByChartId)
   );
   const processedSlots = new Set(results.filter(result => result.success).map(result => Number(result.tab_index)));
   const forcedRemaining = force
