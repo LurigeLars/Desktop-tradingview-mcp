@@ -2,11 +2,19 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/worker.js';
 
+const studySchema = z.union([
+  z.string(),
+  z.object({
+    name: z.string(),
+    inputs: z.record(z.string(), z.unknown()).optional(),
+  }),
+]);
+
 const entrySchema = z.object({
   handle: z.string().optional().describe('Optional stable logical handle. Omit for a deterministic generated handle.'),
   symbol: z.string().describe('TradingView symbol or expression. Treated as opaque market input.'),
   timeframe: z.string().describe('TradingView timeframe/resolution for this resident entry.'),
-  studies: z.array(z.string()).optional().describe('Optional visible study names required by this entry.'),
+  studies: z.array(studySchema).optional().describe('Optional studies. Use a name string or {name, inputs} for parameterized instances.'),
   groups: z.array(z.string()).optional().describe('Optional logical groups/trade contexts containing this entry.'),
 });
 
