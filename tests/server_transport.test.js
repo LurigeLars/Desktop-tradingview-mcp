@@ -34,6 +34,57 @@ test('HTTP transport defaults abandoned sessions to a five-minute idle timeout',
   assert.equal(resolveHttpConfig().sessionIdleMs, 5 * 60 * 1000);
 });
 
+async function initializeTestSession(runtime, clientName = 'session-test') {
+  const response = await fetch(runtime.url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: clientName, version: '1.0.0' },
+      },
+    }),
+  });
+  return {
+    status: response.status,
+    sessionId: response.headers.get('mcp-session-id'),
+    body: await response.json(),
+  };
+}
+
+test('HTTP transport rejects new sessions at the configured capacity', async () => {
+  const runtime = await startTradingViewHttpServer({
+    host: '127.0.0.1',
+    port: 0,
+    maxSessions: 2,
+    sessionIdleMs: 60_000,
+  });
+
+  try {
+    const first = await initializeTestSession(runtime, 'session-capacity-1');
+    const second = await initializeTestSession(runtime, 'session-capacity-2');
+
+    assert.equal(first.status, 200);
+    assert.ok(first.sessionId);
+    assert.equal(second.status, 200);
+    assert.ok(second.sessionId);
+    assert.equal(runtime.sessionCount(), 2);
+
+    const blocked = await initializeTestSession(runtime, 'session-capacity-3');
+    assert.equal(blocked.status, 503);
+    assert.equal(blocked.body.error?.message, 'Too many active MCP sessions');
+  } finally {
+    await runtime.close();
+  }
+});
+
 test('HTTP transport automatically reclaims abandoned sessions after the idle timeout', async () => {
   const runtime = await startTradingViewHttpServer({
     host: '127.0.0.1',
@@ -42,49 +93,16 @@ test('HTTP transport automatically reclaims abandoned sessions after the idle ti
     sessionIdleMs: 40,
   });
 
-  const initialize = async () => {
-    const response = await fetch(runtime.url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-03-26',
-          capabilities: {},
-          clientInfo: { name: 'session-cleanup-test', version: '1.0.0' },
-        },
-      }),
-    });
-    return {
-      status: response.status,
-      sessionId: response.headers.get('mcp-session-id'),
-      body: await response.json(),
-    };
-  };
-
   try {
-    const first = await initialize();
-    const second = await initialize();
+    const created = await initializeTestSession(runtime, 'session-cleanup');
+    assert.equal(created.status, 200);
+    assert.ok(created.sessionId);
+    assert.equal(runtime.sessionCount(), 1);
 
-    assert.equal(first.status, 200);
-    assert.ok(first.sessionId);
-    assert.equal(second.status, 200);
-    assert.ok(second.sessionId);
-    assert.equal(runtime.sessionCount(), 2);
-
-    const blocked = await initialize();
-    assert.equal(blocked.status, 503);
-    assert.equal(blocked.body.error?.message, 'Too many active MCP sessions');
-
-    await new Promise(resolvePromise => setTimeout(resolvePromise, 120));
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 160));
     assert.equal(runtime.sessionCount(), 0);
 
-    const recovered = await initialize();
+    const recovered = await initializeTestSession(runtime, 'session-recovered');
     assert.equal(recovered.status, 200);
     assert.ok(recovered.sessionId);
   } finally {
