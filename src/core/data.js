@@ -481,13 +481,13 @@ async function _getQuoteInternal({ symbol } = {}) {
         var lpTime = finite(live.lp_time);
         quote.source_timestamp = lpTime;
         quote.source_timestamp_ms = lpTime == null ? null : lpTime * 1000;
-        quote.age_ms = lpTime == null ? null : Math.max(0, retrievedAtMs - lpTime * 1000);
+        quote.age_at_retrieval_ms = lpTime == null ? null : Math.max(0, retrievedAtMs - lpTime * 1000);
 
         quote.rtc = finite(live.rtc);
         var rtcTime = finite(live.rtc_time);
         quote.rtc_timestamp = rtcTime;
         quote.rtc_timestamp_ms = rtcTime == null ? null : rtcTime * 1000;
-        quote.rtc_age_ms = rtcTime == null ? null : Math.max(0, retrievedAtMs - rtcTime * 1000);
+        quote.rtc_age_at_retrieval_ms = rtcTime == null ? null : Math.max(0, retrievedAtMs - rtcTime * 1000);
 
         quote.update_mode = live.update_mode == null ? null : String(live.update_mode);
         quote.current_session = live.current_session == null ? null : String(live.current_session);
@@ -509,6 +509,9 @@ async function _getQuoteInternal({ symbol } = {}) {
             ? 'realtime'
             : 'unknown');
         quote.source = Object.keys(live).length ? 'resident_quote_state' : 'current_bar_fallback';
+        quote.freshness_scope = 'dtv_retrieval';
+        quote.transport_turnaround_included = false;
+        quote.end_to_end_freshness = 'unknown';
 
         if (ext.description) quote.description = ext.description;
         if (ext.exchange) quote.exchange = ext.exchange;
