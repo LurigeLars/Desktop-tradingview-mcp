@@ -64,19 +64,71 @@ export function ageMsFromEpochSeconds(timestamp, retrievedAtMs) {
   return Math.max(0, Math.round(retrievedAtMs - timestamp * 1000));
 }
 
+export function freshnessFromAge(ageMs, staleAfterMs = 5000) {
+  if (!Number.isFinite(ageMs)) return 'unknown';
+  return ageMs > staleAfterMs ? 'stale' : 'fresh';
+}
+
 export function filterSnapshotsBySymbols(snapshots, requestedSymbols) {
   const requested = Array.isArray(requestedSymbols)
     ? requestedSymbols.map(value => String(value).trim()).filter(Boolean)
     : [];
   if (requested.length === 0) {
-    return { snapshots, missing: [] };
+    return { snapshots, missing: [], ambiguous: [] };
   }
 
-  const wanted = new Set(requested.map(value => value.toUpperCase()));
-  const matched = snapshots.filter(item => wanted.has(String(item.resolved_symbol || '').toUpperCase()));
-  const found = new Set(matched.map(item => String(item.resolved_symbol || '').toUpperCase()));
-  const missing = requested.filter(value => !found.has(value.toUpperCase()));
-  return { snapshots: matched, missing };
+  const all = snapshots || [];
+  const resolvedValues = [...new Set(
+    all
+      .map(item => String(item.resolved_symbol || '').trim())
+      .filter(Boolean)
+  )];
+
+  const selectedIndexes = new Set();
+  const missing = [];
+  const ambiguous = [];
+
+  for (const request of requested) {
+    const exact = all
+      .map((snapshot, index) => ({ snapshot, index }))
+      .filter(({ snapshot }) =>
+        String(snapshot.resolved_symbol || '').toUpperCase() === request.toUpperCase()
+      );
+
+    if (exact.length) {
+      exact.forEach(({ index }) => selectedIndexes.add(index));
+      continue;
+    }
+
+    const resolved = matchWatchlistSymbol(request, resolvedValues);
+    if (resolved.matched) {
+      all.forEach((snapshot, index) => {
+        if (String(snapshot.resolved_symbol || '').toUpperCase() === resolved.matched.toUpperCase()) {
+          selectedIndexes.add(index);
+        }
+      });
+      continue;
+    }
+
+    if (resolved.verification === 'ambiguous_bare_ticker') {
+      ambiguous.push({
+        requested_symbol: request,
+        candidates: resolvedValues.filter(value => {
+          const suffix = value.split(':').pop();
+          return suffix && suffix.toUpperCase() === request.toUpperCase();
+        }),
+      });
+      continue;
+    }
+
+    missing.push(request);
+  }
+
+  return {
+    snapshots: all.filter((_, index) => selectedIndexes.has(index)),
+    missing,
+    ambiguous,
+  };
 }
 
 function normalizedResolution(value) {
@@ -481,9 +533,14 @@ export async function realtimeSnapshot({
   bars,
   include_studies,
   study_filters,
+  stale_after_ms = 5000,
   _worker_deps,
 } = {}) {
   const options = normalizeSnapshotOptions({ mode, bars, include_studies, study_filters });
+  const staleAfterMs = Number(stale_after_ms);
+  if (!Number.isFinite(staleAfterMs) || staleAfterMs < 0) {
+    throw new Error('stale_after_ms must be a non-negative number');
+  }
   const startedAt = Date.now();
   const targets = await listTradingViewChartTargets();
 
@@ -493,7 +550,20 @@ export async function realtimeSnapshot({
     target => readTarget(target, options),
   );
 
-  const allSnapshots = targetResults.flatMap(target => target.panes || []);
+  const allSnapshots = targetResults.flatMap(target => target.panes || []).map(snapshot => ({
+    ...snapshot,
+    retrieved_at: Number.isFinite(snapshot.retrieved_at_ms)
+      ? new Date(snapshot.retrieved_at_ms).toISOString()
+      : null,
+    quote: snapshot.quote
+      ? {
+          ...snapshot.quote,
+          freshness: freshnessFromAge(snapshot.quote.age_ms, staleAfterMs),
+          stale_after_ms: staleAfterMs,
+          bid_ask_freshness: 'unknown',
+        }
+      : snapshot.quote,
+  }));
   const hasWorkerSelector = (Array.isArray(handles) && handles.length > 0)
     || (Array.isArray(groups) && groups.length > 0);
   const hasSymbolSelector = Array.isArray(symbols) && symbols.length > 0;
@@ -507,7 +577,7 @@ export async function realtimeSnapshot({
   if (hasWorkerSelector) {
     workerSelection = resolveWorkerSelection({ handles, groups, _deps: _worker_deps });
     const selected = selectSnapshotsForWorkerEntries(workerSelection.entries, allSnapshots);
-    filtered = { snapshots: selected.snapshots, missing: [] };
+    filtered = { snapshots: selected.snapshots, missing: [], ambiguous: [] };
     unmatchedWorkerEntries = selected.unmatched;
   } else {
     filtered = filterSnapshotsBySymbols(allSnapshots, symbols);
@@ -534,6 +604,7 @@ export async function realtimeSnapshot({
   return {
     success: targets.length > 0
       && filtered.missing.length === 0
+      && (filtered.ambiguous?.length || 0) === 0
       && workerSelectionComplete
       && filtered.snapshots.length > 0
       && filtered.snapshots.every(snapshot => snapshot.success),
@@ -541,6 +612,7 @@ export async function realtimeSnapshot({
     bars_requested: options.bars,
     include_studies: options.includeStudies,
     study_filters: options.studyFilters,
+    stale_after_ms: staleAfterMs,
     target_count: targets.length,
     chart_count: allSnapshots.length,
     returned_count: filtered.snapshots.length,
@@ -549,6 +621,7 @@ export async function realtimeSnapshot({
     requested_handles: Array.isArray(handles) ? handles : [],
     requested_groups: Array.isArray(groups) ? groups : [],
     missing: filtered.missing,
+    ambiguous_symbols: filtered.ambiguous || [],
     missing_handles: missingHandles,
     missing_groups: missingGroups,
     unmatched_worker_entries: unmatchedWorkerEntries,
