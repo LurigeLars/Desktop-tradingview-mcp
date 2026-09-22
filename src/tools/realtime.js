@@ -4,7 +4,7 @@ import { realtimeSnapshot } from '../core/realtime.js';
 
 export function registerRealtimeTools(server) {
   server.registerTool('realtime_snapshot', {
-    description: 'Read resident TradingView snapshots without symbol switching. Quote age/freshness is measured at DTV retrieval; gateway/tool turnaround after that point is not included.' ,
+    description: 'Read resident TradingView snapshots without symbol switching. Quote age/freshness is measured at DTV retrieval; gateway/tool turnaround after that point is not included.',
     inputSchema: {
       symbols: z.array(z.string()).optional().describe('Optional symbols/expressions. A bare ticker may resolve to one unique exchange-qualified resident symbol; formulas require exact matching. Do not combine with handles/groups.'),
       handles: z.array(z.string()).optional().describe('Optional logical worker handles from worker_status. Do not combine with symbols.'),
