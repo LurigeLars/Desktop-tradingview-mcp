@@ -309,14 +309,19 @@ export async function newTab({ layout, name } = {}) {
       (function() {
         var q = ${JSON.stringify(String(layout).toLowerCase())};
         var items = document.querySelectorAll('.layout-list-item');
+        var exact = null, contains = null;
         for (var i = 0; i < items.length; i++) {
           var t = items[i].querySelector('.layout-list-item-title');
-          if (t && t.textContent.trim().toLowerCase().indexOf(q) !== -1) {
-            items[i].click();
-            return t.textContent.trim();
-          }
+          if (!t) continue;
+          var title = t.textContent.trim();
+          var lower = title.toLowerCase();
+          if (lower === q && !exact) exact = { item: items[i], title: title };
+          else if (lower.indexOf(q) !== -1 && !contains) contains = { item: items[i], title: title };
         }
-        return null;
+        var pick = exact || contains;
+        if (!pick) return null;
+        pick.item.click();
+        return pick.title;
       })()
     `;
     let foundTitle = await evalIn(clickByTitle);
