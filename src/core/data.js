@@ -509,9 +509,8 @@ async function _getQuoteInternal({ symbol } = {}) {
             ? 'realtime'
             : 'unknown');
         quote.source = Object.keys(live).length ? 'resident_quote_state' : 'current_bar_fallback';
-        quote.freshness_scope = 'dtv_retrieval';
+        quote.freshness_basis = 'source_timestamp_vs_dtv_retrieval';
         quote.transport_turnaround_included = false;
-        quote.end_to_end_freshness = 'unknown';
 
         if (ext.description) quote.description = ext.description;
         if (ext.exchange) quote.exchange = ext.exchange;
