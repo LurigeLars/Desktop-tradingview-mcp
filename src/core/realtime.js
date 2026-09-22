@@ -52,6 +52,18 @@ export function realtimeStatusFromDelay(delayMinutes) {
   return 'unknown';
 }
 
+export function realtimeStatusFromQuote({ is_delay, update_mode, delay_minutes } = {}) {
+  if (is_delay === true) return 'delayed';
+  if (is_delay === false) return 'realtime';
+  if (String(update_mode || '').toLowerCase() === 'streaming') return 'realtime';
+  return realtimeStatusFromDelay(delay_minutes);
+}
+
+export function ageMsFromEpochSeconds(timestamp, retrievedAtMs) {
+  if (!Number.isFinite(timestamp) || !Number.isFinite(retrievedAtMs)) return null;
+  return Math.max(0, Math.round(retrievedAtMs - timestamp * 1000));
+}
+
 export function filterSnapshotsBySymbols(snapshots, requestedSymbols) {
   const requested = Array.isArray(requestedSymbols)
     ? requestedSymbols.map(value => String(value).trim()).filter(Boolean)
@@ -300,34 +312,98 @@ function buildTargetExpression({ bars, includeStudies, studyFilters }) {
           }
 
           var currentBar = recentBars.length ? recentBars[recentBars.length - 1] : null;
+
+          // Read TradingView's already-resident watched quote state. This does
+          // not create a quote session and does not switch any symbol/pane.
+          var live = {};
+          try {
+            var provider = series.quotesProvider ? series.quotesProvider() : null;
+            var watched = provider && provider.quotes ? provider.quotes() : null;
+            live = watched && typeof watched.value === 'function' ? watched.value() : {};
+          } catch(e) {}
+          if (!live || typeof live !== 'object' || Object.keys(live).length === 0) {
+            try { live = series.quotes ? series.quotes() : {}; } catch(e) { live = {}; }
+          }
+          if (!live || typeof live !== 'object') live = {};
+
+          var last = finiteOrNull(live.last_price);
+          if (last == null) last = finiteOrNull(live.lp);
+          if (last == null && currentBar) last = finiteOrNull(currentBar.close);
+
+          var bid = finiteOrNull(live.bid);
+          var ask = finiteOrNull(live.ask);
+          var bidSize = finiteOrNull(live.bid_size);
+          var askSize = finiteOrNull(live.ask_size);
+          var spread = bid != null && ask != null ? ask - bid : null;
+          var mid = bid != null && ask != null ? (bid + ask) / 2 : null;
+          var spreadBps = spread != null && mid ? spread / mid * 10000 : null;
+
+          var lpTime = finiteOrNull(live.lp_time);
+          var rtcTime = finiteOrNull(live.rtc_time);
+          var isDelay = null;
+          try {
+            var updateModel = series.dataUpdatedModeModel ? series.dataUpdatedModeModel() : null;
+            if (updateModel && typeof updateModel.isDelay === 'function') isDelay = !!updateModel.isDelay();
+          } catch(e) {}
+
+          var updateMode = live.update_mode == null ? null : String(live.update_mode);
+          var currentSession = live.current_session == null ? null : String(live.current_session);
+          if (!currentSession) {
+            try { currentSession = series.currentSession ? series.currentSession() : null; } catch(e) {}
+          }
+
+          var realtimeStatus = 'unknown';
+          if (isDelay === true) realtimeStatus = 'delayed';
+          else if (isDelay === false) realtimeStatus = 'realtime';
+          else if (String(updateMode || '').toLowerCase() === 'streaming') realtimeStatus = 'realtime';
+          else if (delayMinutes === 0) realtimeStatus = 'realtime';
+          else if (delayMinutes > 0) realtimeStatus = 'delayed';
+
+          var quote = {
+            last: last,
+            bid: bid,
+            ask: ask,
+            bid_size: bidSize,
+            ask_size: askSize,
+            spread: spread,
+            spread_bps: spreadBps,
+            change: finiteOrNull(live.change),
+            change_percent: finiteOrNull(live.change_percent),
+            volume: finiteOrNull(live.volume),
+            source_timestamp: lpTime,
+            source_timestamp_ms: lpTime == null ? null : lpTime * 1000,
+            age_ms: lpTime == null ? null : Math.max(0, retrievedAtMs - lpTime * 1000),
+            rtc: finiteOrNull(live.rtc),
+            rtc_timestamp: rtcTime,
+            rtc_timestamp_ms: rtcTime == null ? null : rtcTime * 1000,
+            rtc_age_ms: rtcTime == null ? null : Math.max(0, retrievedAtMs - rtcTime * 1000),
+            update_mode: updateMode,
+            current_session: currentSession,
+            is_delay: isDelay,
+            source: Object.keys(live).length ? 'resident_quote_state' : 'current_bar_fallback',
+          };
+
+          var hasMarketData = quote.last != null || !!currentBar;
           panes.push({
             pane_index: i,
-            success: !!(symbol && currentBar),
+            success: !!(symbol && hasMarketData),
             resolved_symbol: symbol,
             resolution: resolution,
-            quote: {
-              last: currentBar ? currentBar.close : null,
-              bid: null,
-              ask: null,
-              spread: null,
-              spread_bps: null,
-              source_timestamp: null,
-              age_ms: null,
-            },
+            quote: quote,
             current_bar: currentBar,
             recent_bars: recentBars,
             studies: readStudies(chart),
             metadata: {
               exchange: info.exchange || info.listed_exchange || null,
               instrument_type: info.type || null,
-              market_session: info.session || null,
+              market_session: currentSession || info.session || null,
               timezone: info.timezone || null,
               delay_minutes: delayMinutes,
-              realtime_status: delayMinutes === 0 ? 'realtime' : (delayMinutes > 0 ? 'delayed' : 'unknown'),
+              realtime_status: realtimeStatus,
               bar_time_is_period_start: true,
             },
             retrieved_at_ms: retrievedAtMs,
-            error: symbol && currentBar ? null : 'Symbol or current bar unavailable',
+            error: symbol && hasMarketData ? null : 'Symbol and quote/current bar unavailable',
           });
         } catch(e) {
           panes.push({ pane_index: i, success: false, error: e && e.message ? e.message : String(e) });
