@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { CDP_PORT, isTradingViewUrl } from '../src/connection.js';
 import {
+  DEFAULT_SESSION_IDLE_MS,
   resolveHttpConfig,
   startTradingViewHttpServer,
 } from '../src/server/http.js';
@@ -26,6 +27,69 @@ test('HTTP transport refuses non-loopback binds', () => {
     () => resolveHttpConfig({ host: '0.0.0.0' }),
     /Refusing non-loopback HTTP bind host/
   );
+});
+
+test('HTTP transport defaults abandoned sessions to a five-minute idle timeout', () => {
+  assert.equal(DEFAULT_SESSION_IDLE_MS, 5 * 60 * 1000);
+  assert.equal(resolveHttpConfig().sessionIdleMs, 5 * 60 * 1000);
+});
+
+test('HTTP transport automatically reclaims abandoned sessions after the idle timeout', async () => {
+  const runtime = await startTradingViewHttpServer({
+    host: '127.0.0.1',
+    port: 0,
+    maxSessions: 2,
+    sessionIdleMs: 40,
+  });
+
+  const initialize = async () => {
+    const response = await fetch(runtime.url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-03-26',
+          capabilities: {},
+          clientInfo: { name: 'session-cleanup-test', version: '1.0.0' },
+        },
+      }),
+    });
+    return {
+      status: response.status,
+      sessionId: response.headers.get('mcp-session-id'),
+      body: await response.json(),
+    };
+  };
+
+  try {
+    const first = await initialize();
+    const second = await initialize();
+
+    assert.equal(first.status, 200);
+    assert.ok(first.sessionId);
+    assert.equal(second.status, 200);
+    assert.ok(second.sessionId);
+    assert.equal(runtime.sessionCount(), 2);
+
+    const blocked = await initialize();
+    assert.equal(blocked.status, 503);
+    assert.equal(blocked.body.error?.message, 'Too many active MCP sessions');
+
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 120));
+    assert.equal(runtime.sessionCount(), 0);
+
+    const recovered = await initialize();
+    assert.equal(recovered.status, 200);
+    assert.ok(recovered.sessionId);
+  } finally {
+    await runtime.close();
+  }
 });
 
 test('HTTP transport exposes the complete tool surface with explicit safety annotations and no output schemas', async () => {
