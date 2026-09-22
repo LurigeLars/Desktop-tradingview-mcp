@@ -51,6 +51,7 @@ function resolveDeps(overrides) {
     newTab: overrides?.newTab || tabCore.newTab,
     closeTabByChartId: overrides?.closeTabByChartId || closeTabByChartId,
     configureTarget: overrides?.configureTarget || configureTarget,
+    inspectTargets: overrides?.inspectTargets || inspectTargetPaneCounts,
     now: overrides?.now || (() => Date.now()),
   };
 }
@@ -328,6 +329,32 @@ async function findTargetForChartId(chartId, targets = null, listTargets = listT
   return available.find(target => String(chartIdFromTarget(target)) === String(chartId)) || null;
 }
 
+export async function inspectTargetPaneCounts(targets) {
+  const results = [];
+  for (const target of targets || []) {
+    let client = null;
+    try {
+      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
+      await client.Runtime.enable();
+      const paneCount = await evaluateValue(
+        client,
+        'window.TradingViewApi && window.TradingViewApi._chartWidgetCollection && window.TradingViewApi._chartWidgetCollection.getAll ? window.TradingViewApi._chartWidgetCollection.getAll().length : 0',
+      );
+      if (!Number.isInteger(Number(paneCount)) || Number(paneCount) < 1) {
+        throw new Error('Chart target has no active panes');
+      }
+      results.push({
+        target_id: target.id,
+        chart_id: chartIdFromTarget(target),
+        pane_count: Number(paneCount),
+      });
+    } finally {
+      try { if (client) await client.close(); } catch { /* best effort */ }
+    }
+  }
+  return results;
+}
+
 async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTargets }) {
   if (owned?.chart_id) {
     const live = await findTargetForChartId(owned.chart_id, liveTargets);
@@ -380,6 +407,7 @@ export async function provisionWorker({
   max_tabs = 1,
   dry_run = false,
   force = false,
+  adopt_single_existing = false,
   layout_prefix,
   _deps,
 } = {}) {
@@ -393,6 +421,47 @@ export async function provisionWorker({
   const topology = state.topology_plan;
   const byHandle = entryMap(state);
   const liveTargets = await deps.listTargets();
+  const inspectedTargets = await deps.inspectTargets(liveTargets);
+  const ownedChartIds = new Set(
+    (state.worker_tabs || []).map(tab => String(tab.chart_id || '')).filter(Boolean),
+  );
+
+  let externalTargets = inspectedTargets.filter(item => !ownedChartIds.has(String(item.chart_id || '')));
+  let adoptionCandidate = null;
+
+  if (adopt_single_existing && topology.tabs.length > 0 && (state.worker_tabs || []).length === 0) {
+    if (externalTargets.length !== 1) {
+      throw new Error(
+        'adopt_single_existing requires exactly one non-worker TradingView chart target; found ' +
+        externalTargets.length,
+      );
+    }
+    adoptionCandidate = externalTargets[0];
+    externalTargets = [];
+  }
+
+  const externalConnections = externalTargets.reduce((sum, item) => sum + Number(item.pane_count || 0), 0);
+  const usableCapacity = Number(state.usable_capacity);
+  const projectedConnections = externalConnections + Number(state.configured || 0);
+  if (projectedConnections > usableCapacity) {
+    throw new Error(
+      'Worker capacity exceeded: ' + projectedConnections + ' projected chart connections (' +
+      externalConnections + ' external + ' + state.configured + ' worker) exceed ' +
+      usableCapacity + ' usable slots',
+    );
+  }
+
+  if (adoptionCandidate && !dry_run) {
+    const adoptedTabs = [{
+      slot: 0,
+      chart_id: adoptionCandidate.chart_id,
+      layout_name: null,
+      pane_count: adoptionCandidate.pane_count,
+      adopted: true,
+    }];
+    state = deps.record({ worker_tabs: adoptedTabs });
+  }
+
   const liveChartIds = new Set(liveTargets.map(chartIdFromTarget).filter(Boolean).map(String));
   const ownedBySlot = workerTabMap(state);
 
@@ -411,6 +480,15 @@ export async function provisionWorker({
       topology,
       pending_tabs: pending.map(plan => plan.tab_index),
       stale_worker_tabs: staleOwned,
+      capacity_projection: {
+        capacity: state.capacity,
+        reserve_slots: state.reserve_slots,
+        usable_capacity: usableCapacity,
+        external_connections: externalConnections,
+        worker_connections: state.configured,
+        projected_connections: projectedConnections,
+      },
+      adoption_candidate: adoptionCandidate,
     };
   }
 
@@ -537,6 +615,17 @@ export async function provisionWorker({
     remaining_tabs: remaining.map(plan => plan.tab_index),
     results,
     cleanup,
+    capacity_projection: {
+      capacity: state.capacity,
+      reserve_slots: state.reserve_slots,
+      usable_capacity: usableCapacity,
+      external_connections: externalConnections,
+      worker_connections: state.configured,
+      projected_connections: projectedConnections,
+    },
+    adopted_existing: adoptionCandidate
+      ? { chart_id: adoptionCandidate.chart_id, pane_count: adoptionCandidate.pane_count }
+      : null,
     status: state,
   };
 }
