@@ -403,7 +403,14 @@ async function _getQuoteInternal({ symbol } = {}) {
     const data = await evaluate(`
       (function() {
         var retrievedAtMs = Date.now();
-        var api = ${CHART_API};
+        var api = null;
+        try {
+          var exposed = window._exposed_chartWidgetCollection;
+          if (exposed && exposed.activeChartWidget && typeof exposed.activeChartWidget.value === 'function') {
+            api = exposed.activeChartWidget.value();
+          }
+        } catch(e) {}
+        if (!api) api = ${CHART_API};
         var sym = '';
         try { sym = api.symbol(); } catch(e) {}
         if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
