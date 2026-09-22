@@ -8,6 +8,7 @@
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 const SIMPLE_BARE_SYMBOL_RE = /^[A-Z0-9_.!]+$/i;
+const SIMPLE_QUALIFIED_SYMBOL_RE = /^[A-Z0-9_.]+:[A-Z0-9_.!]+$/i;
 
 export function isBareSymbolRequest(symbol) {
   const value = String(symbol ?? '').trim();
@@ -32,6 +33,7 @@ export function matchWatchlistSymbol(requestedSymbol, candidates) {
   }
 
   const suffixMatches = symbols.filter(symbol => {
+    if (!SIMPLE_QUALIFIED_SYMBOL_RE.test(symbol)) return false;
     const suffix = symbol.split(':').pop();
     return suffix && suffix.toUpperCase() === normalized;
   });
