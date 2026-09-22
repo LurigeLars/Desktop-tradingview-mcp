@@ -433,14 +433,29 @@ export async function provisionWorker({
         liveTargets: await deps.listTargets(),
       });
 
+      const chartId = chartIdFromTarget(opened.target);
+      if (!chartId) throw new Error('Worker target has no stable TradingView chart id');
+
+      const tabs = [
+        ...(state.worker_tabs || []).filter(tab => Number(tab.slot) !== Number(plan.tab_index)),
+        {
+          slot: Number(plan.tab_index),
+          chart_id: chartId,
+          layout_name: opened.layoutName,
+          pane_count: plan.pane_count,
+        },
+      ].sort((a, b) => Number(a.slot) - Number(b.slot));
+
+      // Persist ownership before mutating the chart. If configuration fails,
+      // the next provisioning call can safely reuse/repair this DTV-owned tab
+      // instead of leaking an untracked connection.
+      state = deps.record({ worker_tabs: tabs });
+
       const configured = await deps.configureTarget({
         target: opened.target,
         paneCount: plan.pane_count,
         entries,
       });
-
-      const chartId = chartIdFromTarget(opened.target);
-      if (!chartId) throw new Error('Worker target has no stable TradingView chart id');
 
       const assignments = {};
       for (let index = 0; index < entries.length; index++) {
@@ -452,16 +467,6 @@ export async function provisionWorker({
           provisioned_at: new Date(deps.now()).toISOString(),
         };
       }
-
-      const tabs = [
-        ...(state.worker_tabs || []).filter(tab => Number(tab.slot) !== Number(plan.tab_index)),
-        {
-          slot: Number(plan.tab_index),
-          chart_id: chartId,
-          layout_name: opened.layoutName,
-          pane_count: plan.pane_count,
-        },
-      ].sort((a, b) => Number(a.slot) - Number(b.slot));
 
       state = deps.record({ assignments, worker_tabs: tabs });
       results.push({
