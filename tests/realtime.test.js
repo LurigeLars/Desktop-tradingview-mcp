@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   normalizeSnapshotOptions,
   realtimeStatusFromDelay,
+  realtimeStatusFromQuote,
+  ageMsFromEpochSeconds,
   filterSnapshotsBySymbols,
   selectSnapshotsForWorkerEntries,
 } from '../src/core/realtime.js';
@@ -36,6 +38,20 @@ test('realtime status is only inferred when TradingView exposes numeric delay', 
   assert.equal(realtimeStatusFromDelay(15), 'delayed');
   assert.equal(realtimeStatusFromDelay(null), 'unknown');
   assert.equal(realtimeStatusFromDelay(undefined), 'unknown');
+});
+
+test('resident quote realtime status prefers TradingView live mode signals', () => {
+  assert.equal(realtimeStatusFromQuote({ is_delay: false }), 'realtime');
+  assert.equal(realtimeStatusFromQuote({ update_mode: 'streaming' }), 'realtime');
+  assert.equal(realtimeStatusFromQuote({ is_delay: true, update_mode: 'streaming' }), 'delayed');
+  assert.equal(realtimeStatusFromQuote({ delay_minutes: 15 }), 'delayed');
+  assert.equal(realtimeStatusFromQuote({}), 'unknown');
+});
+
+test('quote age converts TradingView epoch seconds to retrieval milliseconds', () => {
+  assert.equal(ageMsFromEpochSeconds(1000, 1002500), 2500);
+  assert.equal(ageMsFromEpochSeconds(1005, 1002500), 0, 'future timestamps clamp at zero');
+  assert.equal(ageMsFromEpochSeconds(null, 1002500), null);
 });
 
 test('symbol filtering is exact and never collapses expressions', () => {

@@ -3,6 +3,7 @@
  */
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
+import { matchWatchlistSymbol } from './watchlist.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -382,8 +383,8 @@ async function _getQuoteInternal({ symbol } = {}) {
 
   if (requested) {
     try { originalSymbol = await evaluate(`${CHART_API}.symbol()`); } catch (e) {}
-    const bare = (s) => (s || '').toString().split(':').pop().toUpperCase();
-    if (bare(originalSymbol) !== bare(requested)) {
+    const currentMatch = matchWatchlistSymbol(requested, [originalSymbol]);
+    if (!currentMatch.matched) {
       needsRestore = true;
       await evaluateAsync(`
         (function() {
@@ -401,28 +402,114 @@ async function _getQuoteInternal({ symbol } = {}) {
   try {
     const data = await evaluate(`
       (function() {
-        var api = ${CHART_API};
+        var retrievedAtMs = Date.now();
+        var api = null;
+        try {
+          var exposed = window._exposed_chartWidgetCollection;
+          if (exposed && exposed.activeChartWidget && typeof exposed.activeChartWidget.value === 'function') {
+            api = exposed.activeChartWidget.value();
+          }
+        } catch(e) {}
+        if (!api) api = ${CHART_API};
         var sym = '';
         try { sym = api.symbol(); } catch(e) {}
         if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
         var ext = {};
         try { ext = api.symbolExt() || {}; } catch(e) {}
         var bars = ${BARS_PATH};
-        var quote = { symbol: sym };
+        var quote = { symbol: sym, retrieved_at_ms: retrievedAtMs };
+
         if (bars && typeof bars.lastIndex === 'function') {
-          var last = bars.valueAt(bars.lastIndex());
-          if (last) { quote.time = last[0]; quote.open = last[1]; quote.high = last[2]; quote.low = last[3]; quote.close = last[4]; quote.last = last[4]; quote.volume = last[5] || 0; }
+          var bar = bars.valueAt(bars.lastIndex());
+          if (bar) {
+            quote.time = bar[0];
+            quote.open = bar[1];
+            quote.high = bar[2];
+            quote.low = bar[3];
+            quote.close = bar[4];
+            quote.last = bar[4];
+            quote.volume = bar[5] || 0;
+          }
         }
+
+        var series = null;
         try {
-          var bidEl = document.querySelector('[class*="bid"] [class*="price"], [class*="dom-"] [class*="bid"]');
-          var askEl = document.querySelector('[class*="ask"] [class*="price"], [class*="dom-"] [class*="ask"]');
-          if (bidEl) quote.bid = parseFloat(bidEl.textContent.replace(/[^0-9.\\-]/g, ''));
-          if (askEl) quote.ask = parseFloat(askEl.textContent.replace(/[^0-9.\\-]/g, ''));
+          var model = api.model ? api.model() : null;
+          series = model && model.mainSeries ? model.mainSeries() : null;
+          if (!series && api._chartWidget && api._chartWidget.model) {
+            series = api._chartWidget.model().mainSeries();
+          }
         } catch(e) {}
-        try {
-          var hdr = document.querySelector('[class*="headerRow"] [class*="last-"]');
-          if (hdr) { var hdrPrice = parseFloat(hdr.textContent.replace(/[^0-9.\\-]/g, '')); if (!isNaN(hdrPrice)) quote.header_price = hdrPrice; }
-        } catch(e) {}
+
+        var live = {};
+        if (series) {
+          try {
+            var provider = series.quotesProvider ? series.quotesProvider() : null;
+            var watched = provider && provider.quotes ? provider.quotes() : null;
+            live = watched && typeof watched.value === 'function' ? watched.value() : {};
+          } catch(e) {}
+          if (!live || typeof live !== 'object' || Object.keys(live).length === 0) {
+            try { live = series.quotes ? series.quotes() : {}; } catch(e) { live = {}; }
+          }
+        }
+        if (!live || typeof live !== 'object') live = {};
+
+        function finite(value) {
+          return typeof value === 'number' && isFinite(value) ? value : null;
+        }
+
+        var lastPrice = finite(live.last_price);
+        if (lastPrice == null) lastPrice = finite(live.lp);
+        if (lastPrice != null) quote.last = lastPrice;
+
+        var bid = finite(live.bid);
+        var ask = finite(live.ask);
+        if (bid != null) quote.bid = bid;
+        if (ask != null) quote.ask = ask;
+        if (finite(live.bid_size) != null) quote.bid_size = finite(live.bid_size);
+        if (finite(live.ask_size) != null) quote.ask_size = finite(live.ask_size);
+        if (bid != null && ask != null) {
+          quote.spread = ask - bid;
+          var mid = (ask + bid) / 2;
+          quote.spread_bps = mid ? (ask - bid) / mid * 10000 : null;
+        }
+
+        if (finite(live.change) != null) quote.change = finite(live.change);
+        if (finite(live.change_percent) != null) quote.change_percent = finite(live.change_percent);
+        if (finite(live.volume) != null) quote.volume = finite(live.volume);
+
+        var lpTime = finite(live.lp_time);
+        quote.source_timestamp = lpTime;
+        quote.source_timestamp_ms = lpTime == null ? null : lpTime * 1000;
+        quote.age_ms = lpTime == null ? null : Math.max(0, retrievedAtMs - lpTime * 1000);
+
+        quote.rtc = finite(live.rtc);
+        var rtcTime = finite(live.rtc_time);
+        quote.rtc_timestamp = rtcTime;
+        quote.rtc_timestamp_ms = rtcTime == null ? null : rtcTime * 1000;
+        quote.rtc_age_ms = rtcTime == null ? null : Math.max(0, retrievedAtMs - rtcTime * 1000);
+
+        quote.update_mode = live.update_mode == null ? null : String(live.update_mode);
+        quote.current_session = live.current_session == null ? null : String(live.current_session);
+
+        var isDelay = null;
+        if (series) {
+          try {
+            var updateModel = series.dataUpdatedModeModel ? series.dataUpdatedModeModel() : null;
+            if (updateModel && typeof updateModel.isDelay === 'function') isDelay = !!updateModel.isDelay();
+          } catch(e) {}
+          if (!quote.current_session) {
+            try { quote.current_session = series.currentSession ? series.currentSession() : null; } catch(e) {}
+          }
+        }
+        quote.is_delay = isDelay;
+        quote.realtime_status = isDelay === true
+          ? 'delayed'
+          : (isDelay === false || String(quote.update_mode || '').toLowerCase() === 'streaming'
+            ? 'realtime'
+            : 'unknown');
+        quote.source = Object.keys(live).length ? 'resident_quote_state' : 'current_bar_fallback';
+
         if (ext.description) quote.description = ext.description;
         if (ext.exchange) quote.exchange = ext.exchange;
         if (ext.type) quote.type = ext.type;
