@@ -7,6 +7,8 @@ import {
   setUniverse,
   status,
   resolveWorkerSelection,
+  planPaneCounts,
+  planWorkerTopology,
 } from '../src/core/worker.js';
 
 test('timeframe normalization is generic across seconds, minutes, hours and calendar units', () => {
@@ -102,4 +104,59 @@ test('registry persistence and group/handle selection are independent of physica
   const byHandle = resolveWorkerSelection({ handles: ['alpha', 'missing'], _deps: fake });
   assert.deepEqual(byHandle.entries.map(entry => entry.handle), ['alpha']);
   assert.deepEqual(byHandle.missing_handles, ['missing']);
+});
+
+
+test('topology planner represents 50 entries exactly without over-allocating panes', () => {
+  assert.deepEqual(planPaneCounts(50), [8, 8, 8, 8, 8, 8, 2]);
+  assert.equal(planPaneCounts(50).reduce((sum, value) => sum + value, 0), 50);
+});
+
+test('topology planner uses only supported pane counts for awkward remainders', () => {
+  assert.deepEqual(planPaneCounts(5), [4, 1]);
+  assert.deepEqual(planPaneCounts(7), [6, 1]);
+  assert.deepEqual(planPaneCounts(13), [8, 4, 1]);
+});
+
+test('topology planner respects a lower configured per-tab maximum', () => {
+  const plan = planPaneCounts(12, { maxChartsPerTab: 4 });
+  assert.deepEqual(plan, [4, 4, 4]);
+  assert.ok(plan.every(value => value <= 4));
+});
+
+test('topology plan maps generic handles to tabs without market-specific assumptions', () => {
+  const entries = Array.from({ length: 10 }, (_, index) => ({ handle: 'h' + index }));
+  const topology = planWorkerTopology(entries);
+  assert.equal(topology.tab_count, 2);
+  assert.deepEqual(topology.tabs.map(tab => tab.pane_count), [8, 2]);
+  assert.deepEqual(topology.tabs[0].handles, ['h0','h1','h2','h3','h4','h5','h6','h7']);
+  assert.deepEqual(topology.tabs[1].handles, ['h8','h9']);
+});
+
+test('worker status includes an exact topology plan', () => {
+  let stored = null;
+  const fake = {
+    loadState: () => stored,
+    saveState: state => { stored = structuredClone(state); },
+    now: () => Date.parse('2026-09-22T20:00:00Z'),
+  };
+
+  const configured = setUniverse({
+    capacity: 50,
+    reserve_slots: 2,
+    max_charts_per_tab: 8,
+    entries: Array.from({ length: 9 }, (_, index) => ({
+      symbol: 'EX:S' + index,
+      timeframe: '5',
+    })),
+    _deps: fake,
+  });
+
+  assert.equal(configured.max_charts_per_tab, 8);
+  assert.equal(configured.topology_plan.tab_count, 2);
+  assert.deepEqual(configured.topology_plan.tabs.map(tab => tab.pane_count), [8, 1]);
+});
+
+test('per-tab chart limit cannot exceed the configured Premium architecture limit', () => {
+  assert.throws(() => planPaneCounts(1, { maxChartsPerTab: 9 }), /from 1 to 8/);
 });

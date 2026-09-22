@@ -18,6 +18,7 @@ export function registerWorkerTools(server) {
       replace: z.coerce.boolean().optional().describe('Replace the current logical universe (default true). False appends/merges.'),
       capacity: z.coerce.number().int().positive().optional().describe('Connection budget. Defaults to TV_WORKER_MAX_CONNECTIONS or 50.'),
       reserve_slots: z.coerce.number().int().min(0).optional().describe('Keep this many connection slots unused for ad-hoc/event work.'),
+      max_charts_per_tab: z.coerce.number().int().min(1).max(8).optional().describe('Maximum resident charts per TradingView tab (default 8).'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {

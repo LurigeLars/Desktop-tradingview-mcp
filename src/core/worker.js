@@ -20,6 +20,57 @@ function defaultCapacity() {
   return Number.isInteger(configured) && configured > 0 ? configured : 50;
 }
 
+function defaultMaxChartsPerTab() {
+  const configured = Number(process.env.TV_WORKER_MAX_CHARTS_PER_TAB || 8);
+  return Number.isInteger(configured) && configured >= 1 && configured <= 8 ? configured : 8;
+}
+
+const SUPPORTED_PANE_COUNTS = Object.freeze([8, 6, 4, 3, 2, 1]);
+
+export function planPaneCounts(entryCount, { maxChartsPerTab = defaultMaxChartsPerTab() } = {}) {
+  const count = Number(entryCount);
+  const maxPerTab = Number(maxChartsPerTab);
+  if (!Number.isInteger(count) || count < 0) throw new Error('entry_count must be a non-negative integer');
+  if (!Number.isInteger(maxPerTab) || maxPerTab < 1 || maxPerTab > 8) {
+    throw new Error('max_charts_per_tab must be an integer from 1 to 8');
+  }
+  if (count === 0) return [];
+
+  const supported = SUPPORTED_PANE_COUNTS.filter(value => value <= maxPerTab);
+  const plan = [];
+  let remaining = count;
+  while (remaining > 0) {
+    const paneCount = supported.find(value => value <= remaining);
+    if (!paneCount) throw new Error('No supported TradingView pane layout can represent the remaining entries');
+    plan.push(paneCount);
+    remaining -= paneCount;
+  }
+  return plan;
+}
+
+export function planWorkerTopology(entries, { maxChartsPerTab = defaultMaxChartsPerTab() } = {}) {
+  const list = entries || [];
+  const paneCounts = planPaneCounts(list.length, { maxChartsPerTab });
+  const tabs = [];
+  let offset = 0;
+  for (let index = 0; index < paneCounts.length; index++) {
+    const paneCount = paneCounts[index];
+    const tabEntries = list.slice(offset, offset + paneCount);
+    tabs.push({
+      tab_index: index,
+      pane_count: paneCount,
+      handles: tabEntries.map(entry => entry.handle),
+    });
+    offset += paneCount;
+  }
+  return {
+    tab_count: tabs.length,
+    max_charts_per_tab: Number(maxChartsPerTab),
+    total_entries: list.length,
+    tabs,
+  };
+}
+
 function saveState(state) {
   mkdirSync(dirname(STATE_FILE), { recursive: true });
   const tmp = STATE_FILE + '.' + process.pid + '.tmp';
@@ -202,6 +253,7 @@ function buildGroupSummary(entries) {
 function stateSummary(state) {
   const entries = state?.entries || [];
   const assigned = entries.filter(entry => entry.assignment).length;
+  const maxChartsPerTab = state.max_charts_per_tab ?? defaultMaxChartsPerTab();
   return {
     success: true,
     configured: entries.length,
@@ -211,6 +263,8 @@ function stateSummary(state) {
     reserve_slots: state.reserve_slots,
     usable_capacity: state.capacity - state.reserve_slots,
     free_slots: Math.max(0, state.capacity - state.reserve_slots - entries.length),
+    max_charts_per_tab: maxChartsPerTab,
+    topology_plan: planWorkerTopology(entries, { maxChartsPerTab }),
     groups: buildGroupSummary(entries),
     updated_at: state.updated_at || null,
     entries,
@@ -222,12 +276,17 @@ export function setUniverse({
   replace = true,
   capacity,
   reserve_slots,
+  max_charts_per_tab,
   _deps,
 } = {}) {
   const d = deps(_deps);
   const previous = d.loadState();
   const effectiveCapacity = capacity ?? previous?.capacity ?? defaultCapacity();
   const effectiveReserve = reserve_slots ?? previous?.reserve_slots ?? 0;
+  const effectiveMaxChartsPerTab = max_charts_per_tab
+    ?? previous?.max_charts_per_tab
+    ?? defaultMaxChartsPerTab();
+  planPaneCounts(0, { maxChartsPerTab: effectiveMaxChartsPerTab });
 
   const combined = replace
     ? entries
@@ -252,6 +311,7 @@ export function setUniverse({
     version: STATE_VERSION,
     capacity: normalized.capacity,
     reserve_slots: normalized.reserve_slots,
+    max_charts_per_tab: effectiveMaxChartsPerTab,
     updated_at: new Date(d.now()).toISOString(),
     entries: normalized.entries,
   };
@@ -265,6 +325,7 @@ export function status({ _deps } = {}) {
     version: STATE_VERSION,
     capacity: defaultCapacity(),
     reserve_slots: 0,
+    max_charts_per_tab: defaultMaxChartsPerTab(),
     updated_at: null,
     entries: [],
   };
