@@ -35,7 +35,7 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('quote_get', 'Get resident TradingView quote state for the active symbol, including last/bid/ask, timestamps, session and realtime/delay status when exposed. A non-resident symbol still uses chart switch + restore.', {
+  server.tool('quote_get', 'Get resident TradingView quote state for the active symbol, including last/bid/ask, timestamps, session and realtime/delay status when exposed. A differing symbol still uses active-chart switch + restore; use realtime_snapshot for other resident panes.', {
     symbol: z.string().optional().describe('Symbol/expression to quote. Blank reads active resident state; a differing non-blank value uses chart switch + restore.'),
   }, async ({ symbol }) => {
     try { return jsonResult(await core.getQuote({ symbol })); }
