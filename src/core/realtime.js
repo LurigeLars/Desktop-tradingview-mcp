@@ -71,14 +71,6 @@ function normalizedResolution(value) {
   catch { return String(value ?? '').trim(); }
 }
 
-function studyNames(snapshot) {
-  return new Set(
-    (snapshot?.studies || [])
-      .map(study => String(study?.name || '').trim().toUpperCase())
-      .filter(Boolean),
-  );
-}
-
 function studySpecName(value) {
   return typeof value === 'string'
     ? value.trim()
