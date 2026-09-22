@@ -423,11 +423,11 @@ function buildTargetExpression({ bars, includeStudies, studyFilters }) {
             volume: finiteOrNull(live.volume),
             source_timestamp: lpTime,
             source_timestamp_ms: lpTime == null ? null : lpTime * 1000,
-            age_ms: lpTime == null ? null : Math.max(0, retrievedAtMs - lpTime * 1000),
+            age_at_retrieval_ms: lpTime == null ? null : Math.max(0, retrievedAtMs - lpTime * 1000),
             rtc: finiteOrNull(live.rtc),
             rtc_timestamp: rtcTime,
             rtc_timestamp_ms: rtcTime == null ? null : rtcTime * 1000,
-            rtc_age_ms: rtcTime == null ? null : Math.max(0, retrievedAtMs - rtcTime * 1000),
+            rtc_age_at_retrieval_ms: rtcTime == null ? null : Math.max(0, retrievedAtMs - rtcTime * 1000),
             update_mode: updateMode,
             current_session: currentSession,
             is_delay: isDelay,
@@ -557,7 +557,7 @@ export async function realtimeSnapshot({
     quote: snapshot.quote
       ? {
           ...snapshot.quote,
-          last_freshness: freshnessFromAge(snapshot.quote.age_ms, staleAfterMs),
+          last_freshness_at_retrieval: freshnessFromAge(snapshot.quote.age_at_retrieval_ms, staleAfterMs),
           stale_after_ms: staleAfterMs,
           bid_ask_freshness: 'unknown',
         }
@@ -612,6 +612,9 @@ export async function realtimeSnapshot({
     include_studies: options.includeStudies,
     study_filters: options.studyFilters,
     stale_after_ms: staleAfterMs,
+    freshness_scope: 'dtv_retrieval',
+    transport_turnaround_included: false,
+    end_to_end_freshness: 'unknown',
     target_count: targets.length,
     chart_count: allSnapshots.length,
     returned_count: filtered.snapshots.length,
