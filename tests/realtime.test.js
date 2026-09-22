@@ -5,6 +5,7 @@ import {
   realtimeStatusFromDelay,
   realtimeStatusFromQuote,
   ageMsFromEpochSeconds,
+  freshnessFromAge,
   filterSnapshotsBySymbols,
   selectSnapshotsForWorkerEntries,
 } from '../src/core/realtime.js';
@@ -54,18 +55,62 @@ test('quote age converts TradingView epoch seconds to retrieval milliseconds', (
   assert.equal(ageMsFromEpochSeconds(null, 1002500), null);
 });
 
-test('symbol filtering is exact and never collapses expressions', () => {
+test('last-trade freshness is explicit and threshold-driven', () => {
+  assert.equal(freshnessFromAge(1999, 5000), 'fresh');
+  assert.equal(freshnessFromAge(5000, 5000), 'fresh');
+  assert.equal(freshnessFromAge(5001, 5000), 'stale');
+  assert.equal(freshnessFromAge(null, 5000), 'unknown');
+});
+
+test('symbol filtering is exact for expressions and never collapses to a component', () => {
   const snapshots = [
     { resolved_symbol: 'EX1:AAA/EX2:BBB' },
     { resolved_symbol: 'EX2:BBB' },
   ];
   assert.deepEqual(
     filterSnapshotsBySymbols(snapshots, ['EX1:AAA/EX2:BBB']),
-    { snapshots: [snapshots[0]], missing: [] },
+    { snapshots: [snapshots[0]], missing: [], ambiguous: [] },
   );
   assert.deepEqual(
     filterSnapshotsBySymbols(snapshots, ['AAA/BBB']),
-    { snapshots: [], missing: ['AAA/BBB'] },
+    { snapshots: [], missing: ['AAA/BBB'], ambiguous: [] },
+  );
+});
+
+test('bare symbol filtering resolves one unique exchange-qualified resident symbol', () => {
+  const snapshots = [
+    { resolved_symbol: 'EX:AAA', pane_index: 0 },
+    { resolved_symbol: 'EX:BBB', pane_index: 1 },
+  ];
+  assert.deepEqual(
+    filterSnapshotsBySymbols(snapshots, ['AAA']),
+    { snapshots: [snapshots[0]], missing: [], ambiguous: [] },
+  );
+});
+
+test('bare symbol filtering fails closed when multiple exchanges are resident', () => {
+  const snapshots = [
+    { resolved_symbol: 'EX1:AAA' },
+    { resolved_symbol: 'EX2:AAA' },
+  ];
+  assert.deepEqual(
+    filterSnapshotsBySymbols(snapshots, ['AAA']),
+    {
+      snapshots: [],
+      missing: [],
+      ambiguous: [{ requested_symbol: 'AAA', candidates: ['EX1:AAA', 'EX2:AAA'] }],
+    },
+  );
+});
+
+test('exact symbol filtering returns every resident pane for the exact resolved symbol', () => {
+  const snapshots = [
+    { resolved_symbol: 'EX:AAA', resolution: '1' },
+    { resolved_symbol: 'EX:AAA', resolution: '5' },
+  ];
+  assert.deepEqual(
+    filterSnapshotsBySymbols(snapshots, ['EX:AAA']),
+    { snapshots, missing: [], ambiguous: [] },
   );
 });
 
@@ -73,7 +118,7 @@ test('omitting symbol filters returns every resident snapshot', () => {
   const snapshots = [{ resolved_symbol: 'EX:AAA' }, { resolved_symbol: 'EX:BBB' }];
   assert.deepEqual(
     filterSnapshotsBySymbols(snapshots),
-    { snapshots, missing: [] },
+    { snapshots, missing: [], ambiguous: [] },
   );
 });
 
