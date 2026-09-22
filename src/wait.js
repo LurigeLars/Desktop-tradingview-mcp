@@ -1,4 +1,5 @@
 import { evaluate } from './connection.js';
+import { matchWatchlistSymbol } from './core/watchlist.js';
 
 const DEFAULT_TIMEOUT = 10000;
 const POLL_INTERVAL = 200;
@@ -24,10 +25,18 @@ export async function waitForChartReady(expectedSymbol = null, expectedTf = null
           barCount = bars.length;
         } catch {}
 
-        // Get current symbol from header
-        var symbolEl = document.querySelector('[data-name="legend-source-title"]')
-          || document.querySelector('[class*="title"] [class*="apply-common-tooltip"]');
-        var currentSymbol = symbolEl ? symbolEl.textContent.trim() : '';
+        // Prefer TradingView's actual chart state. DOM legend text may be a
+        // shortened component/description and is unsafe for formulas/spreads.
+        var currentSymbol = '';
+        try {
+          var chart = window.TradingViewApi._activeChartWidgetWV.value();
+          currentSymbol = chart && chart.symbol ? chart.symbol() : '';
+        } catch(e) {}
+        if (!currentSymbol) {
+          var symbolEl = document.querySelector('[data-name="legend-source-title"]')
+            || document.querySelector('[class*="title"] [class*="apply-common-tooltip"]');
+          currentSymbol = symbolEl ? symbolEl.textContent.trim() : '';
+        }
 
         return { isLoading: !!isLoading, barCount: barCount, currentSymbol: currentSymbol };
       })()
@@ -46,7 +55,7 @@ export async function waitForChartReady(expectedSymbol = null, expectedTf = null
     }
 
     // Check symbol match if expected
-    if (expectedSymbol && state.currentSymbol && !state.currentSymbol.toUpperCase().includes(expectedSymbol.toUpperCase())) {
+    if (expectedSymbol && state.currentSymbol && !matchWatchlistSymbol(expectedSymbol, [state.currentSymbol]).matched) {
       stableCount = 0;
       await new Promise(r => setTimeout(r, POLL_INTERVAL));
       continue;
