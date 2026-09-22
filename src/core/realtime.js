@@ -7,6 +7,7 @@
 import CDP from 'chrome-remote-interface';
 import { CDP_HOST, CDP_PORT, listTradingViewChartTargets } from '../connection.js';
 import { normalizeWorkerTimeframe, resolveWorkerSelection } from './worker.js';
+import { matchWatchlistSymbol } from './watchlist.js';
 
 const MAX_BARS = 100;
 const TARGET_CONCURRENCY = 8;
@@ -85,7 +86,7 @@ function studyInputsMatch(requiredInputs, actualInputs) {
   );
 }
 
-function requiredStudiesPresent(entry, snapshot) {
+export function requiredStudiesPresent(entry, snapshot) {
   const required = (entry?.studies || []).filter(Boolean);
   if (!required.length) return true;
   const present = snapshot?.studies || [];
@@ -111,10 +112,9 @@ export function selectSnapshotsForWorkerEntries(entries, snapshots) {
   for (const entry of entries || []) {
     let candidates = [];
 
-    const wantedSymbol = String(entry?.symbol || '').toUpperCase();
     const wantedTimeframe = normalizedResolution(entry?.timeframe);
     const contentMatches = snapshot =>
-      String(snapshot.resolved_symbol || '').toUpperCase() === wantedSymbol
+      !!matchWatchlistSymbol(entry?.symbol, [snapshot.resolved_symbol]).matched
       && normalizedResolution(snapshot.resolution) === wantedTimeframe;
 
     if (entry?.assignment?.chart_id != null && entry?.assignment?.pane_index != null) {

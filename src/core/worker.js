@@ -317,6 +317,7 @@ function stateSummary(state) {
     max_charts_per_tab: maxChartsPerTab,
     topology_plan: planWorkerTopology(entries, { maxChartsPerTab }),
     groups: buildGroupSummary(entries),
+    worker_tabs: state.worker_tabs || [],
     updated_at: state.updated_at || null,
     entries,
   };
@@ -363,6 +364,7 @@ export function setUniverse({
     capacity: normalized.capacity,
     reserve_slots: normalized.reserve_slots,
     max_charts_per_tab: effectiveMaxChartsPerTab,
+    worker_tabs: previous?.worker_tabs || [],
     updated_at: new Date(d.now()).toISOString(),
     entries: normalized.entries,
   };
@@ -377,6 +379,7 @@ export function status({ _deps } = {}) {
     capacity: defaultCapacity(),
     reserve_slots: 0,
     max_charts_per_tab: defaultMaxChartsPerTab(),
+    worker_tabs: [],
     updated_at: null,
     entries: [],
   };
@@ -419,4 +422,29 @@ export function resolveWorkerSelection({ handles = [], groups = [], _deps } = {}
     missing_handles: missingHandles,
     missing_groups: missingGroups,
   };
+}
+
+
+export function recordWorkerProvision({
+  assignments = {},
+  worker_tabs,
+  _deps,
+} = {}) {
+  const d = deps(_deps);
+  const state = d.loadState();
+  if (!state) throw new Error('Worker universe is not configured');
+
+  const entries = (state.entries || []).map(entry => {
+    if (!Object.prototype.hasOwnProperty.call(assignments, entry.handle)) return entry;
+    return { ...entry, assignment: assignments[entry.handle] };
+  });
+
+  const next = {
+    ...state,
+    worker_tabs: worker_tabs ?? state.worker_tabs ?? [],
+    updated_at: new Date(d.now()).toISOString(),
+    entries,
+  };
+  d.saveState(next);
+  return stateSummary(next);
 }

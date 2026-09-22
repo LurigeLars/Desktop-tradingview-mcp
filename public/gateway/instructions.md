@@ -4,7 +4,7 @@ TradingView Desktop MCP. The authenticated connector preserves the full TradingV
 - Read chart state once with chart_get_state and reuse returned entity IDs.
 - For OHLCV, prefer data_get_ohlcv with summary=true unless individual bars are required.
 - For low-latency reads across already-open chart panes, use realtime_snapshot instead of serial symbol switching.
-- Configure logical resident entries/groups with worker_set_universe and inspect capacity/state with worker_status; tabs/panes are backend details.
+- Configure logical resident entries/groups with worker_set_universe, reconcile DTV-owned tabs with worker_provision, and inspect state with worker_status; tabs/panes are backend details.
 - For custom Pine drawings, use the data_get_pine_* tools with a study filter when known.
 - Prefer typed chart, Pine, indicator, pane, alert, watchlist and replay tools over generic UI automation.
 - capture_screenshot is preferable when visual context is enough.
