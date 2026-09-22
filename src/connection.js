@@ -50,6 +50,15 @@ export function requireFinite(value, name) {
   return n;
 }
 
+async function invalidateCachedClient() {
+  const stale = client;
+  client = null;
+  targetInfo = null;
+  if (stale) {
+    try { await stale.close(); } catch { /* transport already gone */ }
+  }
+}
+
 export async function getClient() {
   if (client) {
     try {
@@ -57,8 +66,7 @@ export async function getClient() {
       await client.Runtime.evaluate({ expression: '1', returnByValue: true });
       return client;
     } catch {
-      client = null;
-      targetInfo = null;
+      await invalidateCachedClient();
     }
   }
   return connect();
@@ -85,6 +93,7 @@ export async function connect(targetId = null) {
       return client;
     } catch (err) {
       lastError = err;
+      await invalidateCachedClient();
       const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
       await new Promise(r => setTimeout(r, delay));
     }
@@ -99,11 +108,7 @@ export async function connect(targetId = null) {
  * glued to the target picked at first connect.
  */
 export async function reconnectTo(targetId) {
-  if (client) {
-    try { await client.close(); } catch { /* already gone */ }
-    client = null;
-    targetInfo = null;
-  }
+  await invalidateCachedClient();
   return connect(targetId);
 }
 
@@ -148,12 +153,21 @@ export async function getTargetInfo() {
 
 export async function evaluate(expression, opts = {}) {
   const c = await getClient();
-  const result = await c.Runtime.evaluate({
-    expression,
-    returnByValue: true,
-    awaitPromise: opts.awaitPromise ?? false,
-    ...opts,
-  });
+  let result;
+  try {
+    result = await c.Runtime.evaluate({
+      expression,
+      returnByValue: true,
+      awaitPromise: opts.awaitPromise ?? false,
+      ...opts,
+    });
+  } catch (error) {
+    // A rejected CDP call usually means the renderer/target/transport became
+    // stale. Do not retry the current operation (it may be a write), but drop
+    // the cached client so the next independent tool call reconnects cleanly.
+    await invalidateCachedClient();
+    throw error;
+  }
   if (result.exceptionDetails) {
     const msg = result.exceptionDetails.exception?.description
       || result.exceptionDetails.text
@@ -168,11 +182,7 @@ export async function evaluateAsync(expression) {
 }
 
 export async function disconnect() {
-  if (client) {
-    try { await client.close(); } catch {}
-    client = null;
-    targetInfo = null;
-  }
+  await invalidateCachedClient();
 }
 
 // --- Direct API path helpers ---
