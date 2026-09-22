@@ -557,7 +557,7 @@ export async function realtimeSnapshot({
     quote: snapshot.quote
       ? {
           ...snapshot.quote,
-          freshness: freshnessFromAge(snapshot.quote.age_ms, staleAfterMs),
+          last_freshness: freshnessFromAge(snapshot.quote.age_ms, staleAfterMs),
           stale_after_ms: staleAfterMs,
           bid_ask_freshness: 'unknown',
         }
