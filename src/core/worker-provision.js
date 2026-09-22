@@ -252,7 +252,11 @@ function paneMatchesEntry(entry, pane) {
   if (!pane || pane.error) return false;
   const symbolMatch = matchWatchlistSymbol(entry.symbol, [pane.resolved_symbol]);
   if (!symbolMatch.matched) return false;
-  if (normalizeWorkerTimeframe(pane.resolution) !== normalizeWorkerTimeframe(entry.timeframe)) return false;
+  try {
+    if (normalizeWorkerTimeframe(pane.resolution) !== normalizeWorkerTimeframe(entry.timeframe)) return false;
+  } catch {
+    return false;
+  }
   return requiredStudiesPresent(entry, pane);
 }
 
@@ -319,8 +323,8 @@ export async function configureTarget({ target, paneCount, entries }) {
   }
 }
 
-async function findTargetForChartId(chartId, targets = null) {
-  const available = targets || await listTradingViewChartTargets();
+async function findTargetForChartId(chartId, targets = null, listTargets = listTradingViewChartTargets) {
+  const available = targets || await listTargets();
   return available.find(target => String(chartIdFromTarget(target)) === String(chartId)) || null;
 }
 
@@ -332,7 +336,7 @@ async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTarg
     if (owned.layout_name) {
       try {
         const opened = await deps.newTab({ layout: owned.layout_name });
-        const target = await findTargetForChartId(opened.chart_id);
+        const target = await findTargetForChartId(opened.chart_id, null, deps.listTargets);
         if (target) {
           return {
             target,
@@ -354,7 +358,7 @@ async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTarg
     const fallbackName = desiredName + '-' + deps.now().toString(36);
     created = await deps.newTab({ layout: 'new', name: fallbackName });
   }
-  const target = await findTargetForChartId(created.chart_id);
+  const target = await findTargetForChartId(created.chart_id, null, deps.listTargets);
   if (!target) throw new Error('New worker chart target was not discoverable after creation');
 
   return {
@@ -483,9 +487,17 @@ export async function provisionWorker({
   // recorded assignment. Never close unrelated TradingView tabs.
   const afterTargets = await deps.listTargets();
   const afterIds = new Set(afterTargets.map(chartIdFromTarget).filter(Boolean).map(String));
-  const remaining = state.topology_plan.tabs.filter(plan =>
+  const recordedRemaining = state.topology_plan.tabs.filter(plan =>
     !recordedTabComplete(plan, state, afterIds)
   );
+  const processedSlots = new Set(results.filter(result => result.success).map(result => Number(result.tab_index)));
+  const forcedRemaining = force
+    ? pending.filter(plan => !processedSlots.has(Number(plan.tab_index)))
+    : [];
+  const remainingBySlot = new Map(
+    [...recordedRemaining, ...forcedRemaining].map(plan => [Number(plan.tab_index), plan]),
+  );
+  const remaining = [...remainingBySlot.values()].sort((a, b) => Number(a.tab_index) - Number(b.tab_index));
 
   const cleanup = [];
   if (remaining.length === 0) {
@@ -511,9 +523,11 @@ export async function provisionWorker({
     }
   }
 
+  const cleanupComplete = cleanup.every(item => item.success);
+
   return {
-    success: results.every(result => result.success) && remaining.length === 0,
-    complete: remaining.length === 0,
+    success: results.every(result => result.success) && remaining.length === 0 && cleanupComplete,
+    complete: remaining.length === 0 && cleanupComplete,
     processed_tabs: results.length,
     remaining_tabs: remaining.map(plan => plan.tab_index),
     results,
