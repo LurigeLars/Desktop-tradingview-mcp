@@ -557,7 +557,7 @@ export async function realtimeSnapshot({
     quote: snapshot.quote
       ? {
           ...snapshot.quote,
-          last_freshness_at_retrieval: freshnessFromAge(snapshot.quote.age_at_retrieval_ms, staleAfterMs),
+          last_freshness: freshnessFromAge(snapshot.quote.age_at_retrieval_ms, staleAfterMs),
           stale_after_ms: staleAfterMs,
           bid_ask_freshness: 'unknown',
         }
@@ -612,9 +612,8 @@ export async function realtimeSnapshot({
     include_studies: options.includeStudies,
     study_filters: options.studyFilters,
     stale_after_ms: staleAfterMs,
-    freshness_scope: 'dtv_retrieval',
+    freshness_basis: 'source_timestamp_vs_dtv_retrieval',
     transport_turnaround_included: false,
-    end_to_end_freshness: 'unknown',
     target_count: targets.length,
     chart_count: allSnapshots.length,
     returned_count: filtered.snapshots.length,
