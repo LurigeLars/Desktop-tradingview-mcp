@@ -304,7 +304,7 @@ export function activePaneStates(runtime) {
 }
 
 async function readActivePaneStates(client) {
-  const runtime = await readActivePaneStates(client);
+  const runtime = await evaluateValue(client, readPaneStatesExpression());
   return activePaneStates(runtime);
 }
 
