@@ -437,33 +437,33 @@ async function openOrCreateWorkerTab({
         openedThisCall: false,
       };
     }
+  }
 
-    if (owned.layout_name && recoverSavedLayout) {
-      try {
-        const opened = await deps.newTab({
-          layout: owned.layout_name,
-          exact_layout: true,
-          ...newTabOptions,
-        });
-        const target = await findTargetForChartId(opened.chart_id, null, deps.listTargets);
-        if (target) {
-          return {
-            target,
-            layoutName: owned.layout_name,
-            reused: true,
-            openedThisCall: true,
-            recoveredByName: true,
-          };
-        }
-      } catch (error) {
-        if (!isLayoutNotFoundError(error)) {
-          throw new Error(
-            'Worker saved-layout reopen failed for "' + owned.layout_name + '": ' +
-            (error?.message || String(error)),
-          );
-        }
-        // Confirmed missing saved layout: create a replacement below.
+  if (owned?.layout_name && recoverSavedLayout) {
+    try {
+      const opened = await deps.newTab({
+        layout: owned.layout_name,
+        exact_layout: true,
+        ...newTabOptions,
+      });
+      const target = await findTargetForChartId(opened.chart_id, null, deps.listTargets);
+      if (target) {
+        return {
+          target,
+          layoutName: owned.layout_name,
+          reused: true,
+          openedThisCall: true,
+          recoveredByName: true,
+        };
       }
+    } catch (error) {
+      if (!isLayoutNotFoundError(error)) {
+        throw new Error(
+          'Worker saved-layout reopen failed for "' + owned.layout_name + '": ' +
+          (error?.message || String(error)),
+        );
+      }
+      // Confirmed missing saved layout: create a replacement below.
     }
   }
 
