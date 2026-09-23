@@ -455,7 +455,7 @@ test('reserved slots reduce the total usable budget including external charts', 
 });
 
 
-test('worker provisioning performs only one actual create after exact recovery misses', async () => {
+test('worker provisioning journals create intent and recovers the exact layout on the next call', async () => {
   const store = makeStore();
   setUniverse({
     entries: [{ handle: 'a', symbol: 'EX:AAA', timeframe: '5' }],
@@ -467,45 +467,61 @@ test('worker provisioning performs only one actual create after exact recovery m
     type: 'page',
     url: 'https://www.tradingview.com/chart/external-chart/',
   }];
+  const liveTargets = [...external];
 
   let newTabCalls = 0;
-  let createCalls = 0;
-  let receivedCreateArgs = null;
   const runtime = {
     status: () => status({ _deps: store.deps }),
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
-    listTargets: async () => external,
-    inspectTargets: async () => [{
-      target_id: 'external-target',
-      chart_id: 'external-chart',
+    listTargets: async () => liveTargets,
+    inspectTargets: async targets => targets.map(target => ({
+      target_id: target.id,
+      chart_id: target.url.match(/\/chart\/([^/]+)/)?.[1] || null,
       pane_count: 1,
       panes: [{ resolved_symbol: 'EX:OTHER', resolution: '5', studies: [] }],
-    }],
+    })),
     newTab: async args => {
       newTabCalls += 1;
-      if (args.layout !== 'new') {
-        assert.equal(args.exact_layout, true);
-        throw new Error('Layout matching "' + args.layout + '" not found in the layout list.');
+      if (newTabCalls === 1) {
+        assert.equal(args.layout, 'new');
+        assert.equal(args.landing_timeout_ms, 4000);
+        assert.equal(args.chart_timeout_ms, 8000);
+        throw new Error('no ready chart target became discoverable');
       }
-      createCalls += 1;
-      receivedCreateArgs = args;
-      throw new Error('no ready chart target became discoverable');
+
+      assert.equal(args.layout, 'DTV Worker 01');
+      assert.equal(args.exact_layout, true);
+      const recovered = {
+        id: 'worker-target',
+        type: 'page',
+        url: 'https://www.tradingview.com/chart/recovered-worker/',
+      };
+      liveTargets.push(recovered);
+      return { success: true, layout: 'DTV Worker 01', chart_id: 'recovered-worker' };
     },
     configureTarget: async () => {
-      throw new Error('configureTarget must not run after tab create failure');
+      throw new Error('configureTarget must not run in a tab-open recovery phase');
     },
     closeTabByChartId: async () => ({ success: true }),
   };
 
-  const result = await provisionWorker({ max_tabs: 1, _deps: runtime });
+  const first = await provisionWorker({ max_tabs: 1, _deps: runtime });
+  assert.equal(newTabCalls, 1, 'first call performs one direct create attempt');
+  assert.equal(first.results.length, 1);
+  assert.equal(first.results[0].success, false);
+  assert.equal(first.results[0].stage, 'open_or_create');
+  assert.match(first.results[0].error, /Worker tab create failed/);
 
-  assert.equal(newTabCalls, 2, 'one exact recovery lookup plus one actual create');
-  assert.equal(createCalls, 1);
-  assert.equal(receivedCreateArgs.layout, 'new');
-  assert.equal(receivedCreateArgs.landing_timeout_ms, 4000);
-  assert.equal(receivedCreateArgs.chart_timeout_ms, 8000);
-  assert.equal(result.results.length, 1);
-  assert.equal(result.results[0].success, false);
-  assert.equal(result.results[0].stage, 'open_or_create');
-  assert.match(result.results[0].error, /Worker tab create failed/);
+  const journaled = status({ _deps: store.deps }).worker_tabs[0];
+  assert.equal(journaled.chart_id, null);
+  assert.equal(journaled.layout_name, 'DTV Worker 01');
+  assert.equal(journaled.provisioning_state, 'intent');
+
+  const second = await provisionWorker({ max_tabs: 1, _deps: runtime });
+  assert.equal(newTabCalls, 2);
+  assert.equal(second.success, true);
+  assert.equal(second.complete, false);
+  assert.equal(second.results[0].stage, 'tab_ready');
+  assert.equal(second.results[0].recovered_by_name, true);
+  assert.equal(status({ _deps: store.deps }).worker_tabs[0].chart_id, 'recovered-worker');
 });
