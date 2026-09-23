@@ -51,11 +51,47 @@ test('recorded tab completeness requires live ownership and exact pane assignmen
       { handle: 'b', assignment: { worker_slot: 0, chart_id: 'chart-a', pane_index: 1 } },
     ],
   };
-  assert.equal(recordedTabComplete(plan, state, new Set(['chart-a'])), true);
+  assert.equal(recordedTabComplete(plan, state, new Set(['chart:chart-a'])), true);
   assert.equal(recordedTabComplete(plan, state, new Set()), false);
 
   state.entries[1].assignment.pane_index = 0;
-  assert.equal(recordedTabComplete(plan, state, new Set(['chart-a'])), false);
+  assert.equal(recordedTabComplete(plan, state, new Set(['chart:chart-a'])), false);
+});
+
+test('recorded tab completeness prefers target id when chart ids can collide', () => {
+  const plan = { tab_index: 0, pane_count: 1, handles: ['a'] };
+  const state = {
+    worker_tabs: [{
+      slot: 0,
+      target_id: 'target-worker',
+      chart_id: 'shared-chart',
+      layout_name: 'Worker 01',
+      pane_count: 1,
+    }],
+    entries: [{
+      handle: 'a',
+      symbol: 'EX:AAA',
+      timeframe: '5',
+      studies: [],
+      assignment: {
+        worker_slot: 0,
+        target_id: 'target-worker',
+        chart_id: 'shared-chart',
+        pane_index: 0,
+      },
+    }],
+  };
+  const liveKeys = new Set(['target:target-worker', 'chart:shared-chart']);
+  const live = new Map([['target:target-worker', {
+    target_id: 'target-worker',
+    chart_id: 'shared-chart',
+    panes: [{ resolved_symbol: 'EX:AAA', resolution: '5', studies: [] }],
+  }]]);
+
+  assert.equal(recordedTabComplete(plan, state, liveKeys, live), true);
+
+  state.entries[0].assignment.target_id = 'target-other';
+  assert.equal(recordedTabComplete(plan, state, liveKeys, live), false);
 });
 
 test('recorded tab completeness rejects stale live pane content', () => {
