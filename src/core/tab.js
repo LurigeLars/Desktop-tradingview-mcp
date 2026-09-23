@@ -192,11 +192,15 @@ async function probeLandingTarget(target, timeoutMs = LANDING_PROBE_TIMEOUT_MS) 
  * Discover a layout-picker target by DOM capability, not by a single title.
  * Newly-created page targets are checked first, then existing candidates.
  */
-async function findLandingTarget({ beforeIds = [], timeoutMs = 1000 } = {}) {
+async function findLandingTarget({ beforeIds = [], timeoutMs = 1000, requireNew = false } = {}) {
   const deadline = Date.now() + timeoutMs;
+  const before = beforeIds instanceof Set ? beforeIds : new Set(beforeIds);
   do {
     const targets = await listCdpTargets();
-    const candidates = rankLandingCandidates(targets, beforeIds);
+    const ranked = rankLandingCandidates(targets, before);
+    const candidates = requireNew
+      ? ranked.filter(candidate => !before.has(candidate.id))
+      : ranked;
     const known = candidates.find(isNewTabPageTarget);
     if (known) return known;
 
@@ -381,7 +385,11 @@ export async function newTab({
       return count;
     });
 
-    landing = await findLandingTarget({ beforeIds: targetIdsBefore, timeoutMs: landingTimeoutMs });
+    landing = await findLandingTarget({
+      beforeIds: targetIdsBefore,
+      timeoutMs: landingTimeoutMs,
+      requireNew: true,
+    });
     const after = await withShell(evalIn => evalIn(`document.querySelectorAll('.tabs-container .tab').length`));
     shellCounts = { before, after };
   }
