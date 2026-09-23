@@ -122,11 +122,8 @@ async function evaluateValue(client, expression, { awaitPromise = false } = {}) 
 async function waitForPaneCount(client, expected, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
   do {
-    const count = await evaluateValue(
-      client,
-      'window.TradingViewApi._chartWidgetCollection.getAll().length',
-    );
-    if (Number(count) === Number(expected)) return;
+    const panes = await readActivePaneStates(client);
+    if (panes.length === Number(expected)) return;
     if (Date.now() >= deadline) break;
     await new Promise(resolve => setTimeout(resolve, 200));
   } while (true);
@@ -231,6 +228,10 @@ function readPaneStatesExpression() {
     (function() {
       var cwc = window.TradingViewApi && window.TradingViewApi._chartWidgetCollection;
       var panes = cwc && cwc.getAll ? cwc.getAll() : [];
+      var inlineCount = cwc ? cwc.inlineChartsCount : null;
+      if (inlineCount && typeof inlineCount.value === 'function') inlineCount = inlineCount.value();
+      inlineCount = Number(inlineCount);
+      if (!Number.isInteger(inlineCount) || inlineCount < 1) inlineCount = null;
       var out = [];
 
       for (var i = 0; i < panes.length; i++) {
@@ -288,9 +289,23 @@ function readPaneStatesExpression() {
           out.push({ pane_index: i, error: e.message });
         }
       }
-      return out;
+      return { inline_count: inlineCount, panes: out };
     })()
   `;
+}
+
+export function activePaneStates(runtime) {
+  const panes = Array.isArray(runtime)
+    ? runtime
+    : (Array.isArray(runtime?.panes) ? runtime.panes : []);
+  const inlineCount = Number(runtime?.inline_count);
+  if (!Number.isInteger(inlineCount) || inlineCount < 1) return panes;
+  return panes.slice(0, Math.min(inlineCount, panes.length));
+}
+
+async function readActivePaneStates(client) {
+  const runtime = await readActivePaneStates(client);
+  return activePaneStates(runtime);
 }
 
 function paneMatchesEntry(entry, pane) {
@@ -322,7 +337,7 @@ async function waitForPaneMatch(client, entry, index, timeoutMs = 4000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   do {
-    const panes = await evaluateValue(client, readPaneStatesExpression());
+    const panes = await readActivePaneStates(client);
     last = Array.isArray(panes) ? panes[index] : null;
     if (paneMatchesEntry(entry, last)) return last;
     if (Date.now() >= deadline) break;
@@ -356,7 +371,7 @@ export async function configureTarget({ target, paneCount, entries, maxPanes = 1
     await client.Runtime.enable();
 
     const layoutCode = layoutCodeForPaneCount(paneCount);
-    let live = await evaluateValue(client, readPaneStatesExpression());
+    let live = await readActivePaneStates(client);
 
     // Never reset an already-correct multi-pane layout on every resumable call.
     // Change layout only when the pane count itself is wrong.
@@ -367,7 +382,7 @@ export async function configureTarget({ target, paneCount, entries, maxPanes = 1
         { awaitPromise: true },
       );
       await waitForPaneCount(client, paneCount, 5000);
-      live = await evaluateValue(client, readPaneStatesExpression());
+      live = await readActivePaneStates(client);
     }
 
     const pendingBefore = pendingPaneIndexes(entries, live);
@@ -394,7 +409,7 @@ export async function configureTarget({ target, paneCount, entries, maxPanes = 1
       });
     }
 
-    const verified = await evaluateValue(client, readPaneStatesExpression());
+    const verified = await readActivePaneStates(client);
     const pending = pendingPaneIndexes(entries, verified);
 
     return {
@@ -430,7 +445,7 @@ export async function inspectTargetPaneCounts(targets) {
     try {
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
       await client.Runtime.enable();
-      const panes = await evaluateValue(client, readPaneStatesExpression());
+      const panes = await readActivePaneStates(client);
       const paneCount = Array.isArray(panes) ? panes.length : 0;
       if (!Number.isInteger(Number(paneCount)) || Number(paneCount) < 1) {
         throw new Error('Chart target has no active panes');
