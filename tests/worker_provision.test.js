@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildWorkerLayoutName,
   layoutCodeForPaneCount,
+  pendingPaneIndexes,
   provisionWorker,
   recordedTabComplete,
 } from '../src/core/worker-provision.js';
@@ -25,6 +26,20 @@ test('worker pane counts map only to supported TradingView layouts', () => {
 test('worker layout names are technical and deterministic', () => {
   assert.equal(buildWorkerLayoutName('Worker', 0), 'Worker 01');
   assert.equal(buildWorkerLayoutName('Worker', 6), 'Worker 07');
+});
+
+test('pending pane detection skips already-correct resident panes', () => {
+  const entries = [
+    { symbol: 'EX:AAA', timeframe: '5', studies: [] },
+    { symbol: 'EX:BBB', timeframe: '5', studies: [] },
+    { symbol: 'EX1:AAA/EX2:BBB', timeframe: '5', studies: [] },
+  ];
+  const panes = [
+    { resolved_symbol: 'EX:AAA', resolution: '5', studies: [] },
+    { resolved_symbol: 'EX:WRONG', resolution: '5', studies: [] },
+    { resolved_symbol: 'EX2:BBB', resolution: '5', studies: [] },
+  ];
+  assert.deepEqual(pendingPaneIndexes(entries, panes), [1, 2]);
 });
 
 test('recorded tab completeness requires live ownership and exact pane assignments', () => {
@@ -103,7 +118,7 @@ test('recordWorkerProvision persists assignments and DTV-owned tab metadata', ()
   assert.equal(status({ _deps: store.deps }).entries[1].assignment.pane_index, 1);
 });
 
-test('worker provisioning is resumable one topology tab at a time', async () => {
+test('worker provisioning is resumable across tab-open and pane-configure phases', async () => {
   const store = makeStore();
   setUniverse({
     capacity: 20,
@@ -127,7 +142,9 @@ test('worker provisioning is resumable one topology tab at a time', async () => 
       pane_count: 1,
     })),
     newTab: async ({ name, layout }) => {
-      assert.equal(layout, 'new');
+      if (layout !== 'new') {
+        throw new Error('Layout matching "' + layout + '" not found in the layout list.');
+      }
       chartCounter += 1;
       const chartId = 'chart-' + chartCounter;
       liveTargets.push({
@@ -138,28 +155,57 @@ test('worker provisioning is resumable one topology tab at a time', async () => 
       });
       return { success: true, layout: name, chart_id: chartId };
     },
-    configureTarget: async ({ target, paneCount, entries }) => ({
-      success: true,
-      layout_code: layoutCodeForPaneCount(paneCount),
-      target_id: target.id,
-      handles: entries.map(entry => entry.handle),
-    }),
+    configureTarget: async ({ target, paneCount, entries, maxPanes }) => {
+      assert.equal(maxPanes, 1);
+      return {
+        success: true,
+        complete: true,
+        layout_code: layoutCodeForPaneCount(paneCount),
+        target_id: target.id,
+        configured_panes: [0],
+        pending_panes: [],
+        verified: entries.map(entry => ({
+          resolved_symbol: entry.symbol,
+          resolution: entry.timeframe,
+          studies: [],
+        })),
+      };
+    },
     closeTabByChartId: async () => ({ success: true }),
     now: () => Date.parse('2026-09-22T20:00:00Z'),
   };
 
   const first = await provisionWorker({ max_tabs: 1, layout_prefix: 'Worker', _deps: runtime });
+  assert.equal(first.success, true);
   assert.equal(first.complete, false);
-  assert.deepEqual(first.remaining_tabs, [1]);
+  assert.deepEqual(first.remaining_tabs, [0, 1]);
+  assert.equal(first.results[0].stage, 'tab_ready');
   assert.equal(first.results[0].pane_count, 8);
-  assert.equal(status({ _deps: store.deps }).assigned, 8);
+  assert.equal(status({ _deps: store.deps }).assigned, 0);
+  assert.equal(status({ _deps: store.deps }).worker_tabs.length, 1);
 
   const second = await provisionWorker({ max_tabs: 1, layout_prefix: 'Worker', _deps: runtime });
-  assert.equal(second.complete, true);
-  assert.deepEqual(second.remaining_tabs, []);
-  assert.equal(second.results[0].pane_count, 2);
-  assert.equal(status({ _deps: store.deps }).assigned, 10);
+  assert.equal(second.success, true);
+  assert.equal(second.complete, false);
+  assert.deepEqual(second.remaining_tabs, [1]);
+  assert.equal(second.results[0].stage, 'complete');
+  assert.equal(status({ _deps: store.deps }).assigned, 8);
+
+  const third = await provisionWorker({ max_tabs: 1, layout_prefix: 'Worker', _deps: runtime });
+  assert.equal(third.success, true);
+  assert.equal(third.complete, false);
+  assert.deepEqual(third.remaining_tabs, [1]);
+  assert.equal(third.results[0].stage, 'tab_ready');
+  assert.equal(third.results[0].pane_count, 2);
+  assert.equal(status({ _deps: store.deps }).assigned, 8);
   assert.equal(status({ _deps: store.deps }).worker_tabs.length, 2);
+
+  const fourth = await provisionWorker({ max_tabs: 1, layout_prefix: 'Worker', _deps: runtime });
+  assert.equal(fourth.success, true);
+  assert.equal(fourth.complete, true);
+  assert.deepEqual(fourth.remaining_tabs, []);
+  assert.equal(fourth.results[0].stage, 'complete');
+  assert.equal(status({ _deps: store.deps }).assigned, 10);
 });
 
 test('force provisioning remains resumable and does not report complete early', async () => {
@@ -409,7 +455,7 @@ test('reserved slots reduce the total usable budget including external charts', 
 });
 
 
-test('worker provisioning does not repeat a failed tab create in the same call', async () => {
+test('worker provisioning performs only one actual create after exact recovery misses', async () => {
   const store = makeStore();
   setUniverse({
     entries: [{ handle: 'a', symbol: 'EX:AAA', timeframe: '5' }],
@@ -423,7 +469,8 @@ test('worker provisioning does not repeat a failed tab create in the same call',
   }];
 
   let newTabCalls = 0;
-  let receivedArgs = null;
+  let createCalls = 0;
+  let receivedCreateArgs = null;
   const runtime = {
     status: () => status({ _deps: store.deps }),
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
@@ -436,7 +483,12 @@ test('worker provisioning does not repeat a failed tab create in the same call',
     }],
     newTab: async args => {
       newTabCalls += 1;
-      receivedArgs = args;
+      if (args.layout !== 'new') {
+        assert.equal(args.exact_layout, true);
+        throw new Error('Layout matching "' + args.layout + '" not found in the layout list.');
+      }
+      createCalls += 1;
+      receivedCreateArgs = args;
       throw new Error('no ready chart target became discoverable');
     },
     configureTarget: async () => {
@@ -447,10 +499,11 @@ test('worker provisioning does not repeat a failed tab create in the same call',
 
   const result = await provisionWorker({ max_tabs: 1, _deps: runtime });
 
-  assert.equal(newTabCalls, 1);
-  assert.equal(receivedArgs.layout, 'new');
-  assert.equal(receivedArgs.landing_timeout_ms, 4000);
-  assert.equal(receivedArgs.chart_timeout_ms, 8000);
+  assert.equal(newTabCalls, 2, 'one exact recovery lookup plus one actual create');
+  assert.equal(createCalls, 1);
+  assert.equal(receivedCreateArgs.layout, 'new');
+  assert.equal(receivedCreateArgs.landing_timeout_ms, 4000);
+  assert.equal(receivedCreateArgs.chart_timeout_ms, 8000);
   assert.equal(result.results.length, 1);
   assert.equal(result.results[0].success, false);
   assert.equal(result.results[0].stage, 'open_or_create');
