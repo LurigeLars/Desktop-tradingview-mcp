@@ -31,7 +31,7 @@ export function loadConfig(env = process.env) {
 
   const upstreamPort = Number(env.UPSTREAM_PORT ?? 8765);
   const port = Number(env.PORT ?? 8080);
-  const ratePerMin = Number(env.RATE_PER_MIN ?? 120);
+  const ratePerMin = Number(env.RATE_PER_MIN ?? 360);
   const maxBodyBytes = Number(env.MAX_BODY_BYTES ?? (2 * 1024 * 1024));
 
   for (const [name, value] of [

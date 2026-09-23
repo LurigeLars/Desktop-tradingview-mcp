@@ -28,6 +28,10 @@ describe('public gateway configuration', () => {
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_ALLOWED_EMAILS: '' }), /ACCESS_ALLOWED_EMAILS/);
   });
 
+  it('defaults to an MCP-aware HTTP transport rate budget', () => {
+    assert.equal(loadConfig(baseEnv).ratePerMin, 360);
+  });
+
   it('accepts only the MCP path', () => {
     assert.equal(isAllowedPath('/mcp'), true);
     assert.equal(isAllowedPath('/mcp?x=1'), true);
