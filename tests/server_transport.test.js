@@ -6,6 +6,7 @@ import { ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { CDP_PORT, isTradingViewUrl } from '../src/connection.js';
 import {
   DEFAULT_SESSION_IDLE_MS,
+  DEFAULT_SESSION_PRESSURE_IDLE_MS,
   resolveHttpConfig,
   startTradingViewHttpServer,
 } from '../src/server/http.js';
@@ -32,6 +33,11 @@ test('HTTP transport refuses non-loopback binds', () => {
 test('HTTP transport defaults abandoned sessions to a five-minute idle timeout', () => {
   assert.equal(DEFAULT_SESSION_IDLE_MS, 5 * 60 * 1000);
   assert.equal(resolveHttpConfig().sessionIdleMs, 5 * 60 * 1000);
+});
+
+test('HTTP transport uses a shorter default idle threshold only under session pressure', () => {
+  assert.equal(DEFAULT_SESSION_PRESSURE_IDLE_MS, 30 * 1000);
+  assert.equal(resolveHttpConfig().sessionPressureIdleMs, 30 * 1000);
 });
 
 async function initializeTestSession(runtime, clientName = 'session-test') {
@@ -80,6 +86,36 @@ test('HTTP transport rejects new sessions at the configured capacity', async () 
     const blocked = await initializeTestSession(runtime, 'session-capacity-3');
     assert.equal(blocked.status, 503);
     assert.equal(blocked.body.error?.message, 'Too many active MCP sessions');
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('HTTP transport reclaims pressure-idle sessions before rejecting a new session', async () => {
+  const runtime = await startTradingViewHttpServer({
+    host: '127.0.0.1',
+    port: 0,
+    maxSessions: 2,
+    sessionIdleMs: 60_000,
+    sessionPressureIdleMs: 40,
+  });
+
+  try {
+    const first = await initializeTestSession(runtime, 'session-pressure-1');
+    const second = await initializeTestSession(runtime, 'session-pressure-2');
+
+    assert.equal(first.status, 200);
+    assert.ok(first.sessionId);
+    assert.equal(second.status, 200);
+    assert.ok(second.sessionId);
+    assert.equal(runtime.sessionCount(), 2);
+
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 80));
+
+    const recovered = await initializeTestSession(runtime, 'session-pressure-3');
+    assert.equal(recovered.status, 200);
+    assert.ok(recovered.sessionId);
+    assert.equal(runtime.sessionCount(), 1);
   } finally {
     await runtime.close();
   }

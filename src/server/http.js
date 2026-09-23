@@ -12,6 +12,7 @@ export const DEFAULT_HTTP_PATH = '/mcp';
 export const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_MAX_SESSIONS = 32;
 export const DEFAULT_SESSION_IDLE_MS = 5 * 60 * 1000;
+export const DEFAULT_SESSION_PRESSURE_IDLE_MS = 30 * 1000;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -149,6 +150,11 @@ export function resolveHttpConfig(overrides = {}) {
       DEFAULT_SESSION_IDLE_MS,
       'TV_MCP_HTTP_SESSION_IDLE_MS'
     ),
+    sessionPressureIdleMs: toPositiveInt(
+      overrides.sessionPressureIdleMs ?? process.env.TV_MCP_HTTP_SESSION_PRESSURE_IDLE_MS,
+      DEFAULT_SESSION_PRESSURE_IDLE_MS,
+      'TV_MCP_HTTP_SESSION_PRESSURE_IDLE_MS'
+    ),
   };
 }
 
@@ -167,10 +173,10 @@ export async function startTradingViewHttpServer(overrides = {}) {
     }
   }
 
-  async function purgeIdleSessions(now = Date.now()) {
+  async function purgeIdleSessions(now = Date.now(), idleMs = config.sessionIdleMs) {
     const expired = [];
     for (const [sessionId, entry] of sessions.entries()) {
-      if (now - entry.lastSeen > config.sessionIdleMs) {
+      if (now - entry.lastSeen > idleMs) {
         expired.push(sessionId);
       }
     }
@@ -229,6 +235,9 @@ export async function startTradingViewHttpServer(overrides = {}) {
           return;
         }
 
+        if (sessions.size >= config.maxSessions) {
+          await purgeIdleSessions(Date.now(), config.sessionPressureIdleMs);
+        }
         if (sessions.size >= config.maxSessions) {
           sendProtocolError(res, 503, 'Too many active MCP sessions');
           return;
