@@ -12,6 +12,26 @@
 import CDP from 'chrome-remote-interface';
 import { getClient, reconnectTo, CDP_HOST, CDP_PORT, listCdpTargets } from '../connection.js';
 
+const LANDING_PROBE_TIMEOUT_MS = 500;
+const SHELL_OPERATION_TIMEOUT_MS = 6000;
+const CHART_PROBE_TIMEOUT_MS = 750;
+
+export async function withDeadline(promise, timeoutMs, label = 'Operation') {
+  const ms = Number(timeoutMs);
+  if (!Number.isFinite(ms) || ms < 0) throw new Error('timeoutMs must be a non-negative number');
+  if (ms === 0) return promise;
+
+  let timer = null;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(label + ' timed out after ' + ms + 'ms')), ms);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 /**
  * List all open chart tabs (CDP page targets).
  */
@@ -54,11 +74,19 @@ export function rankLandingCandidates(targets, beforeIds = []) {
  */
 export async function list() {
   const targets = await listCdpTargets();
-  const landingIds = new Set();
+  const candidates = rankLandingCandidates(targets);
 
-  for (const candidate of rankLandingCandidates(targets)) {
-    if (await probeLandingTarget(candidate)) landingIds.add(candidate.id);
-  }
+  // Never let one stale/non-responsive Electron page target block tab_list.
+  // Probe candidates concurrently and fail closed on each bounded probe.
+  const probeResults = await Promise.all(
+    candidates.map(async candidate => ({
+      id: candidate.id,
+      isLanding: await probeLandingTarget(candidate, LANDING_PROBE_TIMEOUT_MS),
+    })),
+  );
+  const landingIds = new Set(
+    probeResults.filter(item => item.isLanding).map(item => item.id),
+  );
 
   const tabs = targets
     .filter(target => isChartPageTarget(target) || landingIds.has(target.id))
@@ -71,7 +99,16 @@ export async function list() {
       is_chart: isChartPageTarget(target),
     }));
 
-  return { success: true, tab_count: tabs.length, tabs };
+  return {
+    success: true,
+    tab_count: tabs.length,
+    tabs,
+    discovery: {
+      candidate_count: candidates.length,
+      landing_count: landingIds.size,
+      probe_timeout_ms: LANDING_PROBE_TIMEOUT_MS,
+    },
+  };
 }
 
 /**
@@ -83,45 +120,47 @@ async function withShell(fn) {
   const targets = await listCdpTargets();
   const candidates = targets.filter(t => t.type === 'page' && /\/window\/index\.html/i.test(t.url || ''));
 
+  const failures = [];
   for (const cand of candidates) {
-    let c = null;
     try {
-      c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: cand.id });
-      const probe = await c.Runtime.evaluate({
-        expression: `!!document.querySelector('.tabs-container .tab')`,
-        returnByValue: true,
+      const result = await withTarget(cand.id, async evalIn => {
+        const hasTabs = await evalIn(`!!document.querySelector('.tabs-container .tab')`);
+        if (!hasTabs) return { matched: false, value: null };
+        return { matched: true, value: await fn(evalIn) };
+      }, SHELL_OPERATION_TIMEOUT_MS);
+
+      if (result?.matched) return result.value;
+    } catch (error) {
+      failures.push({
+        target_id: cand.id,
+        error: error?.message || String(error),
       });
-      if (probe.result?.value) {
-        const out = await fn(async (expression) => {
-          const { result } = await c.Runtime.evaluate({ expression, returnByValue: true });
-          return result?.value;
-        });
-        await c.close();
-        return out;
-      }
-      await c.close();
-    } catch {
-      try { if (c) await c.close(); } catch { /* already gone */ }
     }
   }
-  throw new Error('TradingView shell window (tab bar) not found. Is this TradingView Desktop with tabs?');
+
+  const detail = failures.length
+    ? ' Probe failures: ' + JSON.stringify(failures)
+    : '';
+  throw new Error(
+    'TradingView shell window (tab bar) not found within bounded probes. Is this TradingView Desktop with tabs?' +
+    detail,
+  );
 }
 
 /** Check whether a CDP page target is the visible one. */
 async function isTargetVisible(targetId) {
-  let c = null;
   try {
-    c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
-    const { result } = await c.Runtime.evaluate({ expression: 'document.visibilityState', returnByValue: true });
-    return result?.value === 'visible';
+    return await withTarget(
+      targetId,
+      evalIn => evalIn('document.visibilityState').then(value => value === 'visible'),
+      CHART_PROBE_TIMEOUT_MS,
+    );
   } catch {
     return false;
-  } finally {
-    try { if (c) await c.close(); } catch { /* already gone */ }
   }
 }
 
-async function probeLandingTarget(target) {
+async function probeLandingTarget(target, timeoutMs = LANDING_PROBE_TIMEOUT_MS) {
   if (!target || isChartPageTarget(target) || isShellTarget(target)) return false;
   try {
     return await withTarget(target.id, evalIn => evalIn(`
@@ -133,7 +172,7 @@ async function probeLandingTarget(target) {
           || document.querySelector('[class*="layout-list"]')
         );
       })()
-    `));
+    `), timeoutMs);
   } catch {
     return false;
   }
@@ -147,11 +186,18 @@ async function findLandingTarget({ beforeIds = [], timeoutMs = 1000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   do {
     const targets = await listCdpTargets();
-    for (const candidate of rankLandingCandidates(targets, beforeIds)) {
-      if (await probeLandingTarget(candidate)) return candidate;
-    }
+    const candidates = rankLandingCandidates(targets, beforeIds);
+    const remainingMs = Math.max(1, deadline - Date.now());
+    const perProbeMs = Math.min(LANDING_PROBE_TIMEOUT_MS, remainingMs);
+
+    const matches = await Promise.all(
+      candidates.map(candidate => probeLandingTarget(candidate, perProbeMs)),
+    );
+    const matchIndex = matches.findIndex(Boolean);
+    if (matchIndex >= 0) return candidates[matchIndex];
+
     if (Date.now() >= deadline) break;
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, Math.min(100, Math.max(1, deadline - Date.now()))));
   } while (true);
   return null;
 }
@@ -179,7 +225,7 @@ async function chartTargetReady(targetId) {
           return false;
         }
       })()
-    `));
+    `), CHART_PROBE_TIMEOUT_MS);
   } catch {
     return false;
   }
@@ -196,11 +242,15 @@ async function waitForChartTarget({ chartIdsBefore, landingId, timeoutMs = 15000
     ];
 
     const seen = new Set();
-    for (const candidate of candidates) {
-      if (seen.has(candidate.id)) continue;
+    const unique = candidates.filter(candidate => {
+      if (seen.has(candidate.id)) return false;
       seen.add(candidate.id);
-      if (await chartTargetReady(candidate.id)) return candidate;
-    }
+      return true;
+    });
+
+    const ready = await Promise.all(unique.map(candidate => chartTargetReady(candidate.id)));
+    const readyIndex = ready.findIndex(Boolean);
+    if (readyIndex >= 0) return unique[readyIndex];
 
     if (Date.now() >= deadline) break;
     await new Promise(r => setTimeout(r, 250));
@@ -209,17 +259,31 @@ async function waitForChartTarget({ chartIdsBefore, landingId, timeoutMs = 15000
 }
 
 /** Run fn with an eval helper attached to a specific target. */
-async function withTarget(targetId, fn) {
-  let c = null;
-  try {
-    c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
-    return await fn(async (expression) => {
-      const { result } = await c.Runtime.evaluate({ expression, returnByValue: true });
-      return result?.value;
-    });
-  } finally {
-    try { if (c) await c.close(); } catch { /* already gone */ }
-  }
+async function withTarget(targetId, fn, timeoutMs = 2000) {
+  const task = (async () => {
+    let client = null;
+    try {
+      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
+      return await fn(async expression => {
+        const response = await withDeadline(
+          client.Runtime.evaluate({ expression, returnByValue: true }),
+          Math.min(Number(timeoutMs) || 2000, 1000),
+          'CDP Runtime.evaluate for target ' + targetId,
+        );
+        if (response.exceptionDetails) {
+          const message = response.exceptionDetails.exception?.description
+            || response.exceptionDetails.text
+            || 'Unknown target evaluation error';
+          throw new Error(message);
+        }
+        return response.result?.value;
+      });
+    } finally {
+      try { if (client) await client.close(); } catch { /* already gone */ }
+    }
+  })();
+
+  return withDeadline(task, timeoutMs, 'CDP target ' + targetId);
 }
 
 /**
@@ -360,7 +424,7 @@ export async function newTab({
       foundTitle = await evalIn(clickByTitle);
     }
     return foundTitle;
-  });
+  }, 3500);
 
   if (!picked) throw new Error(`Layout matching "${layout}" not found in the layout list.`);
 
