@@ -6,6 +6,7 @@ import {
   realtimeStatusFromQuote,
   ageMsFromEpochSeconds,
   freshnessFromAge,
+  activeRealtimePaneCount,
   filterSnapshotsBySymbols,
   selectSnapshotsForWorkerEntries,
 } from '../src/core/realtime.js';
@@ -60,6 +61,15 @@ test('last-trade freshness is decision-useful and threshold-driven', () => {
   assert.equal(freshnessFromAge(5000, 5000), 'fresh');
   assert.equal(freshnessFromAge(5001, 5000), 'stale');
   assert.equal(freshnessFromAge(null, 5000), 'unknown');
+});
+
+test('realtime pane discovery ignores stale hidden widgets after layout downsizing', () => {
+  const observable = { value: () => 1 };
+
+  assert.equal(activeRealtimePaneCount(observable, 8), 1);
+  assert.equal(activeRealtimePaneCount(4, 8), 4);
+  assert.equal(activeRealtimePaneCount(8, 4), 4);
+  assert.equal(activeRealtimePaneCount(null, 8), 8);
 });
 
 test('symbol filtering is exact for expressions and never collapses to a component', () => {
