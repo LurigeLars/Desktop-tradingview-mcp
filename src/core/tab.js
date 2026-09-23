@@ -161,9 +161,20 @@ async function chartTargetReady(targetId) {
     return await withTarget(targetId, evalIn => evalIn(`
       (function() {
         try {
-          var api = window.TradingViewApi && window.TradingViewApi._activeChartWidgetWV;
+          var tv = window.TradingViewApi;
+          var api = tv && tv._activeChartWidgetWV;
           var chart = api && api.value ? api.value() : null;
-          return !!(chart && typeof chart.symbol === 'function' && chart.symbol());
+          var cwc = tv && tv._chartWidgetCollection;
+          var panes = cwc && typeof cwc.getAll === 'function' ? cwc.getAll() : [];
+          // A newly-created blank layout may not have a symbol yet. For tab
+          // discovery we only need a usable chart API; worker provisioning will
+          // set the symbol/timeframe immediately afterwards.
+          return !!(
+            chart
+            && typeof chart.setSymbol === 'function'
+            && typeof chart.setResolution === 'function'
+            && panes.length > 0
+          );
         } catch(e) {
           return false;
         }
@@ -218,8 +229,22 @@ async function withTarget(targetId, fn) {
  *   layout: '<name>' -> open the saved layout whose title contains <name>
  * Reuses an already-open landing tab instead of opening another one.
  */
-export async function newTab({ layout, name } = {}) {
-  let landing = await findLandingTarget({ timeoutMs: 600 });
+export async function newTab({
+  layout,
+  name,
+  landing_timeout_ms = 8000,
+  chart_timeout_ms = 15000,
+} = {}) {
+  const landingTimeoutMs = Number(landing_timeout_ms);
+  const chartTimeoutMs = Number(chart_timeout_ms);
+  if (!Number.isFinite(landingTimeoutMs) || landingTimeoutMs < 0) {
+    throw new Error('landing_timeout_ms must be a non-negative number');
+  }
+  if (!Number.isFinite(chartTimeoutMs) || chartTimeoutMs < 0) {
+    throw new Error('chart_timeout_ms must be a non-negative number');
+  }
+
+  let landing = await findLandingTarget({ timeoutMs: Math.min(600, landingTimeoutMs) });
   let shellCounts = null;
 
   if (!landing) {
@@ -240,7 +265,7 @@ export async function newTab({ layout, name } = {}) {
       return count;
     });
 
-    landing = await findLandingTarget({ beforeIds: targetIdsBefore, timeoutMs: 8000 });
+    landing = await findLandingTarget({ beforeIds: targetIdsBefore, timeoutMs: landingTimeoutMs });
     const after = await withShell(evalIn => evalIn(`document.querySelectorAll('.tabs-container .tab').length`));
     shellCounts = { before, after };
   }
@@ -342,6 +367,7 @@ export async function newTab({ layout, name } = {}) {
   const chartTarget = await waitForChartTarget({
     chartIdsBefore,
     landingId: landing.id,
+    timeoutMs: chartTimeoutMs,
   });
   if (!chartTarget) {
     throw new Error(`Picked "${picked}" but no ready chart target became discoverable.`);
