@@ -101,6 +101,46 @@ test('worker pane verification never canonicalizes a formula to one component', 
   assert.deepEqual(pendingPaneIndexes(entries, panes), [0]);
 });
 
+test('worker pane verification accepts canonicalized spread only when pro_name preserves the full expression', () => {
+  const entries = [
+    { symbol: 'NASDAQ:QQQ/AMEX:SPY', timeframe: '5', studies: [] },
+  ];
+  const panes = [{
+    resolved_symbol: 'BATS:QQQ/BATS:SPY',
+    resolution: '5',
+    symbol_identity: {
+      name: 'QQQ/SPY',
+      full_name: 'BATS:QQQ/BATS:SPY',
+      pro_name: 'NASDAQ:QQQ/AMEX:SPY',
+      base_name: ['NASDAQ:QQQ', 'AMEX:SPY'],
+      type: 'spread',
+    },
+    studies: [],
+  }];
+
+  assert.deepEqual(pendingPaneIndexes(entries, panes), []);
+});
+
+test('worker pane verification does not reconstruct a spread from base_name components', () => {
+  const entries = [
+    { symbol: 'NASDAQ:QQQ/AMEX:SPY', timeframe: '5', studies: [] },
+  ];
+  const panes = [{
+    resolved_symbol: 'BATS:QQQ/BATS:SPY',
+    resolution: '5',
+    symbol_identity: {
+      name: 'QQQ/SPY',
+      full_name: 'BATS:QQQ/BATS:SPY',
+      pro_name: null,
+      base_name: ['NASDAQ:QQQ', 'AMEX:SPY'],
+      type: 'spread',
+    },
+    studies: [],
+  }];
+
+  assert.deepEqual(pendingPaneIndexes(entries, panes), [0]);
+});
+
 test('recorded tab completeness requires live ownership and exact pane assignments', () => {
   const plan = { tab_index: 0, pane_count: 2, handles: ['a', 'b'] };
   const state = {
