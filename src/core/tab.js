@@ -234,9 +234,11 @@ export async function newTab({
   name,
   landing_timeout_ms = 8000,
   chart_timeout_ms = 15000,
+  exact_layout = false,
 } = {}) {
   const landingTimeoutMs = Number(landing_timeout_ms);
   const chartTimeoutMs = Number(chart_timeout_ms);
+  const exactLayout = Boolean(exact_layout);
   if (!Number.isFinite(landingTimeoutMs) || landingTimeoutMs < 0) {
     throw new Error('landing_timeout_ms must be a non-negative number');
   }
@@ -333,6 +335,7 @@ export async function newTab({
     const clickByTitle = `
       (function() {
         var q = ${JSON.stringify(String(layout).toLowerCase())};
+        var exactOnly = ${exactLayout ? 'true' : 'false'};
         var items = document.querySelectorAll('.layout-list-item');
         var exact = null, contains = null;
         for (var i = 0; i < items.length; i++) {
@@ -343,7 +346,7 @@ export async function newTab({
           if (lower === q && !exact) exact = { item: items[i], title: title };
           else if (lower.indexOf(q) !== -1 && !contains) contains = { item: items[i], title: title };
         }
-        var pick = exact || contains;
+        var pick = exact || (exactOnly ? null : contains);
         if (!pick) return null;
         pick.item.click();
         return pick.title;

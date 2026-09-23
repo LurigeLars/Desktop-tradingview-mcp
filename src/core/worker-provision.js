@@ -278,32 +278,45 @@ function paneMatchesEntry(entry, pane) {
   return requiredStudiesPresent(entry, pane);
 }
 
-async function verifyConfiguredTarget(client, entries, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  let last = [];
-  do {
-    last = await evaluateValue(client, readPaneStatesExpression());
-    const complete = entries.every((entry, index) => paneMatchesEntry(entry, last[index]));
-    if (complete) return last;
-    if (Date.now() >= deadline) break;
-    await new Promise(resolve => setTimeout(resolve, 300));
-  } while (true);
-
-  const mismatches = entries.map((entry, index) => ({
-    handle: entry.handle,
-    pane_index: index,
-    requested_symbol: entry.symbol,
-    requested_timeframe: entry.timeframe,
-    observed: last[index] || null,
-  })).filter((item, index) => !paneMatchesEntry(entries[index], last[index]));
-
-  throw new Error('Worker pane verification failed: ' + JSON.stringify(mismatches));
+export function pendingPaneIndexes(entries, panes) {
+  const live = Array.isArray(panes) ? panes : [];
+  const pending = [];
+  for (let index = 0; index < (entries || []).length; index++) {
+    if (!paneMatchesEntry(entries[index], live[index])) pending.push(index);
+  }
+  return pending;
 }
 
-export async function configureTarget({ target, paneCount, entries }) {
+async function waitForPaneMatch(client, entry, index, timeoutMs = 4000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  do {
+    const panes = await evaluateValue(client, readPaneStatesExpression());
+    last = Array.isArray(panes) ? panes[index] : null;
+    if (paneMatchesEntry(entry, last)) return last;
+    if (Date.now() >= deadline) break;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  } while (true);
+
+  throw new Error(
+    'Worker pane verification failed: ' + JSON.stringify({
+      handle: entry.handle,
+      pane_index: index,
+      requested_symbol: entry.symbol,
+      requested_timeframe: entry.timeframe,
+      observed: last,
+    }),
+  );
+}
+
+export async function configureTarget({ target, paneCount, entries, maxPanes = 1 }) {
   if (!target?.id) throw new Error('CDP target id is required for worker provisioning');
   if (entries.length !== paneCount) {
     throw new Error('Worker tab entry count does not match requested pane count');
+  }
+  const paneBudget = Number(maxPanes);
+  if (!Number.isInteger(paneBudget) || paneBudget < 1 || paneBudget > 8) {
+    throw new Error('maxPanes must be an integer from 1 to 8');
   }
 
   let client = null;
@@ -312,30 +325,56 @@ export async function configureTarget({ target, paneCount, entries }) {
     await client.Runtime.enable();
 
     const layoutCode = layoutCodeForPaneCount(paneCount);
-    await evaluateValue(
-      client,
-      'window.TradingViewApi._chartWidgetCollection.setLayout(' + JSON.stringify(layoutCode) + ')',
-      { awaitPromise: true },
-    );
-    await waitForPaneCount(client, paneCount);
+    let live = await evaluateValue(client, readPaneStatesExpression());
 
+    // Never reset an already-correct multi-pane layout on every resumable call.
+    // Change layout only when the pane count itself is wrong.
+    if (!Array.isArray(live) || live.length !== Number(paneCount)) {
+      await evaluateValue(
+        client,
+        'window.TradingViewApi._chartWidgetCollection.setLayout(' + JSON.stringify(layoutCode) + ')',
+        { awaitPromise: true },
+      );
+      await waitForPaneCount(client, paneCount, 5000);
+      live = await evaluateValue(client, readPaneStatesExpression());
+    }
+
+    const pendingBefore = pendingPaneIndexes(entries, live);
+    const selected = pendingBefore.slice(0, paneBudget);
     const paneResults = [];
-    for (let index = 0; index < entries.length; index++) {
+
+    for (const index of selected) {
       const result = await evaluateValue(
         client,
         configurePaneExpression(index, entries[index]),
         { awaitPromise: true },
       );
-      paneResults.push(result);
       if (!result?.success) {
         throw new Error(
           'Worker pane ' + index + ' study configuration failed: ' + JSON.stringify(result?.studies || []),
         );
       }
+
+      const verifiedPane = await waitForPaneMatch(client, entries[index], index);
+      paneResults.push({
+        pane_index: index,
+        ...result,
+        verified: verifiedPane,
+      });
     }
 
-    const verified = await verifyConfiguredTarget(client, entries);
-    return { success: true, layout_code: layoutCode, pane_results: paneResults, verified };
+    const verified = await evaluateValue(client, readPaneStatesExpression());
+    const pending = pendingPaneIndexes(entries, verified);
+
+    return {
+      success: true,
+      complete: pending.length === 0,
+      layout_code: layoutCode,
+      configured_panes: selected,
+      pending_panes: pending,
+      pane_results: paneResults,
+      verified,
+    };
   } finally {
     try { if (client) await client.close(); } catch { /* best effort */ }
   }
@@ -371,40 +410,69 @@ export async function inspectTargetPaneCounts(targets) {
   return results;
 }
 
-async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTargets }) {
+function isLayoutNotFoundError(error) {
+  return /Layout matching .* not found/i.test(String(error?.message || error || ''));
+}
+
+async function openOrCreateWorkerTab({
+  plan,
+  owned,
+  layoutPrefix,
+  deps,
+  liveTargets,
+  recoverSavedLayout = true,
+}) {
   const newTabOptions = {
     landing_timeout_ms: 4000,
     chart_timeout_ms: 8000,
   };
+
   if (owned?.chart_id) {
     const live = await findTargetForChartId(owned.chart_id, liveTargets);
-    if (live) return { target: live, layoutName: owned.layout_name, reused: true };
+    if (live) {
+      return {
+        target: live,
+        layoutName: owned.layout_name,
+        reused: true,
+        openedThisCall: false,
+      };
+    }
+  }
 
-    if (owned.layout_name) {
-      try {
-        const opened = await deps.newTab({ layout: owned.layout_name, ...newTabOptions });
-        const target = await findTargetForChartId(opened.chart_id, null, deps.listTargets);
-        if (target) {
-          return {
-            target,
-            layoutName: owned.layout_name,
-            reused: true,
-          };
-        }
-      } catch {
-        // Saved layout may have been deleted/renamed; create a replacement.
+  if (owned?.layout_name && recoverSavedLayout) {
+    try {
+      const opened = await deps.newTab({
+        layout: owned.layout_name,
+        exact_layout: true,
+        ...newTabOptions,
+      });
+      const target = await findTargetForChartId(opened.chart_id, null, deps.listTargets);
+      if (target) {
+        return {
+          target,
+          layoutName: owned.layout_name,
+          reused: true,
+          openedThisCall: true,
+          recoveredByName: true,
+        };
       }
+    } catch (error) {
+      if (!isLayoutNotFoundError(error)) {
+        throw new Error(
+          'Worker saved-layout reopen failed for "' + owned.layout_name + '": ' +
+          (error?.message || String(error)),
+        );
+      }
+      // Confirmed missing saved layout: create a replacement below.
     }
   }
 
   const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
+
   let created;
   try {
     created = await deps.newTab({ layout: 'new', name: desiredName, ...newTabOptions });
   } catch (error) {
-    // Do not blindly repeat a full create flow after target/discovery failure.
-    // The old retry could turn one ~15s failure into a connector-level timeout
-    // and potentially leak an untracked tab/layout.
     throw new Error(
       'Worker tab create failed for "' + desiredName + '": ' +
       (error?.message || String(error)),
@@ -417,6 +485,7 @@ async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTarg
     target,
     layoutName: created.layout || desiredName,
     reused: false,
+    openedThisCall: true,
   };
 }
 
@@ -430,6 +499,7 @@ async function closeTabByChartId(chartId) {
 
 export async function provisionWorker({
   max_tabs = 1,
+  max_panes = 1,
   dry_run = false,
   force = false,
   adopt_single_existing = false,
@@ -440,6 +510,10 @@ export async function provisionWorker({
   const maxTabs = Number(max_tabs);
   if (!Number.isInteger(maxTabs) || maxTabs < 1 || maxTabs > 8) {
     throw new Error('max_tabs must be an integer from 1 to 8');
+  }
+  const maxPanes = Number(max_panes);
+  if (!Number.isInteger(maxPanes) || maxPanes < 1 || maxPanes > 8) {
+    throw new Error('max_panes must be an integer from 1 to 8');
   }
 
   let state = deps.status();
@@ -535,12 +609,37 @@ export async function provisionWorker({
     const started = Date.now();
     let stage = 'open_or_create';
     try {
+      const slot = Number(plan.tab_index);
+      const layoutPrefix = layout_prefix || process.env.TV_WORKER_LAYOUT_PREFIX || 'DTV Worker';
+      let owned = ownedBySlot.get(slot) || null;
+      const hadPersistedIntent = !!owned;
+
+      // Journal the deterministic layout intent before opening TradingView.
+      // If the remote request dies mid-create, the next call can recover this
+      // exact saved layout instead of creating an untracked duplicate.
+      if (!owned) {
+        owned = {
+          slot,
+          chart_id: null,
+          layout_name: buildWorkerLayoutName(layoutPrefix, slot),
+          pane_count: plan.pane_count,
+          provisioning_state: 'intent',
+          intent_at: new Date(deps.now()).toISOString(),
+        };
+        const intentTabs = [
+          ...(state.worker_tabs || []).filter(tab => Number(tab.slot) !== slot),
+          owned,
+        ].sort((a, b) => Number(a.slot) - Number(b.slot));
+        state = deps.record({ worker_tabs: intentTabs });
+      }
+
       const opened = await openOrCreateWorkerTab({
         plan,
-        owned: ownedBySlot.get(Number(plan.tab_index)),
-        layoutPrefix: layout_prefix || process.env.TV_WORKER_LAYOUT_PREFIX || 'DTV Worker',
+        owned,
+        layoutPrefix,
         deps,
         liveTargets: await deps.listTargets(),
+        recoverSavedLayout: hadPersistedIntent,
       });
 
       const openDurationMs = Date.now() - started;
@@ -557,18 +656,62 @@ export async function provisionWorker({
         },
       ].sort((a, b) => Number(a.slot) - Number(b.slot));
 
-      // Persist ownership before mutating the chart. If configuration fails,
-      // the next provisioning call can safely reuse/repair this DTV-owned tab
-      // instead of leaking an untracked connection.
-      state = deps.record({ worker_tabs: tabs });
+      // Persist ownership immediately and clear stale assignments for this
+      // topology slot. The next MCP call can safely resume against the same
+      // DTV-owned chart even if the current request ends here.
+      const clearedAssignments = Object.fromEntries(
+        entries.map(entry => [entry.handle, null]),
+      );
+      state = deps.record({ assignments: clearedAssignments, worker_tabs: tabs });
 
-      stage = 'configure_target';
+      // Opening/creating a TradingView tab is already a bounded mutation phase.
+      // Do not combine it with pane configuration in the same remote MCP call.
+      if (opened.openedThisCall) {
+        results.push({
+          tab_index: plan.tab_index,
+          success: true,
+          complete: false,
+          stage: 'tab_ready',
+          chart_id: chartId,
+          layout_name: opened.layoutName,
+          pane_count: plan.pane_count,
+          reused: opened.reused,
+          recovered_by_name: !!opened.recoveredByName,
+          pending_panes: entries.map((_, index) => index),
+          open_duration_ms: openDurationMs,
+          duration_ms: Date.now() - started,
+        });
+        break;
+      }
+
+      stage = 'configure_panes';
       const configureStarted = Date.now();
       const configured = await deps.configureTarget({
         target: opened.target,
         paneCount: plan.pane_count,
         entries,
+        maxPanes,
       });
+
+      if (configured.complete === false) {
+        results.push({
+          tab_index: plan.tab_index,
+          success: true,
+          complete: false,
+          stage,
+          chart_id: chartId,
+          layout_name: opened.layoutName,
+          pane_count: plan.pane_count,
+          reused: opened.reused,
+          layout_code: configured.layout_code,
+          configured_panes: configured.configured_panes || [],
+          pending_panes: configured.pending_panes || [],
+          open_duration_ms: openDurationMs,
+          configure_duration_ms: Date.now() - configureStarted,
+          duration_ms: Date.now() - started,
+        });
+        break;
+      }
 
       const assignments = {};
       for (let index = 0; index < entries.length; index++) {
@@ -587,11 +730,15 @@ export async function provisionWorker({
       results.push({
         tab_index: plan.tab_index,
         success: true,
+        complete: true,
+        stage: 'complete',
         chart_id: chartId,
         layout_name: opened.layoutName,
         pane_count: plan.pane_count,
         reused: opened.reused,
         layout_code: configured.layout_code,
+        configured_panes: configured.configured_panes || [],
+        pending_panes: [],
         open_duration_ms: openDurationMs,
         configure_duration_ms: Date.now() - configureStarted,
         duration_ms: Date.now() - started,
@@ -657,7 +804,7 @@ export async function provisionWorker({
   const cleanupComplete = cleanup.every(item => item.success);
 
   return {
-    success: results.every(result => result.success) && remaining.length === 0 && cleanupComplete,
+    success: results.every(result => result.success) && cleanupComplete,
     complete: remaining.length === 0 && cleanupComplete,
     processed_tabs: results.length,
     remaining_tabs: remaining.map(plan => plan.tab_index),
