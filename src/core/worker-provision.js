@@ -520,6 +520,7 @@ async function closeTabByChartId(chartId) {
 
 export async function provisionWorker({
   max_tabs = 1,
+  max_panes = 1,
   dry_run = false,
   force = false,
   adopt_single_existing = false,
@@ -530,6 +531,10 @@ export async function provisionWorker({
   const maxTabs = Number(max_tabs);
   if (!Number.isInteger(maxTabs) || maxTabs < 1 || maxTabs > 8) {
     throw new Error('max_tabs must be an integer from 1 to 8');
+  }
+  const maxPanes = Number(max_panes);
+  if (!Number.isInteger(maxPanes) || maxPanes < 1 || maxPanes > 8) {
+    throw new Error('max_panes must be an integer from 1 to 8');
   }
 
   let state = deps.status();
@@ -647,18 +652,62 @@ export async function provisionWorker({
         },
       ].sort((a, b) => Number(a.slot) - Number(b.slot));
 
-      // Persist ownership before mutating the chart. If configuration fails,
-      // the next provisioning call can safely reuse/repair this DTV-owned tab
-      // instead of leaking an untracked connection.
-      state = deps.record({ worker_tabs: tabs });
+      // Persist ownership immediately and clear stale assignments for this
+      // topology slot. The next MCP call can safely resume against the same
+      // DTV-owned chart even if the current request ends here.
+      const clearedAssignments = Object.fromEntries(
+        entries.map(entry => [entry.handle, null]),
+      );
+      state = deps.record({ assignments: clearedAssignments, worker_tabs: tabs });
 
-      stage = 'configure_target';
+      // Opening/creating a TradingView tab is already a bounded mutation phase.
+      // Do not combine it with pane configuration in the same remote MCP call.
+      if (opened.openedThisCall) {
+        results.push({
+          tab_index: plan.tab_index,
+          success: true,
+          complete: false,
+          stage: 'tab_ready',
+          chart_id: chartId,
+          layout_name: opened.layoutName,
+          pane_count: plan.pane_count,
+          reused: opened.reused,
+          recovered_by_name: !!opened.recoveredByName,
+          pending_panes: entries.map((_, index) => index),
+          open_duration_ms: openDurationMs,
+          duration_ms: Date.now() - started,
+        });
+        break;
+      }
+
+      stage = 'configure_panes';
       const configureStarted = Date.now();
       const configured = await deps.configureTarget({
         target: opened.target,
         paneCount: plan.pane_count,
         entries,
+        maxPanes,
       });
+
+      if (!configured.complete) {
+        results.push({
+          tab_index: plan.tab_index,
+          success: true,
+          complete: false,
+          stage,
+          chart_id: chartId,
+          layout_name: opened.layoutName,
+          pane_count: plan.pane_count,
+          reused: opened.reused,
+          layout_code: configured.layout_code,
+          configured_panes: configured.configured_panes || [],
+          pending_panes: configured.pending_panes || [],
+          open_duration_ms: openDurationMs,
+          configure_duration_ms: Date.now() - configureStarted,
+          duration_ms: Date.now() - started,
+        });
+        break;
+      }
 
       const assignments = {};
       for (let index = 0; index < entries.length; index++) {
@@ -677,11 +726,15 @@ export async function provisionWorker({
       results.push({
         tab_index: plan.tab_index,
         success: true,
+        complete: true,
+        stage: 'complete',
         chart_id: chartId,
         layout_name: opened.layoutName,
         pane_count: plan.pane_count,
         reused: opened.reused,
         layout_code: configured.layout_code,
+        configured_panes: configured.configured_panes || [],
+        pending_panes: [],
         open_duration_ms: openDurationMs,
         configure_duration_ms: Date.now() - configureStarted,
         duration_ms: Date.now() - started,
@@ -747,7 +800,7 @@ export async function provisionWorker({
   const cleanupComplete = cleanup.every(item => item.success);
 
   return {
-    success: results.every(result => result.success) && remaining.length === 0 && cleanupComplete,
+    success: results.every(result => result.success) && cleanupComplete,
     complete: remaining.length === 0 && cleanupComplete,
     processed_tabs: results.length,
     remaining_tabs: remaining.map(plan => plan.tab_index),
