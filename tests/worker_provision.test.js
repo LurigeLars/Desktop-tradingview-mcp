@@ -407,3 +407,52 @@ test('reserved slots reduce the total usable budget including external charts', 
     /9 projected chart connections.*exceed 8 usable slots/,
   );
 });
+
+
+test('worker provisioning does not repeat a failed tab create in the same call', async () => {
+  const store = makeStore();
+  setUniverse({
+    entries: [{ handle: 'a', symbol: 'EX:AAA', timeframe: '5' }],
+    _deps: store.deps,
+  });
+
+  const external = [{
+    id: 'external-target',
+    type: 'page',
+    url: 'https://www.tradingview.com/chart/external-chart/',
+  }];
+
+  let newTabCalls = 0;
+  let receivedArgs = null;
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => external,
+    inspectTargets: async () => [{
+      target_id: 'external-target',
+      chart_id: 'external-chart',
+      pane_count: 1,
+      panes: [{ resolved_symbol: 'EX:OTHER', resolution: '5', studies: [] }],
+    }],
+    newTab: async args => {
+      newTabCalls += 1;
+      receivedArgs = args;
+      throw new Error('no ready chart target became discoverable');
+    },
+    configureTarget: async () => {
+      throw new Error('configureTarget must not run after tab create failure');
+    },
+    closeTabByChartId: async () => ({ success: true }),
+  };
+
+  const result = await provisionWorker({ max_tabs: 1, _deps: runtime });
+
+  assert.equal(newTabCalls, 1);
+  assert.equal(receivedArgs.layout, 'new');
+  assert.equal(receivedArgs.landing_timeout_ms, 4000);
+  assert.equal(receivedArgs.chart_timeout_ms, 8000);
+  assert.equal(result.results.length, 1);
+  assert.equal(result.results[0].success, false);
+  assert.equal(result.results[0].stage, 'open_or_create');
+  assert.match(result.results[0].error, /Worker tab create failed/);
+});
