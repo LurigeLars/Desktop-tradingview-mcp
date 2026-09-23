@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  activePaneStates,
   buildWorkerLayoutName,
   layoutCodeForPaneCount,
   pendingPaneIndexes,
@@ -26,6 +27,17 @@ test('worker pane counts map only to supported TradingView layouts', () => {
 test('worker layout names are technical and deterministic', () => {
   assert.equal(buildWorkerLayoutName('Worker', 0), 'Worker 01');
   assert.equal(buildWorkerLayoutName('Worker', 6), 'Worker 07');
+});
+
+test('active pane state follows inlineChartsCount when getAll retains stale hidden widgets', () => {
+  const panes = Array.from({ length: 8 }, (_, pane_index) => ({ pane_index }));
+
+  assert.deepEqual(
+    activePaneStates({ inline_count: 4, panes }).map(pane => pane.pane_index),
+    [0, 1, 2, 3],
+  );
+  assert.equal(activePaneStates({ inline_count: 8, panes: panes.slice(0, 4) }).length, 4);
+  assert.equal(activePaneStates({ inline_count: null, panes }).length, 8);
 });
 
 test('pending pane detection skips already-correct resident panes', () => {
