@@ -372,13 +372,17 @@ export async function inspectTargetPaneCounts(targets) {
 }
 
 async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTargets }) {
+  const newTabOptions = {
+    landing_timeout_ms: 4000,
+    chart_timeout_ms: 8000,
+  };
   if (owned?.chart_id) {
     const live = await findTargetForChartId(owned.chart_id, liveTargets);
     if (live) return { target: live, layoutName: owned.layout_name, reused: true };
 
     if (owned.layout_name) {
       try {
-        const opened = await deps.newTab({ layout: owned.layout_name });
+        const opened = await deps.newTab({ layout: owned.layout_name, ...newTabOptions });
         const target = await findTargetForChartId(opened.chart_id, null, deps.listTargets);
         if (target) {
           return {
@@ -396,10 +400,15 @@ async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTarg
   const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
   let created;
   try {
-    created = await deps.newTab({ layout: 'new', name: desiredName });
+    created = await deps.newTab({ layout: 'new', name: desiredName, ...newTabOptions });
   } catch (error) {
-    const fallbackName = desiredName + '-' + deps.now().toString(36);
-    created = await deps.newTab({ layout: 'new', name: fallbackName });
+    // Do not blindly repeat a full create flow after target/discovery failure.
+    // The old retry could turn one ~15s failure into a connector-level timeout
+    // and potentially leak an untracked tab/layout.
+    throw new Error(
+      'Worker tab create failed for "' + desiredName + '": ' +
+      (error?.message || String(error)),
+    );
   }
   const target = await findTargetForChartId(created.chart_id, null, deps.listTargets);
   if (!target) throw new Error('New worker chart target was not discoverable after creation');
@@ -523,6 +532,8 @@ export async function provisionWorker({
       return entry;
     });
 
+    const started = Date.now();
+    let stage = 'open_or_create';
     try {
       const opened = await openOrCreateWorkerTab({
         plan,
@@ -532,6 +543,7 @@ export async function provisionWorker({
         liveTargets: await deps.listTargets(),
       });
 
+      const openDurationMs = Date.now() - started;
       const chartId = chartIdFromTarget(opened.target);
       if (!chartId) throw new Error('Worker target has no stable TradingView chart id');
 
@@ -550,6 +562,8 @@ export async function provisionWorker({
       // instead of leaking an untracked connection.
       state = deps.record({ worker_tabs: tabs });
 
+      stage = 'configure_target';
+      const configureStarted = Date.now();
       const configured = await deps.configureTarget({
         target: opened.target,
         paneCount: plan.pane_count,
@@ -578,11 +592,16 @@ export async function provisionWorker({
         pane_count: plan.pane_count,
         reused: opened.reused,
         layout_code: configured.layout_code,
+        open_duration_ms: openDurationMs,
+        configure_duration_ms: Date.now() - configureStarted,
+        duration_ms: Date.now() - started,
       });
     } catch (error) {
       results.push({
         tab_index: plan.tab_index,
         success: false,
+        stage,
+        duration_ms: Date.now() - started,
         error: error?.message || String(error),
       });
       break;
