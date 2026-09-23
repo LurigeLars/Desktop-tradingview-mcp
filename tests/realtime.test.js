@@ -77,6 +77,33 @@ test('symbol filtering is exact for expressions and never collapses to a compone
   );
 });
 
+test('qualified symbol filtering accepts only metadata-proven TradingView canonicalization', () => {
+  const proven = {
+    resolved_symbol: 'BATS:QQQ',
+    _symbol_identity: {
+      name: 'QQQ',
+      pro_name: 'NASDAQ:QQQ',
+      listed_exchange: 'NASDAQ',
+    },
+  };
+  const unproven = {
+    resolved_symbol: 'BATS:QQQ',
+    _symbol_identity: {
+      name: 'QQQ',
+      listed_exchange: 'NYSE',
+    },
+  };
+
+  assert.deepEqual(
+    filterSnapshotsBySymbols([proven], ['NASDAQ:QQQ']),
+    { snapshots: [proven], missing: [], ambiguous: [] },
+  );
+  assert.deepEqual(
+    filterSnapshotsBySymbols([unproven], ['NASDAQ:QQQ']),
+    { snapshots: [], missing: ['NASDAQ:QQQ'], ambiguous: [] },
+  );
+});
+
 test('bare symbol filtering resolves one unique exchange-qualified resident symbol', () => {
   const snapshots = [
     { resolved_symbol: 'EX:AAA', pane_index: 0 },
@@ -122,6 +149,40 @@ test('omitting symbol filters returns every resident snapshot', () => {
   );
 });
 
+
+test('resident worker selection accepts TradingView canonical venue when identity metadata proves it', () => {
+  const entry = {
+    handle: 'qqq',
+    key: 'NASDAQ:QQQ|5',
+    symbol: 'NASDAQ:QQQ',
+    timeframe: '5',
+    studies: [],
+    groups: [],
+    assignment: { target_id: 'worker-target', pane_index: 0 },
+  };
+  const snapshot = {
+    target_id: 'worker-target',
+    resolved_symbol: 'BATS:QQQ',
+    resolution: '5',
+    chart_id: 'shared-chart',
+    pane_index: 0,
+    studies: [],
+    success: true,
+    _symbol_identity: {
+      name: 'QQQ',
+      full_name: 'BATS:QQQ',
+      pro_name: 'NASDAQ:QQQ',
+      base_name: ['NASDAQ:QQQ'],
+      listed_exchange: 'NASDAQ',
+      exchange: 'Cboe One',
+    },
+  };
+
+  const selected = selectSnapshotsForWorkerEntries([entry], [snapshot]);
+  assert.equal(selected.unmatched.length, 0);
+  assert.equal(selected.snapshots.length, 1);
+  assert.equal(selected.snapshots[0].resolved_symbol, 'BATS:QQQ');
+});
 
 test('worker selection matches exact symbol and normalized timeframe without exposing pane layout', () => {
   const entry = {
