@@ -523,17 +523,59 @@ async function openOrCreateWorkerTab({
   };
 }
 
-async function closeTabByOwned(owned) {
-  const state = await tabCore.list();
-  const found = state.tabs.find(tab =>
-    tab.is_chart && (
-      (owned?.target_id && String(tab.id) === String(owned.target_id))
-      || (owned?.chart_id && String(tab.chart_id) === String(owned.chart_id))
-    )
+export async function closeTabByOwned(owned, {
+  listTargets = listTradingViewChartTargets,
+  closeTarget = targetId => CDP.Close({ host: CDP_HOST, port: CDP_PORT, id: targetId }),
+  listTabs = tabCore.list,
+  switchTab = tabCore.switchTab,
+  closeTab = tabCore.closeTab,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  timeoutMs = 3000,
+} = {}) {
+  const targetId = owned?.target_id ? String(owned.target_id) : null;
+
+  if (targetId) {
+    const before = await listTargets();
+    if (!before.some(target => String(target.id) === targetId)) {
+      return { success: true, closed: false, reason: 'already_absent', target_id: targetId };
+    }
+
+    await closeTarget(targetId);
+
+    const deadline = Date.now() + Number(timeoutMs);
+    do {
+      const remaining = await listTargets();
+      if (!remaining.some(target => String(target.id) === targetId)) {
+        return { success: true, closed: true, via: 'target_id', target_id: targetId };
+      }
+      if (Date.now() >= deadline) break;
+      await wait(100);
+    } while (true);
+
+    throw new Error('Worker target ' + targetId + ' remained present after close request.');
+  }
+
+  const chartId = owned?.chart_id ? String(owned.chart_id) : null;
+  if (!chartId) {
+    return { success: true, closed: false, reason: 'missing_runtime_identity' };
+  }
+
+  const state = await listTabs();
+  const matches = state.tabs.filter(tab =>
+    tab.is_chart && String(tab.chart_id) === chartId
   );
-  if (!found) return { success: true, closed: false, reason: 'already_absent' };
-  await tabCore.switchTab({ index: found.index });
-  return tabCore.closeTab();
+  if (matches.length === 0) {
+    return { success: true, closed: false, reason: 'already_absent', chart_id: chartId };
+  }
+  if (matches.length !== 1) {
+    throw new Error(
+      'Cannot safely close worker chart ' + chartId +
+      ' without target_id because ' + matches.length + ' matching tabs are open.'
+    );
+  }
+
+  await switchTab({ index: matches[0].index });
+  return closeTab();
 }
 
 export async function provisionWorker({
