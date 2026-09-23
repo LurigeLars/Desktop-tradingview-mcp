@@ -180,13 +180,19 @@ export function selectSnapshotsForWorkerEntries(entries, snapshots) {
       !!matchWatchlistSymbol(entry?.symbol, [snapshot.resolved_symbol]).matched
       && normalizedResolution(snapshot.resolution) === wantedTimeframe;
 
-    if (entry?.assignment?.chart_id != null && entry?.assignment?.pane_index != null) {
-      candidates = available.filter(({ snapshot, index }) =>
-        !claimed.has(index)
-        && String(snapshot.chart_id || '') === String(entry.assignment.chart_id)
-        && Number(snapshot.pane_index) === Number(entry.assignment.pane_index)
-        && contentMatches(snapshot)
-      );
+    if (
+      entry?.assignment?.pane_index != null
+      && (entry?.assignment?.target_id != null || entry?.assignment?.chart_id != null)
+    ) {
+      candidates = available.filter(({ snapshot, index }) => {
+        if (claimed.has(index)) return false;
+        const identityMatches = entry.assignment.target_id != null
+          ? String(snapshot.target_id || '') === String(entry.assignment.target_id)
+          : String(snapshot.chart_id || '') === String(entry.assignment.chart_id);
+        return identityMatches
+          && Number(snapshot.pane_index) === Number(entry.assignment.pane_index)
+          && contentMatches(snapshot);
+      });
     }
 
     if (!candidates.length) {
