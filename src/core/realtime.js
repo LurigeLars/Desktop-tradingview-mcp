@@ -7,7 +7,7 @@
 import CDP from 'chrome-remote-interface';
 import { CDP_HOST, CDP_PORT, listTradingViewChartTargets } from '../connection.js';
 import { normalizeWorkerTimeframe, resolveWorkerSelection } from './worker.js';
-import { matchWatchlistSymbol } from './watchlist.js';
+import { matchTradingViewResolvedSymbol, matchWatchlistSymbol } from './watchlist.js';
 
 const MAX_BARS = 100;
 const TARGET_CONCURRENCY = 8;
@@ -120,6 +120,21 @@ export function filterSnapshotsBySymbols(snapshots, requestedSymbols) {
       continue;
     }
 
+    const canonicalMatches = all
+      .map((snapshot, index) => ({ snapshot, index }))
+      .filter(({ snapshot }) =>
+        !!matchTradingViewResolvedSymbol(
+          request,
+          snapshot.resolved_symbol,
+          snapshot._symbol_identity || {},
+        ).matched
+      );
+
+    if (canonicalMatches.length) {
+      canonicalMatches.forEach(({ index }) => selectedIndexes.add(index));
+      continue;
+    }
+
     missing.push(request);
   }
 
@@ -177,7 +192,11 @@ export function selectSnapshotsForWorkerEntries(entries, snapshots) {
 
     const wantedTimeframe = normalizedResolution(entry?.timeframe);
     const contentMatches = snapshot =>
-      !!matchWatchlistSymbol(entry?.symbol, [snapshot.resolved_symbol]).matched
+      !!matchTradingViewResolvedSymbol(
+        entry?.symbol,
+        snapshot.resolved_symbol,
+        snapshot._symbol_identity || {},
+      ).matched
       && normalizedResolution(snapshot.resolution) === wantedTimeframe;
 
     if (
@@ -345,6 +364,19 @@ function buildTargetExpression({ bars, includeStudies, studyFilters }) {
             if (!info || typeof info !== 'object') info = {};
           } catch(e) { info = {}; }
 
+          var symbolIdentity = {
+            name: info.name || null,
+            ticker: info.ticker || null,
+            full_name: info.full_name || null,
+            pro_name: info.pro_name || null,
+            base_name: Array.isArray(info.base_name)
+              ? info.base_name.slice(0, 8)
+              : (info.base_name ? [info.base_name] : []),
+            exchange: info.exchange || null,
+            listed_exchange: info.listed_exchange || null,
+            type: info.type || null,
+          };
+
           var delayMinutes = finiteOrNull(info.delay);
           var barsObj = null;
           try { barsObj = series.bars ? series.bars() : null; } catch(e) {}
@@ -446,6 +478,7 @@ function buildTargetExpression({ bars, includeStudies, studyFilters }) {
             success: !!(symbol && hasMarketData),
             resolved_symbol: symbol,
             resolution: resolution,
+            _symbol_identity: symbolIdentity,
             quote: quote,
             current_bar: currentBar,
             recent_bars: recentBars,
@@ -597,6 +630,10 @@ export async function realtimeSnapshot({
     }));
 
   const failedSnapshots = filtered.snapshots.filter(snapshot => !snapshot.success).length;
+  const publicSnapshots = filtered.snapshots.map(snapshot => {
+    const { _symbol_identity, ...publicSnapshot } = snapshot;
+    return publicSnapshot;
+  });
 
   const missingHandles = workerSelection?.missing_handles || [];
   const missingGroups = workerSelection?.missing_groups || [];
@@ -635,7 +672,7 @@ export async function realtimeSnapshot({
     started_at: new Date(startedAt).toISOString(),
     completed_at: new Date().toISOString(),
     duration_ms: Date.now() - startedAt,
-    snapshots: filtered.snapshots,
+    snapshots: publicSnapshots,
     errors,
   };
 }
