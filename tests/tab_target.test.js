@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isChartPageTarget, rankLandingCandidates, withDeadline } from '../src/core/tab.js';
+import { isChartPageTarget, isNewTabPageTarget, rankLandingCandidates, withDeadline } from '../src/core/tab.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
   assert.equal(isChartPageTarget({
@@ -64,5 +64,34 @@ test('bounded target helper returns fast operations and rejects hung probes', as
   await assert.rejects(
     () => withDeadline(new Promise(resolve => setTimeout(resolve, 50)), 5, 'probe'),
     /probe timed out after 5ms/,
+  );
+});
+
+
+test('TradingView Desktop new-tab target is recognized by its stable app.asar URL', () => {
+  assert.equal(isNewTabPageTarget({
+    type: 'page',
+    url: 'file:///C:/Program%20Files/WindowsApps/TradingView/app.asar/app/new-tab/index.html',
+  }), true);
+  assert.equal(isNewTabPageTarget({
+    type: 'page',
+    url: 'https://www.tradingview.com/chart/abc/',
+  }), false);
+});
+
+test('known Desktop new-tab target is preferred over generic landing candidates', () => {
+  const before = new Set(['generic']);
+  const targets = [
+    { id: 'generic', type: 'page', url: 'file:///generic.html', title: 'New tab' },
+    {
+      id: 'desktop-new',
+      type: 'page',
+      url: 'file:///C:/TradingView/resources/app.asar/app/new-tab/index.html',
+      title: 'Workspace',
+    },
+  ];
+  assert.deepEqual(
+    rankLandingCandidates(targets, before).map(target => target.id),
+    ['desktop-new', 'generic'],
   );
 });
