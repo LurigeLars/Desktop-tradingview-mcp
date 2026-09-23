@@ -410,17 +410,12 @@ export async function inspectTargetPaneCounts(targets) {
   return results;
 }
 
-function isLayoutNotFoundError(error) {
-  return /Layout matching .* not found/i.test(String(error?.message || error || ''));
-}
-
 async function openOrCreateWorkerTab({
   plan,
   owned,
   layoutPrefix,
   deps,
   liveTargets,
-  recoverSavedLayout = true,
 }) {
   const newTabOptions = {
     landing_timeout_ms: 4000,
@@ -435,57 +430,39 @@ async function openOrCreateWorkerTab({
         layoutName: owned.layout_name,
         reused: true,
         openedThisCall: false,
+        directChart: true,
       };
-    }
-  }
-
-  if (owned?.layout_name && recoverSavedLayout) {
-    try {
-      const opened = await deps.newTab({
-        layout: owned.layout_name,
-        exact_layout: true,
-        ...newTabOptions,
-      });
-      const target = await findTargetForChartId(opened.chart_id, null, deps.listTargets);
-      if (target) {
-        return {
-          target,
-          layoutName: owned.layout_name,
-          reused: true,
-          openedThisCall: true,
-          recoveredByName: true,
-        };
-      }
-    } catch (error) {
-      if (!isLayoutNotFoundError(error)) {
-        throw new Error(
-          'Worker saved-layout reopen failed for "' + owned.layout_name + '": ' +
-          (error?.message || String(error)),
-        );
-      }
-      // Confirmed missing saved layout: create a replacement below.
     }
   }
 
   const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
 
+  // Worker provisioning only needs a dedicated chart target. Do not depend on
+  // TradingView's saved-layout picker UI; open a new Desktop tab and navigate
+  // its known new-tab target directly to /chart/.
   let created;
   try {
-    created = await deps.newTab({ layout: 'new', name: desiredName, ...newTabOptions });
+    created = await deps.newTab({
+      as_chart: true,
+      force_new_tab: true,
+      ...newTabOptions,
+    });
   } catch (error) {
     throw new Error(
-      'Worker tab create failed for "' + desiredName + '": ' +
+      'Worker direct chart-tab create failed for "' + desiredName + '": ' +
       (error?.message || String(error)),
     );
   }
+
   const target = await findTargetForChartId(created.chart_id, null, deps.listTargets);
-  if (!target) throw new Error('New worker chart target was not discoverable after creation');
+  if (!target) throw new Error('New worker chart target was not discoverable after direct navigation');
 
   return {
     target,
-    layoutName: created.layout || desiredName,
+    layoutName: desiredName,
     reused: false,
     openedThisCall: true,
+    directChart: true,
   };
 }
 
@@ -612,11 +589,9 @@ export async function provisionWorker({
       const slot = Number(plan.tab_index);
       const layoutPrefix = layout_prefix || process.env.TV_WORKER_LAYOUT_PREFIX || 'DTV Worker';
       let owned = ownedBySlot.get(slot) || null;
-      const hadPersistedIntent = !!owned;
-
-      // Journal the deterministic layout intent before opening TradingView.
-      // If the remote request dies mid-create, the next call can recover this
-      // exact saved layout instead of creating an untracked duplicate.
+      // Journal deterministic worker ownership intent before opening
+      // TradingView. The technical name is metadata only; worker creation no
+      // longer depends on a saved TradingView layout.
       if (!owned) {
         owned = {
           slot,
@@ -639,7 +614,6 @@ export async function provisionWorker({
         layoutPrefix,
         deps,
         liveTargets: await deps.listTargets(),
-        recoverSavedLayout: hadPersistedIntent,
       });
 
       const openDurationMs = Date.now() - started;
@@ -676,7 +650,7 @@ export async function provisionWorker({
           layout_name: opened.layoutName,
           pane_count: plan.pane_count,
           reused: opened.reused,
-          recovered_by_name: !!opened.recoveredByName,
+          direct_chart: !!opened.directChart,
           pending_panes: entries.map((_, index) => index),
           open_duration_ms: openDurationMs,
           duration_ms: Date.now() - started,
@@ -736,6 +710,7 @@ export async function provisionWorker({
         layout_name: opened.layoutName,
         pane_count: plan.pane_count,
         reused: opened.reused,
+        direct_chart: !!opened.directChart,
         layout_code: configured.layout_code,
         configured_panes: configured.configured_panes || [],
         pending_panes: [],
