@@ -42,6 +42,65 @@ test('pending pane detection skips already-correct resident panes', () => {
   assert.deepEqual(pendingPaneIndexes(entries, panes), [1, 2]);
 });
 
+test('worker pane verification accepts metadata-proven TradingView venue canonicalization', () => {
+  const entries = [
+    { symbol: 'NASDAQ:QQQ', timeframe: '5', studies: [] },
+  ];
+  const panes = [{
+    resolved_symbol: 'BATS:QQQ',
+    resolution: '5',
+    symbol_identity: {
+      name: 'QQQ',
+      full_name: 'BATS:QQQ',
+      pro_name: 'NASDAQ:QQQ',
+      base_name: ['NASDAQ:QQQ'],
+      exchange: 'Cboe One',
+      listed_exchange: 'NASDAQ',
+      type: 'fund',
+    },
+    studies: [],
+  }];
+
+  assert.deepEqual(pendingPaneIndexes(entries, panes), []);
+});
+
+test('worker pane verification rejects unproven exchange substitution', () => {
+  const entries = [
+    { symbol: 'NASDAQ:QQQ', timeframe: '5', studies: [] },
+  ];
+  const panes = [{
+    resolved_symbol: 'BATS:QQQ',
+    resolution: '5',
+    symbol_identity: {
+      name: 'QQQ',
+      full_name: 'BATS:QQQ',
+      exchange: 'Cboe One',
+      listed_exchange: 'NYSE',
+    },
+    studies: [],
+  }];
+
+  assert.deepEqual(pendingPaneIndexes(entries, panes), [0]);
+});
+
+test('worker pane verification never canonicalizes a formula to one component', () => {
+  const entries = [
+    { symbol: 'NASDAQ:QQQ/AMEX:SPY', timeframe: '5', studies: [] },
+  ];
+  const panes = [{
+    resolved_symbol: 'BATS:QQQ',
+    resolution: '5',
+    symbol_identity: {
+      name: 'QQQ',
+      pro_name: 'NASDAQ:QQQ',
+      listed_exchange: 'NASDAQ',
+    },
+    studies: [],
+  }];
+
+  assert.deepEqual(pendingPaneIndexes(entries, panes), [0]);
+});
+
 test('recorded tab completeness requires live ownership and exact pane assignments', () => {
   const plan = { tab_index: 0, pane_count: 2, handles: ['a', 'b'] };
   const state = {
