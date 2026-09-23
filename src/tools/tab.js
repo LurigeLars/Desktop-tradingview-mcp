@@ -13,7 +13,7 @@ export function registerTabTools(server) {
   });
 
   server.registerTool('tab_new', {
-    description: 'Open another TradingView Desktop tab. Optionally navigate the new-tab target directly to a chart, or use the saved-layout picker workflow.'
+    description: 'Open another TradingView Desktop tab. Optionally navigate the new-tab target directly to a chart, or use the saved-layout picker workflow.',
     inputSchema: {
       layout: z.string().optional().describe('"new" for a blank new layout, or a saved layout name (substring match). Omit to leave the tab on the new-tab page.'),
       name: z.string().optional().describe('Name for the new layout (used with layout: "new"; default "New layout")'),
