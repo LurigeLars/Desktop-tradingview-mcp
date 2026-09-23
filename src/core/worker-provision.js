@@ -663,12 +663,12 @@ export async function provisionWorker({
 
       const openDurationMs = Date.now() - started;
       const chartId = chartIdFromTarget(opened.target);
-      if (!chartId) throw new Error('Worker target has no stable TradingView chart id');
 
       const tabs = [
         ...(state.worker_tabs || []).filter(tab => Number(tab.slot) !== Number(plan.tab_index)),
         {
           slot: Number(plan.tab_index),
+          target_id: opened.target.id,
           target_id: opened.target.id,
           chart_id: chartId,
           layout_name: opened.layoutName,
