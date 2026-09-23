@@ -13,7 +13,7 @@ import CDP from 'chrome-remote-interface';
 import { getClient, reconnectTo, CDP_HOST, CDP_PORT, listCdpTargets } from '../connection.js';
 
 const LANDING_PROBE_TIMEOUT_MS = 500;
-const SHELL_OPERATION_TIMEOUT_MS = 2500;
+const SHELL_OPERATION_TIMEOUT_MS = 6000;
 const CHART_PROBE_TIMEOUT_MS = 750;
 
 export async function withDeadline(promise, timeoutMs, label = 'Operation') {
@@ -424,7 +424,7 @@ export async function newTab({
       foundTitle = await evalIn(clickByTitle);
     }
     return foundTitle;
-  });
+  }, 3500);
 
   if (!picked) throw new Error(`Layout matching "${layout}" not found in the layout list.`);
 
