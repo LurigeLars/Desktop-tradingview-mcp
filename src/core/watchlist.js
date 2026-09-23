@@ -74,8 +74,10 @@ function normalizedIdentityAliases(identity) {
  * requested listed identity (for example NASDAQ:QQQ resolving to BATS:QQQ
  * while pro_name/base_name/listed_exchange still identify NASDAQ:QQQ).
  *
- * Expressions/formulas/spreads remain exact-only and never use metadata alias
- * matching.
+ * Expressions/formulas/spreads remain opaque. Their resolved display form may
+ * differ only when TradingView itself preserves the complete requested string
+ * exactly in full_name or pro_name. Component/base_name reconstruction is
+ * never used.
  */
 export function matchTradingViewResolvedSymbol(requestedSymbol, resolvedSymbol, identity = {}) {
   const requested = String(requestedSymbol ?? '').trim();
@@ -83,18 +85,29 @@ export function matchTradingViewResolvedSymbol(requestedSymbol, resolvedSymbol, 
   const baseline = matchWatchlistSymbol(requested, resolved ? [resolved] : []);
   if (baseline.matched) return baseline;
 
+  const requestedUpper = requested.toUpperCase();
+
+  // For opaque TradingView expressions we never parse legs/operators. The only
+  // allowed non-literal resolution is TradingView proving the entire original
+  // request verbatim through its own primary identity metadata.
+  const primaryIdentityAliases = [identity?.full_name, identity?.pro_name]
+    .map(value => String(value ?? '').trim().toUpperCase())
+    .filter(Boolean);
+  if (resolved && primaryIdentityAliases.includes(requestedUpper)) {
+    return { matched: resolved, verification: 'tradingview_exact_identity_alias' };
+  }
+
   if (!SIMPLE_QUALIFIED_SYMBOL_RE.test(requested)
       || !SIMPLE_QUALIFIED_SYMBOL_RE.test(resolved)) {
     return baseline;
   }
 
-  const [requestedExchange, requestedTicker] = requested.toUpperCase().split(':');
+  const [requestedExchange, requestedTicker] = requestedUpper.split(':');
   const resolvedTicker = resolved.toUpperCase().split(':').pop();
   if (!requestedTicker || !resolvedTicker || requestedTicker !== resolvedTicker) {
     return { matched: null, verification: 'canonicalization_ticker_mismatch' };
   }
 
-  const requestedUpper = requested.toUpperCase();
   const aliases = normalizedIdentityAliases(identity);
   if (aliases.includes(requestedUpper)) {
     return { matched: resolved, verification: 'tradingview_identity_alias' };

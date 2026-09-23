@@ -77,6 +77,36 @@ test('symbol filtering is exact for expressions and never collapses to a compone
   );
 });
 
+test('expression filtering accepts TradingView canonical display only with full exact pro_name proof', () => {
+  const proven = {
+    resolved_symbol: 'BATS:QQQ/BATS:SPY',
+    _symbol_identity: {
+      full_name: 'BATS:QQQ/BATS:SPY',
+      pro_name: 'NASDAQ:QQQ/AMEX:SPY',
+      base_name: ['NASDAQ:QQQ', 'AMEX:SPY'],
+      type: 'spread',
+    },
+  };
+  const componentsOnly = {
+    resolved_symbol: 'BATS:QQQ/BATS:SPY',
+    _symbol_identity: {
+      full_name: 'BATS:QQQ/BATS:SPY',
+      pro_name: null,
+      base_name: ['NASDAQ:QQQ', 'AMEX:SPY'],
+      type: 'spread',
+    },
+  };
+
+  assert.deepEqual(
+    filterSnapshotsBySymbols([proven], ['NASDAQ:QQQ/AMEX:SPY']),
+    { snapshots: [proven], missing: [], ambiguous: [] },
+  );
+  assert.deepEqual(
+    filterSnapshotsBySymbols([componentsOnly], ['NASDAQ:QQQ/AMEX:SPY']),
+    { snapshots: [], missing: ['NASDAQ:QQQ/AMEX:SPY'], ambiguous: [] },
+  );
+});
+
 test('qualified symbol filtering accepts only metadata-proven TradingView canonicalization', () => {
   const proven = {
     resolved_symbol: 'BATS:QQQ',
