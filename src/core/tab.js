@@ -15,6 +15,7 @@ import { getClient, reconnectTo, CDP_HOST, CDP_PORT, listCdpTargets } from '../c
 const LANDING_PROBE_TIMEOUT_MS = 500;
 const SHELL_OPERATION_TIMEOUT_MS = 6000;
 const CHART_PROBE_TIMEOUT_MS = 750;
+const NEW_TAB_URL_RE = /app\.asar\/app\/new-tab\/index\.html/i;
 
 export async function withDeadline(promise, timeoutMs, label = 'Operation') {
   const ms = Number(timeoutMs);
@@ -47,6 +48,10 @@ export function isChartPageTarget(target) {
   }
 }
 
+export function isNewTabPageTarget(target) {
+  return target?.type === 'page' && NEW_TAB_URL_RE.test(String(target.url || ''));
+}
+
 function isShellTarget(target) {
   return target?.type === 'page' && /\/window\/index\.html/i.test(target.url || '');
 }
@@ -59,10 +64,12 @@ export function rankLandingCandidates(targets, beforeIds = []) {
       target,
       index,
       isNew: !before.has(target.id),
+      knownNewTab: isNewTabPageTarget(target),
       titleHint: /^new tab$/i.test(String(target.title || '').trim()),
     }))
     .sort((a, b) =>
       Number(b.isNew) - Number(a.isNew)
+      || Number(b.knownNewTab) - Number(a.knownNewTab)
       || Number(b.titleHint) - Number(a.titleHint)
       || a.index - b.index
     )
@@ -81,7 +88,9 @@ export async function list() {
   const probeResults = await Promise.all(
     candidates.map(async candidate => ({
       id: candidate.id,
-      isLanding: await probeLandingTarget(candidate, LANDING_PROBE_TIMEOUT_MS),
+      isLanding: isNewTabPageTarget(candidate)
+        ? true
+        : await probeLandingTarget(candidate, LANDING_PROBE_TIMEOUT_MS),
     })),
   );
   const landingIds = new Set(
@@ -162,6 +171,7 @@ async function isTargetVisible(targetId) {
 
 async function probeLandingTarget(target, timeoutMs = LANDING_PROBE_TIMEOUT_MS) {
   if (!target || isChartPageTarget(target) || isShellTarget(target)) return false;
+  if (isNewTabPageTarget(target)) return true;
   try {
     return await withTarget(target.id, evalIn => evalIn(`
       (function() {
@@ -182,11 +192,18 @@ async function probeLandingTarget(target, timeoutMs = LANDING_PROBE_TIMEOUT_MS) 
  * Discover a layout-picker target by DOM capability, not by a single title.
  * Newly-created page targets are checked first, then existing candidates.
  */
-async function findLandingTarget({ beforeIds = [], timeoutMs = 1000 } = {}) {
+async function findLandingTarget({ beforeIds = [], timeoutMs = 1000, requireNew = false } = {}) {
   const deadline = Date.now() + timeoutMs;
+  const before = beforeIds instanceof Set ? beforeIds : new Set(beforeIds);
   do {
     const targets = await listCdpTargets();
-    const candidates = rankLandingCandidates(targets, beforeIds);
+    const ranked = rankLandingCandidates(targets, before);
+    const candidates = requireNew
+      ? ranked.filter(candidate => !before.has(candidate.id))
+      : ranked;
+    const known = candidates.find(isNewTabPageTarget);
+    if (known) return known;
+
     const remainingMs = Math.max(1, deadline - Date.now());
     const perProbeMs = Math.min(LANDING_PROBE_TIMEOUT_MS, remainingMs);
 
@@ -286,6 +303,25 @@ async function withTarget(targetId, fn, timeoutMs = 2000) {
   return withDeadline(task, timeoutMs, 'CDP target ' + targetId);
 }
 
+async function navigateTarget(targetId, url, timeoutMs = 2500) {
+  const task = (async () => {
+    let client = null;
+    try {
+      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
+      await client.Page.enable();
+      const result = await client.Page.navigate({ url });
+      if (result?.errorText) {
+        throw new Error('Page.navigate failed: ' + result.errorText);
+      }
+      return result;
+    } finally {
+      try { if (client) await client.close(); } catch { /* best effort */ }
+    }
+  })();
+
+  return withDeadline(task, timeoutMs, 'CDP Page.navigate for target ' + targetId);
+}
+
 /**
  * Open a new chart tab by clicking the shell window's new-tab button.
  * With `layout`, also picks from the landing page's layout list:
@@ -296,6 +332,9 @@ async function withTarget(targetId, fn, timeoutMs = 2000) {
 export async function newTab({
   layout,
   name,
+  symbol,
+  as_chart = false,
+  force_new_tab = false,
   landing_timeout_ms = 8000,
   chart_timeout_ms = 15000,
   exact_layout = false,
@@ -303,6 +342,8 @@ export async function newTab({
   const landingTimeoutMs = Number(landing_timeout_ms);
   const chartTimeoutMs = Number(chart_timeout_ms);
   const exactLayout = Boolean(exact_layout);
+  const wantsDirectChart = Boolean(symbol) || Boolean(as_chart);
+  const forceNewTab = Boolean(force_new_tab);
   if (!Number.isFinite(landingTimeoutMs) || landingTimeoutMs < 0) {
     throw new Error('landing_timeout_ms must be a non-negative number');
   }
@@ -310,7 +351,9 @@ export async function newTab({
     throw new Error('chart_timeout_ms must be a non-negative number');
   }
 
-  let landing = await findLandingTarget({ timeoutMs: Math.min(600, landingTimeoutMs) });
+  let landing = forceNewTab
+    ? null
+    : await findLandingTarget({ timeoutMs: Math.min(600, landingTimeoutMs) });
   let shellCounts = null;
 
   if (!landing) {
@@ -321,19 +364,73 @@ export async function newTab({
       const count = await evalIn(`document.querySelectorAll('.tabs-container .tab').length`);
       const clicked = await evalIn(`
         (function() {
-          var btn = document.querySelector('[class*="create-new-tab"]');
-          if (!btn) return false;
+          var btn = document.querySelector('button.create-new-tab-button')
+            || document.querySelector('[class*="create-new-tab"]');
+          if (!btn) return { ok: false, reason: 'button_not_found' };
+          var key = Object.keys(btn).find(function(k){ return k.indexOf('__reactProps') === 0; });
+          if (key && btn[key] && typeof btn[key].onClick === 'function') {
+            btn[key].onClick({
+              preventDefault: function(){},
+              stopPropagation: function(){},
+              currentTarget: btn,
+              target: btn
+            });
+            return { ok: true, via: 'react_onclick' };
+          }
           btn.click();
-          return true;
+          return { ok: true, via: 'dom_click' };
         })()
       `);
-      if (!clicked) throw new Error('New-tab button not found in shell window.');
+      if (!clicked?.ok) throw new Error('New-tab button not found in shell window.');
       return count;
     });
 
-    landing = await findLandingTarget({ beforeIds: targetIdsBefore, timeoutMs: landingTimeoutMs });
+    landing = await findLandingTarget({
+      beforeIds: targetIdsBefore,
+      timeoutMs: landingTimeoutMs,
+      requireNew: true,
+    });
     const after = await withShell(evalIn => evalIn(`document.querySelectorAll('.tabs-container .tab').length`));
     shellCounts = { before, after };
+  }
+
+  if (!landing) {
+    throw new Error('New tab opened but its new-tab target was not discoverable by CDP.');
+  }
+
+  // Workers and callers that only need a chart target should bypass the
+  // layout-picker DOM entirely. TradingView Desktop exposes its new-tab page
+  // as app.asar/app/new-tab/index.html; navigate that target directly to a
+  // chart and let the normal chart-ready discovery handle renderer reuse.
+  if (wantsDirectChart) {
+    const chartIdsBefore = new Set(
+      (await listCdpTargets())
+        .filter(isChartPageTarget)
+        .map(target => target.id)
+    );
+    const chartUrl = symbol
+      ? 'https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(String(symbol))
+      : 'https://www.tradingview.com/chart/';
+
+    await navigateTarget(landing.id, chartUrl, Math.min(chartTimeoutMs, 2500));
+    const chartTarget = await waitForChartTarget({
+      chartIdsBefore,
+      landingId: landing.id,
+      timeoutMs: chartTimeoutMs,
+    });
+    if (!chartTarget) {
+      throw new Error('New tab target was found and navigated, but no ready chart target became discoverable.');
+    }
+
+    await reconnectTo(chartTarget.id);
+    return {
+      success: true,
+      action: 'new_chart_tab_opened',
+      direct_navigation: true,
+      target_id: chartTarget.id,
+      chart_id: chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
+      symbol: symbol || null,
+    };
   }
 
   if (!layout) {
@@ -341,12 +438,10 @@ export async function newTab({
     return {
       success: shellCounts ? shellCounts.after > shellCounts.before : !!landing,
       action: 'new_tab_opened',
-      note: 'Tab is on the layout picker. Call tab_new with layout: "new" or a saved layout name to open a chart in it.',
+      note: 'Tab is on the layout picker. Call tab_new with layout: "new" or a saved layout name to open it.',
       ...state,
     };
   }
-
-  if (!landing) throw new Error('New tab opened but its layout-picker target was not discoverable by CDP.');
 
   // Snapshot existing chart targets so we can spot the renderer/target created
   // (or reused) when the landing page navigates into a chart.

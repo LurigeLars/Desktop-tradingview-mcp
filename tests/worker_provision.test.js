@@ -51,11 +51,47 @@ test('recorded tab completeness requires live ownership and exact pane assignmen
       { handle: 'b', assignment: { worker_slot: 0, chart_id: 'chart-a', pane_index: 1 } },
     ],
   };
-  assert.equal(recordedTabComplete(plan, state, new Set(['chart-a'])), true);
+  assert.equal(recordedTabComplete(plan, state, new Set(['chart:chart-a'])), true);
   assert.equal(recordedTabComplete(plan, state, new Set()), false);
 
   state.entries[1].assignment.pane_index = 0;
-  assert.equal(recordedTabComplete(plan, state, new Set(['chart-a'])), false);
+  assert.equal(recordedTabComplete(plan, state, new Set(['chart:chart-a'])), false);
+});
+
+test('recorded tab completeness prefers target id when chart ids can collide', () => {
+  const plan = { tab_index: 0, pane_count: 1, handles: ['a'] };
+  const state = {
+    worker_tabs: [{
+      slot: 0,
+      target_id: 'target-worker',
+      chart_id: 'shared-chart',
+      layout_name: 'Worker 01',
+      pane_count: 1,
+    }],
+    entries: [{
+      handle: 'a',
+      symbol: 'EX:AAA',
+      timeframe: '5',
+      studies: [],
+      assignment: {
+        worker_slot: 0,
+        target_id: 'target-worker',
+        chart_id: 'shared-chart',
+        pane_index: 0,
+      },
+    }],
+  };
+  const liveKeys = new Set(['target:target-worker', 'chart:shared-chart']);
+  const live = new Map([['target:target-worker', {
+    target_id: 'target-worker',
+    chart_id: 'shared-chart',
+    panes: [{ resolved_symbol: 'EX:AAA', resolution: '5', studies: [] }],
+  }]]);
+
+  assert.equal(recordedTabComplete(plan, state, liveKeys, live), true);
+
+  state.entries[0].assignment.target_id = 'target-other';
+  assert.equal(recordedTabComplete(plan, state, liveKeys, live), false);
 });
 
 test('recorded tab completeness rejects stale live pane content', () => {
@@ -70,12 +106,14 @@ test('recorded tab completeness rejects stale live pane content', () => {
       assignment: { worker_slot: 0, chart_id: 'chart-a', pane_index: 0 },
     }],
   };
-  const liveIds = new Set(['chart-a']);
-  const matching = new Map([['chart-a', {
+  const liveIds = new Set(['chart:chart-a']);
+  const matching = new Map([['chart:chart-a', {
+    target_id: 'target-a',
     chart_id: 'chart-a',
     panes: [{ resolved_symbol: 'EX:AAA', resolution: '5', studies: [] }],
   }]]);
-  const stale = new Map([['chart-a', {
+  const stale = new Map([['chart:chart-a', {
+    target_id: 'target-a',
     chart_id: 'chart-a',
     panes: [{ resolved_symbol: 'EX:BBB', resolution: '5', studies: [] }],
   }]]);
@@ -141,19 +179,19 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
       chart_id: target.url.match(/\/chart\/([^/]+)/)?.[1] || null,
       pane_count: 1,
     })),
-    newTab: async ({ name, layout }) => {
-      if (layout !== 'new') {
-        throw new Error('Layout matching "' + layout + '" not found in the layout list.');
-      }
+    newTab: async args => {
+      assert.equal(args.as_chart, true);
+      assert.equal(args.force_new_tab, true);
       chartCounter += 1;
+      const targetId = 'target-' + chartCounter;
       const chartId = 'chart-' + chartCounter;
       liveTargets.push({
-        id: 'target-' + chartCounter,
+        id: targetId,
         type: 'page',
-        title: name,
+        title: 'Worker chart',
         url: 'https://www.tradingview.com/chart/' + chartId + '/',
       });
-      return { success: true, layout: name, chart_id: chartId };
+      return { success: true, target_id: targetId, chart_id: chartId };
     },
     configureTarget: async ({ target, paneCount, entries, maxPanes }) => {
       assert.equal(maxPanes, 1);
@@ -171,7 +209,7 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
         })),
       };
     },
-    closeTabByChartId: async () => ({ success: true }),
+    closeTabByOwned: async () => ({ success: true }),
     now: () => Date.parse('2026-09-22T20:00:00Z'),
   };
 
@@ -251,7 +289,7 @@ test('force provisioning remains resumable and does not report complete early', 
     })),
     newTab: async () => { throw new Error('should reuse live worker tab'); },
     configureTarget: async ({ paneCount }) => ({ success: true, layout_code: layoutCodeForPaneCount(paneCount) }),
-    closeTabByChartId: async () => ({ success: true }),
+    closeTabByOwned: async () => ({ success: true }),
     now: () => Date.parse('2026-09-22T20:00:00Z'),
   };
 
@@ -290,7 +328,7 @@ test('worker provisioning fails closed when external charts would exceed total c
     }],
     newTab: async () => { throw new Error('must not create tabs above capacity'); },
     configureTarget: async () => { throw new Error('must not configure above capacity'); },
-    closeTabByChartId: async () => ({ success: true }),
+    closeTabByOwned: async () => ({ success: true }),
   };
 
   await assert.rejects(
@@ -374,7 +412,7 @@ test('explicit adoption uses the sole existing chart as worker slot zero', async
       layout_code: layoutCodeForPaneCount(paneCount),
       target_id: target.id,
     }),
-    closeTabByChartId: async () => ({ success: true }),
+    closeTabByOwned: async () => ({ success: true }),
     now: () => Date.parse('2026-09-22T20:00:00Z'),
   };
 
@@ -455,10 +493,21 @@ test('reserved slots reduce the total usable budget including external charts', 
 });
 
 
-test('worker provisioning journals create intent and recovers the exact layout on the next call', async () => {
+test('persisted worker intent creates a direct chart tab without saved-layout recovery', async () => {
   const store = makeStore();
   setUniverse({
     entries: [{ handle: 'a', symbol: 'EX:AAA', timeframe: '5' }],
+    _deps: store.deps,
+  });
+  recordWorkerProvision({
+    worker_tabs: [{
+      slot: 0,
+      target_id: null,
+      chart_id: null,
+      layout_name: 'DTV Worker 01',
+      pane_count: 1,
+      provisioning_state: 'intent',
+    }],
     _deps: store.deps,
   });
 
@@ -482,46 +531,31 @@ test('worker provisioning journals create intent and recovers the exact layout o
     })),
     newTab: async args => {
       newTabCalls += 1;
-      if (newTabCalls === 1) {
-        assert.equal(args.layout, 'new');
-        assert.equal(args.landing_timeout_ms, 4000);
-        assert.equal(args.chart_timeout_ms, 8000);
-        throw new Error('no ready chart target became discoverable');
-      }
-
-      assert.equal(args.layout, 'DTV Worker 01');
-      assert.equal(args.exact_layout, true);
-      const recovered = {
+      assert.equal(args.as_chart, true);
+      assert.equal(args.force_new_tab, true);
+      const created = {
         id: 'worker-target',
         type: 'page',
-        url: 'https://www.tradingview.com/chart/recovered-worker/',
+        url: 'https://www.tradingview.com/chart/worker-chart/',
       };
-      liveTargets.push(recovered);
-      return { success: true, layout: 'DTV Worker 01', chart_id: 'recovered-worker' };
+      liveTargets.push(created);
+      return { success: true, target_id: created.id, chart_id: 'worker-chart' };
     },
     configureTarget: async () => {
-      throw new Error('configureTarget must not run in a tab-open recovery phase');
+      throw new Error('configureTarget must not run in a tab-open phase');
     },
-    closeTabByChartId: async () => ({ success: true }),
+    closeTabByOwned: async () => ({ success: true }),
   };
 
-  const first = await provisionWorker({ max_tabs: 1, _deps: runtime });
-  assert.equal(newTabCalls, 1, 'first call performs one direct create attempt');
-  assert.equal(first.results.length, 1);
-  assert.equal(first.results[0].success, false);
-  assert.equal(first.results[0].stage, 'open_or_create');
-  assert.match(first.results[0].error, /Worker tab create failed/);
+  const result = await provisionWorker({ max_tabs: 1, _deps: runtime });
+  assert.equal(newTabCalls, 1);
+  assert.equal(result.success, true);
+  assert.equal(result.complete, false);
+  assert.equal(result.results[0].stage, 'tab_ready');
+  assert.equal(result.results[0].direct_chart, true);
 
-  const journaled = status({ _deps: store.deps }).worker_tabs[0];
-  assert.equal(journaled.chart_id, null);
-  assert.equal(journaled.layout_name, 'DTV Worker 01');
-  assert.equal(journaled.provisioning_state, 'intent');
-
-  const second = await provisionWorker({ max_tabs: 1, _deps: runtime });
-  assert.equal(newTabCalls, 2);
-  assert.equal(second.success, true);
-  assert.equal(second.complete, false);
-  assert.equal(second.results[0].stage, 'tab_ready');
-  assert.equal(second.results[0].recovered_by_name, true);
-  assert.equal(status({ _deps: store.deps }).worker_tabs[0].chart_id, 'recovered-worker');
+  const owned = status({ _deps: store.deps }).worker_tabs[0];
+  assert.equal(owned.target_id, 'worker-target');
+  assert.equal(owned.chart_id, 'worker-chart');
+  assert.equal(owned.layout_name, 'DTV Worker 01');
 });

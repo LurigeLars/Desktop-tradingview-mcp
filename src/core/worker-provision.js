@@ -49,7 +49,7 @@ function resolveDeps(overrides) {
     record: overrides?.record || recordWorkerProvision,
     listTargets: overrides?.listTargets || listTradingViewChartTargets,
     newTab: overrides?.newTab || tabCore.newTab,
-    closeTabByChartId: overrides?.closeTabByChartId || closeTabByChartId,
+    closeTabByOwned: overrides?.closeTabByOwned || closeTabByOwned,
     configureTarget: overrides?.configureTarget || configureTarget,
     inspectTargets: overrides?.inspectTargets || inspectTargetPaneCounts,
     now: overrides?.now || (() => Date.now()),
@@ -64,25 +64,33 @@ function workerTabMap(state) {
   return new Map((state.worker_tabs || []).map(tab => [Number(tab.slot), tab]));
 }
 
+function ownedRuntimeKey(value) {
+  if (value?.target_id) return 'target:' + String(value.target_id);
+  if (value?.chart_id) return 'chart:' + String(value.chart_id);
+  return null;
+}
+
 export function recordedTabComplete(
   plan,
   state,
-  liveChartIds = new Set(),
-  liveByChartId = null,
+  liveRuntimeKeys = new Set(),
+  liveByRuntimeKey = null,
 ) {
   const tabs = workerTabMap(state);
   const entries = entryMap(state);
   const owned = tabs.get(Number(plan.tab_index));
-  if (!owned?.chart_id || !liveChartIds.has(String(owned.chart_id))) return false;
+  const ownedKey = ownedRuntimeKey(owned);
+  if (!ownedKey || !liveRuntimeKeys.has(ownedKey)) return false;
 
-  const live = liveByChartId?.get?.(String(owned.chart_id)) || null;
+  const live = liveByRuntimeKey?.get?.(ownedKey) || null;
 
   return plan.handles.every((handle, paneIndex) => {
     const entry = entries.get(handle);
     const assignment = entry?.assignment;
+    const assignmentKey = ownedRuntimeKey(assignment);
     const assignmentMatches = assignment
       && Number(assignment.worker_slot) === Number(plan.tab_index)
-      && String(assignment.chart_id || '') === String(owned.chart_id)
+      && assignmentKey === ownedKey
       && Number(assignment.pane_index) === paneIndex;
 
     if (!assignmentMatches) return false;
@@ -380,9 +388,16 @@ export async function configureTarget({ target, paneCount, entries, maxPanes = 1
   }
 }
 
-async function findTargetForChartId(chartId, targets = null, listTargets = listTradingViewChartTargets) {
+async function findTargetForOwned(owned, targets = null, listTargets = listTradingViewChartTargets) {
   const available = targets || await listTargets();
-  return available.find(target => String(chartIdFromTarget(target)) === String(chartId)) || null;
+  if (owned?.target_id) {
+    const byTarget = available.find(target => String(target.id) === String(owned.target_id));
+    if (byTarget) return byTarget;
+  }
+  if (owned?.chart_id) {
+    return available.find(target => String(chartIdFromTarget(target)) === String(owned.chart_id)) || null;
+  }
+  return null;
 }
 
 export async function inspectTargetPaneCounts(targets) {
@@ -410,88 +425,74 @@ export async function inspectTargetPaneCounts(targets) {
   return results;
 }
 
-function isLayoutNotFoundError(error) {
-  return /Layout matching .* not found/i.test(String(error?.message || error || ''));
-}
-
 async function openOrCreateWorkerTab({
   plan,
   owned,
   layoutPrefix,
   deps,
   liveTargets,
-  recoverSavedLayout = true,
 }) {
   const newTabOptions = {
     landing_timeout_ms: 4000,
     chart_timeout_ms: 8000,
   };
 
-  if (owned?.chart_id) {
-    const live = await findTargetForChartId(owned.chart_id, liveTargets);
+  if (owned?.target_id || owned?.chart_id) {
+    const live = await findTargetForOwned(owned, liveTargets);
     if (live) {
       return {
         target: live,
         layoutName: owned.layout_name,
         reused: true,
         openedThisCall: false,
+        directChart: true,
       };
-    }
-  }
-
-  if (owned?.layout_name && recoverSavedLayout) {
-    try {
-      const opened = await deps.newTab({
-        layout: owned.layout_name,
-        exact_layout: true,
-        ...newTabOptions,
-      });
-      const target = await findTargetForChartId(opened.chart_id, null, deps.listTargets);
-      if (target) {
-        return {
-          target,
-          layoutName: owned.layout_name,
-          reused: true,
-          openedThisCall: true,
-          recoveredByName: true,
-        };
-      }
-    } catch (error) {
-      if (!isLayoutNotFoundError(error)) {
-        throw new Error(
-          'Worker saved-layout reopen failed for "' + owned.layout_name + '": ' +
-          (error?.message || String(error)),
-        );
-      }
-      // Confirmed missing saved layout: create a replacement below.
     }
   }
 
   const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
 
+  // Worker provisioning only needs a dedicated chart target. Do not depend on
+  // TradingView's saved-layout picker UI; open a new Desktop tab and navigate
+  // its known new-tab target directly to /chart/.
   let created;
   try {
-    created = await deps.newTab({ layout: 'new', name: desiredName, ...newTabOptions });
+    created = await deps.newTab({
+      as_chart: true,
+      force_new_tab: true,
+      ...newTabOptions,
+    });
   } catch (error) {
     throw new Error(
-      'Worker tab create failed for "' + desiredName + '": ' +
+      'Worker direct chart-tab create failed for "' + desiredName + '": ' +
       (error?.message || String(error)),
     );
   }
-  const target = await findTargetForChartId(created.chart_id, null, deps.listTargets);
-  if (!target) throw new Error('New worker chart target was not discoverable after creation');
+
+  const target = await findTargetForOwned(
+    { target_id: created.target_id, chart_id: created.chart_id },
+    null,
+    deps.listTargets,
+  );
+  if (!target) throw new Error('New worker chart target was not discoverable after direct navigation');
 
   return {
     target,
-    layoutName: created.layout || desiredName,
+    layoutName: desiredName,
     reused: false,
     openedThisCall: true,
+    directChart: true,
   };
 }
 
-async function closeTabByChartId(chartId) {
+async function closeTabByOwned(owned) {
   const state = await tabCore.list();
-  const found = state.tabs.find(tab => tab.is_chart && String(tab.chart_id) === String(chartId));
+  const found = state.tabs.find(tab =>
+    tab.is_chart && (
+      (owned?.target_id && String(tab.id) === String(owned.target_id))
+      || (owned?.chart_id && String(tab.chart_id) === String(owned.chart_id))
+    )
+  );
   if (!found) return { success: true, closed: false, reason: 'already_absent' };
   await tabCore.switchTab({ index: found.index });
   return tabCore.closeTab();
@@ -521,11 +522,18 @@ export async function provisionWorker({
   const byHandle = entryMap(state);
   const liveTargets = await deps.listTargets();
   const inspectedTargets = await deps.inspectTargets(liveTargets);
-  const ownedChartIds = new Set(
-    (state.worker_tabs || []).map(tab => String(tab.chart_id || '')).filter(Boolean),
+  const ownedRuntimeKeys = new Set(
+    (state.worker_tabs || []).map(ownedRuntimeKey).filter(Boolean),
   );
 
-  let externalTargets = inspectedTargets.filter(item => !ownedChartIds.has(String(item.chart_id || '')));
+  let externalTargets = inspectedTargets.filter(item => {
+    const targetKey = item.target_id ? 'target:' + String(item.target_id) : null;
+    const chartKey = item.chart_id ? 'chart:' + String(item.chart_id) : null;
+    return !(
+      (targetKey && ownedRuntimeKeys.has(targetKey))
+      || (chartKey && ownedRuntimeKeys.has(chartKey))
+    );
+  });
   let adoptionCandidate = null;
 
   if (adopt_single_existing && topology.tabs.length > 0 && (state.worker_tabs || []).length === 0) {
@@ -553,7 +561,8 @@ export async function provisionWorker({
   if (adoptionCandidate && !dry_run) {
     const adoptedTabs = [{
       slot: 0,
-      chart_id: adoptionCandidate.chart_id,
+      target_id: adoptionCandidate.target_id || null,
+      chart_id: adoptionCandidate.chart_id || null,
       layout_name: null,
       pane_count: adoptionCandidate.pane_count,
       adopted: true,
@@ -561,16 +570,24 @@ export async function provisionWorker({
     state = deps.record({ worker_tabs: adoptedTabs });
   }
 
-  const liveChartIds = new Set(liveTargets.map(chartIdFromTarget).filter(Boolean).map(String));
-  const liveByChartId = new Map(
-    inspectedTargets
-      .filter(item => item.chart_id)
-      .map(item => [String(item.chart_id), item]),
-  );
+  const liveRuntimeKeys = new Set();
+  const liveByRuntimeKey = new Map();
+  for (const item of inspectedTargets) {
+    if (item.target_id) {
+      const key = 'target:' + String(item.target_id);
+      liveRuntimeKeys.add(key);
+      liveByRuntimeKey.set(key, item);
+    }
+    if (item.chart_id) {
+      const key = 'chart:' + String(item.chart_id);
+      liveRuntimeKeys.add(key);
+      if (!liveByRuntimeKey.has(key)) liveByRuntimeKey.set(key, item);
+    }
+  }
   const ownedBySlot = workerTabMap(state);
 
   const pending = topology.tabs.filter(plan =>
-    force || !recordedTabComplete(plan, state, liveChartIds, liveByChartId)
+    force || !recordedTabComplete(plan, state, liveRuntimeKeys, liveByRuntimeKey)
   );
 
   const staleOwned = (state.worker_tabs || []).filter(tab =>
@@ -612,14 +629,13 @@ export async function provisionWorker({
       const slot = Number(plan.tab_index);
       const layoutPrefix = layout_prefix || process.env.TV_WORKER_LAYOUT_PREFIX || 'DTV Worker';
       let owned = ownedBySlot.get(slot) || null;
-      const hadPersistedIntent = !!owned;
-
-      // Journal the deterministic layout intent before opening TradingView.
-      // If the remote request dies mid-create, the next call can recover this
-      // exact saved layout instead of creating an untracked duplicate.
+      // Journal deterministic worker ownership intent before opening
+      // TradingView. The technical name is metadata only; worker creation no
+      // longer depends on a saved TradingView layout.
       if (!owned) {
         owned = {
           slot,
+          target_id: null,
           chart_id: null,
           layout_name: buildWorkerLayoutName(layoutPrefix, slot),
           pane_count: plan.pane_count,
@@ -639,17 +655,16 @@ export async function provisionWorker({
         layoutPrefix,
         deps,
         liveTargets: await deps.listTargets(),
-        recoverSavedLayout: hadPersistedIntent,
       });
 
       const openDurationMs = Date.now() - started;
       const chartId = chartIdFromTarget(opened.target);
-      if (!chartId) throw new Error('Worker target has no stable TradingView chart id');
 
       const tabs = [
         ...(state.worker_tabs || []).filter(tab => Number(tab.slot) !== Number(plan.tab_index)),
         {
           slot: Number(plan.tab_index),
+          target_id: opened.target.id,
           chart_id: chartId,
           layout_name: opened.layoutName,
           pane_count: plan.pane_count,
@@ -672,11 +687,12 @@ export async function provisionWorker({
           success: true,
           complete: false,
           stage: 'tab_ready',
+          target_id: opened.target.id,
           chart_id: chartId,
           layout_name: opened.layoutName,
           pane_count: plan.pane_count,
           reused: opened.reused,
-          recovered_by_name: !!opened.recoveredByName,
+          direct_chart: !!opened.directChart,
           pending_panes: entries.map((_, index) => index),
           open_duration_ms: openDurationMs,
           duration_ms: Date.now() - started,
@@ -699,6 +715,7 @@ export async function provisionWorker({
           success: true,
           complete: false,
           stage,
+          target_id: opened.target.id,
           chart_id: chartId,
           layout_name: opened.layoutName,
           pane_count: plan.pane_count,
@@ -717,6 +734,7 @@ export async function provisionWorker({
       for (let index = 0; index < entries.length; index++) {
         assignments[entries[index].handle] = {
           worker_slot: Number(plan.tab_index),
+          target_id: opened.target.id,
           chart_id: chartId,
           pane_index: index,
           layout_name: opened.layoutName,
@@ -732,10 +750,12 @@ export async function provisionWorker({
         success: true,
         complete: true,
         stage: 'complete',
+        target_id: opened.target.id,
         chart_id: chartId,
         layout_name: opened.layoutName,
         pane_count: plan.pane_count,
         reused: opened.reused,
+        direct_chart: !!opened.directChart,
         layout_code: configured.layout_code,
         configured_panes: configured.configured_panes || [],
         pending_panes: [],
@@ -758,15 +778,23 @@ export async function provisionWorker({
   // Only clean obsolete worker-owned tabs after every desired tab has a
   // recorded assignment. Never close unrelated TradingView tabs.
   const afterTargets = await deps.listTargets();
-  const afterIds = new Set(afterTargets.map(chartIdFromTarget).filter(Boolean).map(String));
   const afterInspected = await deps.inspectTargets(afterTargets);
-  const afterByChartId = new Map(
-    afterInspected
-      .filter(item => item.chart_id)
-      .map(item => [String(item.chart_id), item]),
-  );
+  const afterRuntimeKeys = new Set();
+  const afterByRuntimeKey = new Map();
+  for (const item of afterInspected) {
+    if (item.target_id) {
+      const key = 'target:' + String(item.target_id);
+      afterRuntimeKeys.add(key);
+      afterByRuntimeKey.set(key, item);
+    }
+    if (item.chart_id) {
+      const key = 'chart:' + String(item.chart_id);
+      afterRuntimeKeys.add(key);
+      if (!afterByRuntimeKey.has(key)) afterByRuntimeKey.set(key, item);
+    }
+  }
   const recordedRemaining = state.topology_plan.tabs.filter(plan =>
-    !recordedTabComplete(plan, state, afterIds, afterByChartId)
+    !recordedTabComplete(plan, state, afterRuntimeKeys, afterByRuntimeKey)
   );
   const processedSlots = new Set(results.filter(result => result.success).map(result => Number(result.tab_index)));
   const forcedRemaining = force
@@ -788,7 +816,7 @@ export async function provisionWorker({
       }
 
       try {
-        const result = await deps.closeTabByChartId(owned.chart_id);
+        const result = await deps.closeTabByOwned(owned);
         cleanup.push({ ...owned, success: true, result });
       } catch (error) {
         keepTabs.push(owned);
@@ -819,7 +847,11 @@ export async function provisionWorker({
       projected_connections: projectedConnections,
     },
     adopted_existing: adoptionCandidate
-      ? { chart_id: adoptionCandidate.chart_id, pane_count: adoptionCandidate.pane_count }
+      ? {
+          target_id: adoptionCandidate.target_id || null,
+          chart_id: adoptionCandidate.chart_id || null,
+          pane_count: adoptionCandidate.pane_count,
+        }
       : null,
     status: state,
   };
