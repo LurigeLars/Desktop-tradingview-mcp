@@ -400,10 +400,6 @@ async function findTargetForOwned(owned, targets = null, listTargets = listTradi
   return null;
 }
 
-async function findTargetForChartId(chartId, targets = null, listTargets = listTradingViewChartTargets) {
-  return findTargetForOwned({ chart_id: chartId }, targets, listTargets);
-}
-
 export async function inspectTargetPaneCounts(targets) {
   const results = [];
   for (const target of targets || []) {
