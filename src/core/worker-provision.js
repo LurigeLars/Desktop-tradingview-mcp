@@ -410,40 +410,90 @@ export async function inspectTargetPaneCounts(targets) {
   return results;
 }
 
+function isLayoutNotFoundError(error) {
+  return /Layout matching .* not found/i.test(String(error?.message || error || ''));
+}
+
 async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTargets }) {
   const newTabOptions = {
     landing_timeout_ms: 4000,
     chart_timeout_ms: 8000,
   };
+
   if (owned?.chart_id) {
     const live = await findTargetForChartId(owned.chart_id, liveTargets);
-    if (live) return { target: live, layoutName: owned.layout_name, reused: true };
+    if (live) {
+      return {
+        target: live,
+        layoutName: owned.layout_name,
+        reused: true,
+        openedThisCall: false,
+      };
+    }
 
     if (owned.layout_name) {
       try {
-        const opened = await deps.newTab({ layout: owned.layout_name, ...newTabOptions });
+        const opened = await deps.newTab({
+          layout: owned.layout_name,
+          exact_layout: true,
+          ...newTabOptions,
+        });
         const target = await findTargetForChartId(opened.chart_id, null, deps.listTargets);
         if (target) {
           return {
             target,
             layoutName: owned.layout_name,
             reused: true,
+            openedThisCall: true,
           };
         }
-      } catch {
-        // Saved layout may have been deleted/renamed; create a replacement.
+      } catch (error) {
+        if (!isLayoutNotFoundError(error)) {
+          throw new Error(
+            'Worker saved-layout reopen failed for "' + owned.layout_name + '": ' +
+            (error?.message || String(error)),
+          );
+        }
+        // Confirmed missing saved layout: create a replacement below.
       }
     }
   }
 
   const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
+
+  // Recover an exact DTV worker layout that may have been created by a prior
+  // request which timed out before ownership could be persisted.
+  if (!owned?.chart_id) {
+    try {
+      const recovered = await deps.newTab({
+        layout: desiredName,
+        exact_layout: true,
+        ...newTabOptions,
+      });
+      const target = await findTargetForChartId(recovered.chart_id, null, deps.listTargets);
+      if (target) {
+        return {
+          target,
+          layoutName: desiredName,
+          reused: true,
+          openedThisCall: true,
+          recoveredByName: true,
+        };
+      }
+    } catch (error) {
+      if (!isLayoutNotFoundError(error)) {
+        throw new Error(
+          'Worker layout recovery failed for "' + desiredName + '": ' +
+          (error?.message || String(error)),
+        );
+      }
+    }
+  }
+
   let created;
   try {
     created = await deps.newTab({ layout: 'new', name: desiredName, ...newTabOptions });
   } catch (error) {
-    // Do not blindly repeat a full create flow after target/discovery failure.
-    // The old retry could turn one ~15s failure into a connector-level timeout
-    // and potentially leak an untracked tab/layout.
     throw new Error(
       'Worker tab create failed for "' + desiredName + '": ' +
       (error?.message || String(error)),
@@ -456,6 +506,7 @@ async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTarg
     target,
     layoutName: created.layout || desiredName,
     reused: false,
+    openedThisCall: true,
   };
 }
 
