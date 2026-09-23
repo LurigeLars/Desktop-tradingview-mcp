@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isChartPageTarget, rankLandingCandidates } from '../src/core/tab.js';
+import { isChartPageTarget, rankLandingCandidates, withDeadline } from '../src/core/tab.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
   assert.equal(isChartPageTarget({
@@ -55,5 +55,14 @@ test('title hint breaks ties between equally old landing candidates', () => {
   assert.deepEqual(
     rankLandingCandidates(targets, before).map(target => target.id),
     ['hinted', 'generic'],
+  );
+});
+
+
+test('bounded target helper returns fast operations and rejects hung probes', async () => {
+  assert.equal(await withDeadline(Promise.resolve('ok'), 50, 'probe'), 'ok');
+  await assert.rejects(
+    () => withDeadline(new Promise(resolve => setTimeout(resolve, 50)), 5, 'probe'),
+    /probe timed out after 5ms/,
   );
 });
