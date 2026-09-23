@@ -278,32 +278,45 @@ function paneMatchesEntry(entry, pane) {
   return requiredStudiesPresent(entry, pane);
 }
 
-async function verifyConfiguredTarget(client, entries, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  let last = [];
-  do {
-    last = await evaluateValue(client, readPaneStatesExpression());
-    const complete = entries.every((entry, index) => paneMatchesEntry(entry, last[index]));
-    if (complete) return last;
-    if (Date.now() >= deadline) break;
-    await new Promise(resolve => setTimeout(resolve, 300));
-  } while (true);
-
-  const mismatches = entries.map((entry, index) => ({
-    handle: entry.handle,
-    pane_index: index,
-    requested_symbol: entry.symbol,
-    requested_timeframe: entry.timeframe,
-    observed: last[index] || null,
-  })).filter((item, index) => !paneMatchesEntry(entries[index], last[index]));
-
-  throw new Error('Worker pane verification failed: ' + JSON.stringify(mismatches));
+export function pendingPaneIndexes(entries, panes) {
+  const live = Array.isArray(panes) ? panes : [];
+  const pending = [];
+  for (let index = 0; index < (entries || []).length; index++) {
+    if (!paneMatchesEntry(entries[index], live[index])) pending.push(index);
+  }
+  return pending;
 }
 
-export async function configureTarget({ target, paneCount, entries }) {
+async function waitForPaneMatch(client, entry, index, timeoutMs = 4000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  do {
+    const panes = await evaluateValue(client, readPaneStatesExpression());
+    last = Array.isArray(panes) ? panes[index] : null;
+    if (paneMatchesEntry(entry, last)) return last;
+    if (Date.now() >= deadline) break;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  } while (true);
+
+  throw new Error(
+    'Worker pane verification failed: ' + JSON.stringify({
+      handle: entry.handle,
+      pane_index: index,
+      requested_symbol: entry.symbol,
+      requested_timeframe: entry.timeframe,
+      observed: last,
+    }),
+  );
+}
+
+export async function configureTarget({ target, paneCount, entries, maxPanes = 1 }) {
   if (!target?.id) throw new Error('CDP target id is required for worker provisioning');
   if (entries.length !== paneCount) {
     throw new Error('Worker tab entry count does not match requested pane count');
+  }
+  const paneBudget = Number(maxPanes);
+  if (!Number.isInteger(paneBudget) || paneBudget < 1 || paneBudget > 8) {
+    throw new Error('maxPanes must be an integer from 1 to 8');
   }
 
   let client = null;
@@ -312,30 +325,56 @@ export async function configureTarget({ target, paneCount, entries }) {
     await client.Runtime.enable();
 
     const layoutCode = layoutCodeForPaneCount(paneCount);
-    await evaluateValue(
-      client,
-      'window.TradingViewApi._chartWidgetCollection.setLayout(' + JSON.stringify(layoutCode) + ')',
-      { awaitPromise: true },
-    );
-    await waitForPaneCount(client, paneCount);
+    let live = await evaluateValue(client, readPaneStatesExpression());
 
+    // Never reset an already-correct multi-pane layout on every resumable call.
+    // Change layout only when the pane count itself is wrong.
+    if (!Array.isArray(live) || live.length !== Number(paneCount)) {
+      await evaluateValue(
+        client,
+        'window.TradingViewApi._chartWidgetCollection.setLayout(' + JSON.stringify(layoutCode) + ')',
+        { awaitPromise: true },
+      );
+      await waitForPaneCount(client, paneCount, 5000);
+      live = await evaluateValue(client, readPaneStatesExpression());
+    }
+
+    const pendingBefore = pendingPaneIndexes(entries, live);
+    const selected = pendingBefore.slice(0, paneBudget);
     const paneResults = [];
-    for (let index = 0; index < entries.length; index++) {
+
+    for (const index of selected) {
       const result = await evaluateValue(
         client,
         configurePaneExpression(index, entries[index]),
         { awaitPromise: true },
       );
-      paneResults.push(result);
       if (!result?.success) {
         throw new Error(
           'Worker pane ' + index + ' study configuration failed: ' + JSON.stringify(result?.studies || []),
         );
       }
+
+      const verifiedPane = await waitForPaneMatch(client, entries[index], index);
+      paneResults.push({
+        pane_index: index,
+        ...result,
+        verified: verifiedPane,
+      });
     }
 
-    const verified = await verifyConfiguredTarget(client, entries);
-    return { success: true, layout_code: layoutCode, pane_results: paneResults, verified };
+    const verified = await evaluateValue(client, readPaneStatesExpression());
+    const pending = pendingPaneIndexes(entries, verified);
+
+    return {
+      success: true,
+      complete: pending.length === 0,
+      layout_code: layoutCode,
+      configured_panes: selected,
+      pending_panes: pending,
+      pane_results: paneResults,
+      verified,
+    };
   } finally {
     try { if (client) await client.close(); } catch { /* best effort */ }
   }
