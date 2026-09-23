@@ -13,7 +13,7 @@ import {
   status as workerStatus,
 } from './worker.js';
 import { requiredStudiesPresent } from './realtime.js';
-import { matchWatchlistSymbol } from './watchlist.js';
+import { matchTradingViewResolvedSymbol } from './watchlist.js';
 
 const PANE_LAYOUT_CODES = Object.freeze({
   1: 's',
@@ -240,6 +240,24 @@ function readPaneStatesExpression() {
           var series = model && model.mainSeries ? model.mainSeries() : null;
           var symbol = series && series.symbol ? series.symbol() : null;
           var resolution = series && series.interval ? series.interval() : null;
+          var symbolIdentity = {};
+          try {
+            var info = series && series.symbolInfo ? series.symbolInfo() : {};
+            if (info && typeof info.value === 'function') info = info.value();
+            if (!info || typeof info !== 'object') info = {};
+            symbolIdentity = {
+              name: info.name || null,
+              ticker: info.ticker || null,
+              full_name: info.full_name || null,
+              pro_name: info.pro_name || null,
+              base_name: Array.isArray(info.base_name)
+                ? info.base_name.slice(0, 8)
+                : (info.base_name ? [info.base_name] : []),
+              exchange: info.exchange || null,
+              listed_exchange: info.listed_exchange || null,
+              type: info.type || null,
+            };
+          } catch(e) {}
           var studies = [];
 
           var sources = model && model.model ? model.model().dataSources() : [];
@@ -263,6 +281,7 @@ function readPaneStatesExpression() {
             pane_index: i,
             resolved_symbol: symbol,
             resolution: resolution,
+            symbol_identity: symbolIdentity,
             studies: studies,
           });
         } catch(e) {
@@ -276,7 +295,11 @@ function readPaneStatesExpression() {
 
 function paneMatchesEntry(entry, pane) {
   if (!pane || pane.error) return false;
-  const symbolMatch = matchWatchlistSymbol(entry.symbol, [pane.resolved_symbol]);
+  const symbolMatch = matchTradingViewResolvedSymbol(
+    entry.symbol,
+    pane.resolved_symbol,
+    pane.symbol_identity || {},
+  );
   if (!symbolMatch.matched) return false;
   try {
     if (normalizeWorkerTimeframe(pane.resolution) !== normalizeWorkerTimeframe(entry.timeframe)) return false;
