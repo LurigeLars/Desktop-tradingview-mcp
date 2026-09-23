@@ -689,7 +689,7 @@ export async function provisionWorker({
         maxPanes,
       });
 
-      if (!configured.complete) {
+      if (configured.complete === false) {
         results.push({
           tab_index: plan.tab_index,
           success: true,
