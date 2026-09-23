@@ -69,6 +69,18 @@ export function freshnessFromAge(ageMs, staleAfterMs = 5000) {
   return ageMs > staleAfterMs ? 'stale' : 'fresh';
 }
 
+export function activeRealtimePaneCount(inlineCount, totalCount) {
+  const total = Number(totalCount);
+  if (!Number.isInteger(total) || total < 0) return 0;
+
+  let active = inlineCount;
+  if (active && typeof active.value === 'function') active = active.value();
+  active = Number(active);
+
+  if (!Number.isInteger(active) || active < 1) return total;
+  return Math.min(active, total);
+}
+
 export function filterSnapshotsBySymbols(snapshots, requestedSymbols) {
   const requested = Array.isArray(requestedSymbols)
     ? requestedSymbols.map(value => String(value).trim()).filter(Boolean)
@@ -291,6 +303,8 @@ function buildTargetExpression({ bars, includeStudies, studyFilters }) {
       }
 
       var charts = cwc.getAll() || [];
+      var activePaneCount = (${activeRealtimePaneCount.toString()})(cwc.inlineChartsCount, charts.length);
+      charts = charts.slice(0, activePaneCount);
       var panes = [];
 
       function finiteOrNull(value) {
