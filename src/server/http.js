@@ -14,6 +14,10 @@ export const DEFAULT_MAX_SESSIONS = 32;
 export const DEFAULT_SESSION_IDLE_MS = 5 * 60 * 1000;
 export const DEFAULT_SESSION_PRESSURE_IDLE_MS = 30 * 1000;
 
+export function isSessionReclaimable(entry, now, idleMs) {
+  return (entry.activeRequests ?? 0) === 0 && now - entry.lastSeen > idleMs;
+}
+
 class HttpError extends Error {
   constructor(status, message) {
     super(message);
@@ -176,11 +180,22 @@ export async function startTradingViewHttpServer(overrides = {}) {
   async function purgeIdleSessions(now = Date.now(), idleMs = config.sessionIdleMs) {
     const expired = [];
     for (const [sessionId, entry] of sessions.entries()) {
-      if (now - entry.lastSeen > idleMs) {
+      if (isSessionReclaimable(entry, now, idleMs)) {
         expired.push(sessionId);
       }
     }
     await Promise.all(expired.map(closeSession));
+  }
+
+  async function handleSessionRequest(entry, handler) {
+    entry.activeRequests += 1;
+    entry.lastSeen = Date.now();
+    try {
+      return await handler();
+    } finally {
+      entry.activeRequests = Math.max(0, entry.activeRequests - 1);
+      entry.lastSeen = Date.now();
+    }
   }
 
   const sessionSweepMs = Math.max(
@@ -225,8 +240,10 @@ export async function startTradingViewHttpServer(overrides = {}) {
             sendProtocolError(res, 404, 'Session not found');
             return;
           }
-          entry.lastSeen = Date.now();
-          await entry.transport.handleRequest(req, res, body);
+          await handleSessionRequest(
+            entry,
+            () => entry.transport.handleRequest(req, res, body)
+          );
           return;
         }
 
@@ -254,6 +271,7 @@ export async function startTradingViewHttpServer(overrides = {}) {
               server,
               transport,
               lastSeen: Date.now(),
+              activeRequests: 1,
             });
           },
         });
@@ -264,7 +282,16 @@ export async function startTradingViewHttpServer(overrides = {}) {
         };
 
         await server.connect(transport);
-        await transport.handleRequest(req, res, body);
+        try {
+          await transport.handleRequest(req, res, body);
+        } finally {
+          const initializedId = transport.sessionId;
+          const entry = initializedId ? sessions.get(initializedId) : null;
+          if (entry) {
+            entry.activeRequests = Math.max(0, entry.activeRequests - 1);
+            entry.lastSeen = Date.now();
+          }
+        }
         return;
       }
 
@@ -278,8 +305,10 @@ export async function startTradingViewHttpServer(overrides = {}) {
           sendProtocolError(res, 404, 'Session not found');
           return;
         }
-        entry.lastSeen = Date.now();
-        await entry.transport.handleRequest(req, res);
+        await handleSessionRequest(
+          entry,
+          () => entry.transport.handleRequest(req, res)
+        );
         return;
       }
 
