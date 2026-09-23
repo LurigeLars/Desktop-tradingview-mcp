@@ -46,6 +46,74 @@ export function matchWatchlistSymbol(requestedSymbol, candidates) {
   };
 }
 
+function normalizedIdentityAliases(identity) {
+  const aliases = [];
+  const push = value => {
+    const text = String(value ?? '').trim();
+    if (text) aliases.push(text.toUpperCase());
+  };
+
+  push(identity?.full_name);
+  push(identity?.pro_name);
+  push(identity?.ticker);
+
+  const baseNames = Array.isArray(identity?.base_name)
+    ? identity.base_name
+    : (identity?.base_name == null ? [] : [identity.base_name]);
+  for (const value of baseNames) push(value);
+
+  return aliases;
+}
+
+/**
+ * Verify the symbol TradingView actually resolved in a live chart.
+ *
+ * Exact symbols still win. Bare tickers keep the existing unique-suffix
+ * behavior. A simple exchange-qualified request may also match a different
+ * traded venue only when TradingView's own symbol metadata proves the
+ * requested listed identity (for example NASDAQ:QQQ resolving to BATS:QQQ
+ * while pro_name/base_name/listed_exchange still identify NASDAQ:QQQ).
+ *
+ * Expressions/formulas/spreads remain exact-only and never use metadata alias
+ * matching.
+ */
+export function matchTradingViewResolvedSymbol(requestedSymbol, resolvedSymbol, identity = {}) {
+  const requested = String(requestedSymbol ?? '').trim();
+  const resolved = String(resolvedSymbol ?? '').trim();
+  const baseline = matchWatchlistSymbol(requested, resolved ? [resolved] : []);
+  if (baseline.matched) return baseline;
+
+  if (!SIMPLE_QUALIFIED_SYMBOL_RE.test(requested)
+      || !SIMPLE_QUALIFIED_SYMBOL_RE.test(resolved)) {
+    return baseline;
+  }
+
+  const [requestedExchange, requestedTicker] = requested.toUpperCase().split(':');
+  const resolvedTicker = resolved.toUpperCase().split(':').pop();
+  if (!requestedTicker || !resolvedTicker || requestedTicker !== resolvedTicker) {
+    return { matched: null, verification: 'canonicalization_ticker_mismatch' };
+  }
+
+  const requestedUpper = requested.toUpperCase();
+  const aliases = normalizedIdentityAliases(identity);
+  if (aliases.includes(requestedUpper)) {
+    return { matched: resolved, verification: 'tradingview_identity_alias' };
+  }
+
+  const listedExchange = String(identity?.listed_exchange ?? '').trim().toUpperCase();
+  const identityTicker = String(identity?.name ?? identity?.ticker ?? '')
+    .trim()
+    .toUpperCase()
+    .split(':')
+    .pop();
+
+  if (listedExchange === requestedExchange && identityTicker === requestedTicker) {
+    return { matched: resolved, verification: 'tradingview_listed_exchange' };
+  }
+
+  return { matched: null, verification: 'canonicalization_unverified' };
+}
+
 // TV renamed the right-rail button: current builds use data-name="base" with
 // aria-label "Watchlist, details, and news"; older builds used
 // data-name="base-watchlist-widget-button" / aria-label "Watchlist".
