@@ -414,7 +414,14 @@ function isLayoutNotFoundError(error) {
   return /Layout matching .* not found/i.test(String(error?.message || error || ''));
 }
 
-async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTargets }) {
+async function openOrCreateWorkerTab({
+  plan,
+  owned,
+  layoutPrefix,
+  deps,
+  liveTargets,
+  recoverSavedLayout = true,
+}) {
   const newTabOptions = {
     landing_timeout_ms: 4000,
     chart_timeout_ms: 8000,
@@ -431,7 +438,7 @@ async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTarg
       };
     }
 
-    if (owned.layout_name) {
+    if (owned.layout_name && recoverSavedLayout) {
       try {
         const opened = await deps.newTab({
           layout: owned.layout_name,
@@ -445,6 +452,7 @@ async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTarg
             layoutName: owned.layout_name,
             reused: true,
             openedThisCall: true,
+            recoveredByName: true,
           };
         }
       } catch (error) {
@@ -460,35 +468,6 @@ async function openOrCreateWorkerTab({ plan, owned, layoutPrefix, deps, liveTarg
   }
 
   const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
-
-  // Recover an exact DTV worker layout that may have been created by a prior
-  // request which timed out before ownership could be persisted.
-  if (!owned?.chart_id) {
-    try {
-      const recovered = await deps.newTab({
-        layout: desiredName,
-        exact_layout: true,
-        ...newTabOptions,
-      });
-      const target = await findTargetForChartId(recovered.chart_id, null, deps.listTargets);
-      if (target) {
-        return {
-          target,
-          layoutName: desiredName,
-          reused: true,
-          openedThisCall: true,
-          recoveredByName: true,
-        };
-      }
-    } catch (error) {
-      if (!isLayoutNotFoundError(error)) {
-        throw new Error(
-          'Worker layout recovery failed for "' + desiredName + '": ' +
-          (error?.message || String(error)),
-        );
-      }
-    }
-  }
 
   let created;
   try {
@@ -630,12 +609,37 @@ export async function provisionWorker({
     const started = Date.now();
     let stage = 'open_or_create';
     try {
+      const slot = Number(plan.tab_index);
+      const layoutPrefix = layout_prefix || process.env.TV_WORKER_LAYOUT_PREFIX || 'DTV Worker';
+      let owned = ownedBySlot.get(slot) || null;
+      const hadPersistedIntent = !!owned;
+
+      // Journal the deterministic layout intent before opening TradingView.
+      // If the remote request dies mid-create, the next call can recover this
+      // exact saved layout instead of creating an untracked duplicate.
+      if (!owned) {
+        owned = {
+          slot,
+          chart_id: null,
+          layout_name: buildWorkerLayoutName(layoutPrefix, slot),
+          pane_count: plan.pane_count,
+          provisioning_state: 'intent',
+          intent_at: new Date(deps.now()).toISOString(),
+        };
+        const intentTabs = [
+          ...(state.worker_tabs || []).filter(tab => Number(tab.slot) !== slot),
+          owned,
+        ].sort((a, b) => Number(a.slot) - Number(b.slot));
+        state = deps.record({ worker_tabs: intentTabs });
+      }
+
       const opened = await openOrCreateWorkerTab({
         plan,
-        owned: ownedBySlot.get(Number(plan.tab_index)),
-        layoutPrefix: layout_prefix || process.env.TV_WORKER_LAYOUT_PREFIX || 'DTV Worker',
+        owned,
+        layoutPrefix,
         deps,
         liveTargets: await deps.listTargets(),
+        recoverSavedLayout: hadPersistedIntent,
       });
 
       const openDurationMs = Date.now() - started;
