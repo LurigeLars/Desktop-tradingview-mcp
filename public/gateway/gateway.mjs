@@ -110,7 +110,7 @@ export function createAccessVerifier(config, fetchImpl = fetch) {
     if ((stale || !cache.keys.has(kid)) && canRefresh) {
       cache.fetchedAt = now;
       // accessTeamDomain is validated by loadConfig() as a bare *.cloudflareaccess.com hostname.
-      // codeql[js/request-forgery]
+      // lgtm[js/request-forgery]
       const response = await fetchImpl(`${config.accessIssuer}/cdn-cgi/access/certs`, {
         signal: AbortSignal.timeout(5000),
       });
