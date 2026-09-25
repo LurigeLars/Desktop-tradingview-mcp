@@ -8,8 +8,9 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { launch, close } from '../src/core/health.js';
 
+const TEST_HOME = 'C:\\Users\\Test';
 const MSIX_EXE = 'C:\\Program Files\\WindowsApps\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\\TradingView.exe';
-const LOCAL_COPY_EXE = `${process.env.LOCALAPPDATA || ''}\\tradingview-mcp\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\\TradingView.exe`;
+const LOCAL_COPY_EXE = `${TEST_HOME}\\AppData\\Local\\tradingview-mcp\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\\TradingView.exe`;
 const CDP_VERSION = JSON.stringify({ Browser: 'Chrome/140', 'User-Agent': 'TVDesktop/3.1.0' });
 
 function mockChild({ failWith } = {}) {
@@ -30,14 +31,12 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
     },
     execFileSync: (file, args) => {
       if (file === 'taskkill.exe' && args.includes('TradingView.exe')) { state.killed++; return ''; }
-      throw new Error(`unexpected execFileSync: ${file} ${args.join(' ')}`);
-    },
-    execSync: (cmd) => {
-      if (cmd.includes('Get-AppxPackage')) {
+      if (file === 'powershell.exe' && args.some((arg) => String(arg).includes('Get-AppxPackage'))) {
         return 'C:\\Program Files\\WindowsApps\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\n';
       }
-      throw new Error(`unexpected execSync: ${cmd}`);
+      throw new Error(`unexpected execFileSync: ${file} ${args.join(' ')}`);
     },
+    execSync: (cmd) => { throw new Error(`unexpected execSync: ${cmd}`); },
     spawn: (exe) => {
       state.spawned.push(exe);
       const fail = spawnFailures.some((s) => exe.includes(s));
@@ -49,6 +48,7 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
     readdirSync: () => ['TradingView.Desktop_3.0.0.7652_x64__n534cwy3pjxzj'],
     delay: async () => {},
     probeCdp: async () => (state.cdpUp ? CDP_VERSION : null),
+    homeDir: () => TEST_HOME,
   };
   return { deps, state };
 }
@@ -109,7 +109,7 @@ describe('launch() — MSIX WindowsApps handling', { skip: !onWindows }, () => {
 
 describe('launch() — classic install path', { skip: !onWindows }, () => {
   it('launches classic LOCALAPPDATA install without MSIX logic', async () => {
-    const classicExe = `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`;
+    const classicExe = `${TEST_HOME}\\AppData\\Local\\TradingView\\TradingView.exe`;
     const state = { spawned: [], cdpUp: false };
     const deps = {
       existsSync: (p) => p === classicExe,
@@ -121,6 +121,7 @@ describe('launch() — classic install path', { skip: !onWindows }, () => {
       readdirSync: () => [],
       delay: async () => {},
       probeCdp: async () => (state.cdpUp ? CDP_VERSION : null),
+      homeDir: () => TEST_HOME,
     };
     const result = await launch({ _deps: deps });
     assert.equal(result.success, true);
@@ -136,6 +137,7 @@ describe('launch() — classic install path', { skip: !onWindows }, () => {
       spawn: () => { throw new Error('should not spawn'); },
       cpSync: () => {}, rmSync: () => {}, readdirSync: () => [],
       delay: async () => {}, probeCdp: async () => null,
+      homeDir: () => TEST_HOME,
     };
     await assert.rejects(() => launch({ _deps: deps }), /TradingView not found/);
   });
