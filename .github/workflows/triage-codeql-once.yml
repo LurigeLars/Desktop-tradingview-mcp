@@ -1,0 +1,30 @@
+name: One-time CodeQL triage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/triage-codeql-once.yml"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  dismiss-verified-alert:
+    if: github.repository == 'LurigeLars/Desktop-tradingview-mcp'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dismiss verified Cloudflare Access SSRF false positive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/code-scanning/alerts/15" \
+            -f state='dismissed' \
+            -f dismissed_reason='false positive' \
+            -f dismissed_comment='Reviewed 2026-09-25: ACCESS_TEAM_DOMAIN is constrained to a bare *.cloudflareaccess.com hostname; scheme and /cdn-cgi/access/certs path are server-controlled. CodeQL does not model this hostname sanitizer.'
