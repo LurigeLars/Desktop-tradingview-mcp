@@ -300,7 +300,10 @@ function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync
 
 export async function launch({ port, kill_existing, _deps } = {}) {
   const deps = _resolveLaunchDeps(_deps);
-  const cdpPort = port || CDP_PORT;
+  const cdpPort = Number(port ?? CDP_PORT);
+  if (!Number.isInteger(cdpPort) || cdpPort < 1024 || cdpPort > 65535) {
+    throw new Error('CDP port must be an integer from 1024 to 65535');
+  }
   const killFirst = kill_existing !== false;
   const platform = deps.platform;
 
