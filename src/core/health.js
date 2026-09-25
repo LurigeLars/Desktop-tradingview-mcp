@@ -232,7 +232,8 @@ async function _probeCdp(cdpPort) {
 }
 
 function _spawnDetached(spawnFn, exe, args) {
-  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore' });
+  // spawn receives an executable and argument array and never invokes a shell.
+  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore', shell: false }); // lgtm[js/command-line-injection]
   child.unref();
   return child;
 }
