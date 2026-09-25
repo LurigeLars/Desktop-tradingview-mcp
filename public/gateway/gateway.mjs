@@ -109,6 +109,8 @@ export function createAccessVerifier(config, fetchImpl = fetch) {
 
     if ((stale || !cache.keys.has(kid)) && canRefresh) {
       cache.fetchedAt = now;
+      // accessTeamDomain is validated by loadConfig() as a bare *.cloudflareaccess.com hostname.
+      // codeql[js/request-forgery]
       const response = await fetchImpl(`${config.accessIssuer}/cdn-cgi/access/certs`, {
         signal: AbortSignal.timeout(5000),
       });
@@ -160,10 +162,6 @@ export function createAccessVerifier(config, fetchImpl = fetch) {
       return { ok: false, reason: `verify error: ${error.message}` };
     }
   };
-}
-
-function safeLogValue(value) {
-  return String(value ?? '').replace(/[\r\n\u2028\u2029]/g, ' ').slice(0, 500);
 }
 
 function clientIp(req) {
@@ -271,7 +269,7 @@ function forward(req, res, body, config, ctx = null) {
   );
 
   upstream.on('error', error => {
-    console.warn(`upstream error: ${safeLogValue(error.code ?? error.message)}`);
+    console.warn('upstream error');
     if (!res.headersSent) send(res, 502, 'upstream unavailable');
     else res.destroy();
   });
@@ -317,7 +315,7 @@ export function createGatewayServer(env = process.env, dependencies = {}) {
 
       const identity = await verifyAccessJwt(req.headers['cf-access-jwt-assertion']);
       if (!identity.ok) {
-        console.warn(`access denied from ${safeLogValue(clientIp(req))}: ${safeLogValue(identity.reason)}`);
+        console.warn('access denied');
         return send(res, 403, 'forbidden');
       }
 
