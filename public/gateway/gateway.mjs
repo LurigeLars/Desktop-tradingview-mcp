@@ -162,6 +162,10 @@ export function createAccessVerifier(config, fetchImpl = fetch) {
   };
 }
 
+function safeLogValue(value) {
+  return String(value ?? '').replace(/[\r\n\u2028\u2029]/g, ' ').slice(0, 500);
+}
+
 function clientIp(req) {
   return req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? 'unknown';
 }
@@ -267,7 +271,7 @@ function forward(req, res, body, config, ctx = null) {
   );
 
   upstream.on('error', error => {
-    console.warn(`upstream error: ${error.code ?? error.message}`);
+    console.warn(`upstream error: ${safeLogValue(error.code ?? error.message)}`);
     if (!res.headersSent) send(res, 502, 'upstream unavailable');
     else res.destroy();
   });
@@ -313,7 +317,7 @@ export function createGatewayServer(env = process.env, dependencies = {}) {
 
       const identity = await verifyAccessJwt(req.headers['cf-access-jwt-assertion']);
       if (!identity.ok) {
-        console.warn(`access denied from ${clientIp(req)}: ${identity.reason}`);
+        console.warn(`access denied from ${safeLogValue(clientIp(req))}: ${safeLogValue(identity.reason)}`);
         return send(res, 403, 'forbidden');
       }
 
