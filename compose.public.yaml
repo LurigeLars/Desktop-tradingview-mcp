@@ -6,7 +6,7 @@ name: tradingview-mcp-public
 
 services:
   gateway:
-    image: node:22.22-alpine
+    image: node:26.9-alpine
     container_name: tradingview-mcp-gateway
     command: ["node", "/app/gateway.mjs"]
     user: node
