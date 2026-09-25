@@ -21,6 +21,8 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
 import CDP from 'chrome-remote-interface';
 
 let client;
@@ -150,7 +152,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       const { existsSync } = await import('fs');
       const paths = [
         '/Applications/TradingView.app/Contents/MacOS/TradingView',
-        `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
+        path.join(os.homedir(), 'Applications', 'TradingView.app', 'Contents', 'MacOS', 'TradingView'),
       ];
       const found = paths.some(p => existsSync(p));
       assert.ok(found, 'TradingView binary found on disk');
