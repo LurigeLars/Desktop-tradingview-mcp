@@ -5,6 +5,7 @@ import { getClient, getTargetInfo, evaluate, disconnect, CDP_HOST, CDP_PORT } fr
 import { existsSync, cpSync, rmSync, readdirSync } from 'fs';
 import { execFileSync, execSync, spawn } from 'child_process';
 import { dirname, basename, join } from 'path';
+import { homedir } from 'os';
 
 // Best-effort git-pull update check: compare local HEAD to origin's default
 // branch on GitHub. Never throws — returns null on any failure (offline,
@@ -215,6 +216,7 @@ function _resolveLaunchDeps(deps) {
     probeCdp: deps?.probeCdp || _probeCdp,
     processKill: deps?.processKill || process.kill.bind(process),
     platform: deps?.platform || process.platform,
+    homeDir: deps?.homeDir || homedir,
   };
 }
 
@@ -277,10 +279,10 @@ async function _waitForCdp({ cdpPort, attempts, delay, probeCdp }) {
  * a plain directory outside WindowsApps works and keeps the user's session,
  * so copy the package into LOCALAPPDATA once per version and launch that.
  */
-function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync }) {
+function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync, homeDir }) {
   const srcDir = dirname(tvPath);
   const pkgName = basename(srcDir);
-  const cacheRoot = join(process.env.LOCALAPPDATA || '', 'tradingview-mcp');
+  const cacheRoot = join(homeDir(), 'AppData', 'Local', 'tradingview-mcp');
   const dstDir = join(cacheRoot, pkgName);
   const dstExe = join(dstDir, 'TradingView.exe');
   if (!existsSync(dstExe)) {
@@ -298,24 +300,28 @@ function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync
 
 export async function launch({ port, kill_existing, _deps } = {}) {
   const deps = _resolveLaunchDeps(_deps);
-  const cdpPort = port || CDP_PORT;
+  const cdpPort = Number(port ?? CDP_PORT);
+  if (!Number.isInteger(cdpPort) || cdpPort < 1024 || cdpPort > 65535) {
+    throw new Error('CDP port must be an integer from 1024 to 65535');
+  }
   const killFirst = kill_existing !== false;
   const platform = deps.platform;
 
+  const userHome = deps.homeDir();
   const pathMap = {
     darwin: [
       '/Applications/TradingView.app/Contents/MacOS/TradingView',
-      `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
+      join(userHome, 'Applications', 'TradingView.app', 'Contents', 'MacOS', 'TradingView'),
     ],
     win32: [
-      `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
-      `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
-      `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+      join(userHome, 'AppData', 'Local', 'TradingView', 'TradingView.exe'),
+      'C:\\Program Files\\TradingView\\TradingView.exe',
+      'C:\\Program Files (x86)\\TradingView\\TradingView.exe',
     ],
     linux: [
       '/opt/TradingView/tradingview',
       '/opt/TradingView/TradingView',
-      `${process.env.HOME}/.local/share/TradingView/TradingView`,
+      join(userHome, '.local', 'share', 'TradingView', 'TradingView'),
       '/usr/bin/tradingview',
       '/snap/tradingview/current/tradingview',
     ],
@@ -328,32 +334,20 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   }
 
   if (!tvPath && platform === 'win32') {
-    // MSIX/Windows Store install — InstallLocation is in WindowsApps, which is ACL-restricted
-    // for normal `dir` enumeration but readable via Get-AppxPackage without elevation.
+    // MSIX/Windows Store install — resolve the package via a fixed command and
+    // accept only the expected TradingView.exe child of the returned package root.
     try {
-      const ps = 'powershell -NoProfile -Command "(Get-AppxPackage -Name \'TradingView.Desktop\' -ErrorAction SilentlyContinue).InstallLocation"';
-      const installDir = deps.execSync(ps, { timeout: 5000 }).toString().trim();
+      const installDir = deps.execFileSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command',
+          "(Get-AppxPackage -Name 'TradingView.Desktop' -ErrorAction SilentlyContinue).InstallLocation"],
+        { timeout: 5000 },
+      ).toString().trim();
       if (installDir) {
-        const candidate = `${installDir}\\TradingView.exe`;
-        if (deps.existsSync(candidate)) tvPath = candidate;
-      }
-    } catch { /* ignore */ }
-  }
-
-  if (!tvPath) {
-    try {
-      const cmd = platform === 'win32' ? 'where TradingView.exe' : 'which tradingview';
-      tvPath = deps.execSync(cmd, { timeout: 3000 }).toString().trim().split('\n')[0];
-      if (tvPath && !deps.existsSync(tvPath)) tvPath = null;
-    } catch { /* ignore */ }
-  }
-
-  if (!tvPath && platform === 'darwin') {
-    try {
-      const found = deps.execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
-      if (found) {
-        const candidate = `${found}/Contents/MacOS/TradingView`;
-        if (deps.existsSync(candidate)) tvPath = candidate;
+        const candidate = join(installDir, 'TradingView.exe');
+        if (deps.existsSync(candidate) && basename(candidate).toLowerCase() === 'tradingview.exe') {
+          tvPath = candidate;
+        }
       }
     } catch { /* ignore */ }
   }
