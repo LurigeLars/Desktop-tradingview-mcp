@@ -232,8 +232,16 @@ async function _probeCdp(cdpPort) {
 }
 
 function _spawnDetached(spawnFn, exe, args) {
-  // spawn receives an executable and argument array and never invokes a shell.
-  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore', shell: false }); // lgtm[js/command-line-injection]
+  const executableName = basename(String(exe || '')).toLowerCase();
+  if (!['tradingview', 'tradingview.exe'].includes(executableName)) {
+    throw new Error('Refusing to launch a non-TradingView executable');
+  }
+  if (!Array.isArray(args) || args.length !== 1 || !/^--remote-debugging-port=\d{4,5}$/.test(String(args[0]))) {
+    throw new Error('Refusing unexpected TradingView launch arguments');
+  }
+  // spawn receives a validated executable name and fixed-shape argument array and never invokes a shell.
+  // codeql[js/command-line-injection]
+  const child = spawnFn(exe, args, { detached: true, stdio: 'ignore', shell: false });
   child.unref();
   return child;
 }
