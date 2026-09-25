@@ -7,6 +7,126 @@
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
+const SIMPLE_BARE_SYMBOL_RE = /^[A-Z0-9_.!]+$/i;
+const SIMPLE_QUALIFIED_SYMBOL_RE = /^[A-Z0-9_.]+:[A-Z0-9_.!]+$/i;
+
+export function isBareSymbolRequest(symbol) {
+  const value = String(symbol ?? '').trim();
+  return value.length > 0 && SIMPLE_BARE_SYMBOL_RE.test(value);
+}
+
+export function matchWatchlistSymbol(requestedSymbol, candidates) {
+  const requested = String(requestedSymbol ?? '').trim();
+  if (!requested) return { matched: null, verification: 'empty_request' };
+
+  const normalized = requested.toUpperCase();
+  const symbols = (candidates || []).filter(Boolean).map(String);
+  const exact = symbols.find(symbol => symbol.toUpperCase() === normalized);
+  if (exact) return { matched: exact, verification: 'exact' };
+
+  // Only unqualified, simple ticker requests may fall back to matching the
+  // ticker suffix. Expressions/formulas and exchange-qualified symbols must
+  // verify exactly; otherwise a component of an expression could be reported
+  // as a false success (for example, a ratio being mistaken for one leg).
+  if (!isBareSymbolRequest(requested)) {
+    return { matched: null, verification: 'exact_required' };
+  }
+
+  const suffixMatches = symbols.filter(symbol => {
+    if (!SIMPLE_QUALIFIED_SYMBOL_RE.test(symbol)) return false;
+    const suffix = symbol.split(':').pop();
+    return suffix && suffix.toUpperCase() === normalized;
+  });
+  if (suffixMatches.length === 1) {
+    return { matched: suffixMatches[0], verification: 'unique_bare_ticker' };
+  }
+  return {
+    matched: null,
+    verification: suffixMatches.length > 1 ? 'ambiguous_bare_ticker' : 'not_found',
+  };
+}
+
+function normalizedIdentityAliases(identity) {
+  const aliases = [];
+  const push = value => {
+    const text = String(value ?? '').trim();
+    if (text) aliases.push(text.toUpperCase());
+  };
+
+  push(identity?.full_name);
+  push(identity?.pro_name);
+  push(identity?.ticker);
+
+  const baseNames = Array.isArray(identity?.base_name)
+    ? identity.base_name
+    : (identity?.base_name == null ? [] : [identity.base_name]);
+  for (const value of baseNames) push(value);
+
+  return aliases;
+}
+
+/**
+ * Verify the symbol TradingView actually resolved in a live chart.
+ *
+ * Exact symbols still win. Bare tickers keep the existing unique-suffix
+ * behavior. A simple exchange-qualified request may also match a different
+ * traded venue only when TradingView's own symbol metadata proves the
+ * requested listed identity (for example NASDAQ:QQQ resolving to BATS:QQQ
+ * while pro_name/base_name/listed_exchange still identify NASDAQ:QQQ).
+ *
+ * Expressions/formulas/spreads remain opaque. Their resolved display form may
+ * differ only when TradingView itself preserves the complete requested string
+ * exactly in full_name or pro_name. Component/base_name reconstruction is
+ * never used.
+ */
+export function matchTradingViewResolvedSymbol(requestedSymbol, resolvedSymbol, identity = {}) {
+  const requested = String(requestedSymbol ?? '').trim();
+  const resolved = String(resolvedSymbol ?? '').trim();
+  const baseline = matchWatchlistSymbol(requested, resolved ? [resolved] : []);
+  if (baseline.matched) return baseline;
+
+  const requestedUpper = requested.toUpperCase();
+
+  // For opaque TradingView expressions we never parse legs/operators. The only
+  // allowed non-literal resolution is TradingView proving the entire original
+  // request verbatim through its own primary identity metadata.
+  const primaryIdentityAliases = [identity?.full_name, identity?.pro_name]
+    .map(value => String(value ?? '').trim().toUpperCase())
+    .filter(Boolean);
+  if (resolved && primaryIdentityAliases.includes(requestedUpper)) {
+    return { matched: resolved, verification: 'tradingview_exact_identity_alias' };
+  }
+
+  if (!SIMPLE_QUALIFIED_SYMBOL_RE.test(requested)
+      || !SIMPLE_QUALIFIED_SYMBOL_RE.test(resolved)) {
+    return baseline;
+  }
+
+  const [requestedExchange, requestedTicker] = requestedUpper.split(':');
+  const resolvedTicker = resolved.toUpperCase().split(':').pop();
+  if (!requestedTicker || !resolvedTicker || requestedTicker !== resolvedTicker) {
+    return { matched: null, verification: 'canonicalization_ticker_mismatch' };
+  }
+
+  const aliases = normalizedIdentityAliases(identity);
+  if (aliases.includes(requestedUpper)) {
+    return { matched: resolved, verification: 'tradingview_identity_alias' };
+  }
+
+  const listedExchange = String(identity?.listed_exchange ?? '').trim().toUpperCase();
+  const identityTicker = String(identity?.name ?? identity?.ticker ?? '')
+    .trim()
+    .toUpperCase()
+    .split(':')
+    .pop();
+
+  if (listedExchange === requestedExchange && identityTicker === requestedTicker) {
+    return { matched: resolved, verification: 'tradingview_listed_exchange' };
+  }
+
+  return { matched: null, verification: 'canonicalization_unverified' };
+}
+
 // TV renamed the right-rail button: current builds use data-name="base" with
 // aria-label "Watchlist, details, and news"; older builds used
 // data-name="base-watchlist-widget-button" / aria-label "Watchlist".
@@ -115,46 +235,89 @@ export async function get() {
   };
 }
 
-export async function add({ symbol }) {
-  const c = await getClient();
-  await ensureWatchlistOpen();
-
-  const addClicked = await evaluate(`
-    (function() {
-      var btn = document.querySelector('[data-name="add-symbol-button"]')
-        || document.querySelector('[aria-label="Add symbol"]')
-        || document.querySelector('[aria-label*="Add symbol"]');
-      if (!btn || btn.offsetParent === null) return { found: false };
-      btn.click();
-      return { found: true };
-    })()
-  `);
-  if (!addClicked?.found) throw new Error('Add symbol button not found in watchlist panel');
-  await new Promise(r => setTimeout(r, 400));
-
-  await c.Input.insertText({ text: symbol });
-  await new Promise(r => setTimeout(r, 700));
-  await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-  await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
-  await new Promise(r => setTimeout(r, 400));
-  await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-  await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
-  await new Promise(r => setTimeout(r, 400));
-
-  // Verify the row actually appeared instead of reporting blind success.
-  const bare = symbol.split(':').pop().toUpperCase();
-  const verified = await evaluate(`
+async function readVisibleWatchlistSymbols() {
+  return evaluate(`
     (function() {
       var rows = document.querySelectorAll('[class*="layout__area--right"] [data-symbol-full]');
+      var symbols = [];
       for (var i = 0; i < rows.length; i++) {
-        var s = rows[i].getAttribute('data-symbol-full') || '';
-        if (s.toUpperCase() === ${JSON.stringify(symbol.toUpperCase())} || s.split(':').pop().toUpperCase() === ${JSON.stringify(bare)}) return s;
+        var value = rows[i].getAttribute('data-symbol-full');
+        if (value) symbols.push(value);
       }
-      return null;
+      return symbols;
     })()
   `);
+}
 
-  return { success: !!verified, symbol, added_as: verified, action: verified ? 'added' : 'not_verified' };
+async function dismissSymbolSearch(client) {
+  try {
+    await client.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await client.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  } catch {
+    // Best effort. A failed CDP transport is invalidated by connection.js so
+    // the next unrelated tool call can rediscover a healthy target.
+  }
+}
+
+export async function add({ symbol }) {
+  const requested = String(symbol ?? '').trim();
+  if (!requested) throw new Error('Symbol must not be empty');
+
+  await ensureWatchlistOpen();
+
+  const before = await readVisibleWatchlistSymbols();
+  const existing = matchWatchlistSymbol(requested, before);
+  if (existing.matched) {
+    return {
+      success: true,
+      symbol: requested,
+      added_as: existing.matched,
+      action: 'already_present',
+      verification: existing.verification,
+    };
+  }
+
+  const c = await getClient();
+  try {
+    const addClicked = await evaluate(`
+      (function() {
+        var btn = document.querySelector('[data-name="add-symbol-button"]')
+          || document.querySelector('[aria-label="Add symbol"]')
+          || document.querySelector('[aria-label*="Add symbol"]');
+        if (!btn || btn.offsetParent === null) return { found: false };
+        btn.click();
+        return { found: true };
+      })()
+    `);
+    if (!addClicked?.found) throw new Error('Add symbol button not found in watchlist panel');
+    await new Promise(r => setTimeout(r, 400));
+
+    // Preserve the request exactly. TradingView owns parsing/resolution of
+    // formulas, spreads and other supported symbol expressions.
+    await c.Input.insertText({ text: requested });
+    await new Promise(r => setTimeout(r, 700));
+    await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
+    await new Promise(r => setTimeout(r, 400));
+  } finally {
+    await dismissSymbolSearch(c);
+  }
+
+  await new Promise(r => setTimeout(r, 400));
+
+  // Verify against TradingView's actual watchlist state. Exchange-qualified
+  // symbols and formulas/expressions require an exact match. Only an
+  // unqualified simple ticker may use a unique exchange-suffix fallback.
+  const after = await readVisibleWatchlistSymbols();
+  const verified = matchWatchlistSymbol(requested, after);
+
+  return {
+    success: !!verified.matched,
+    symbol: requested,
+    added_as: verified.matched,
+    action: verified.matched ? 'added' : 'not_verified',
+    verification: verified.verification,
+  };
 }
 
 export async function addBulk({ symbols }) {
@@ -162,13 +325,27 @@ export async function addBulk({ symbols }) {
   for (const symbol of symbols) {
     try {
       const r = await add({ symbol });
-      results.push({ symbol, success: r.success, added_as: r.added_as });
+      results.push({
+        symbol,
+        success: r.success,
+        added_as: r.added_as,
+        action: r.action,
+        verification: r.verification,
+      });
     } catch (err) {
-      results.push({ symbol, success: false, error: err.message });
+      results.push({ symbol, success: false, action: 'failed', error: err.message });
     }
   }
-  const added = results.filter(r => r.success).length;
-  return { success: added > 0, added, failed: results.length - added, results };
+  const added = results.filter(r => r.action === 'added').length;
+  const alreadyPresent = results.filter(r => r.action === 'already_present').length;
+  const failed = results.length - added - alreadyPresent;
+  return {
+    success: failed === 0,
+    added,
+    already_present: alreadyPresent,
+    failed,
+    results,
+  };
 }
 
 export async function remove({ symbols }) {

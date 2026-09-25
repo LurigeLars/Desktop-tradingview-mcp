@@ -13,14 +13,16 @@ export function registerTabTools(server) {
   });
 
   server.registerTool('tab_new', {
-    description: 'Open another TradingView Desktop chart tab. May be called repeatedly to keep multiple tabs open. Optionally pick what to load: layout "new" creates a named blank layout, or pass a saved layout name to open it.',
+    description: 'Open another TradingView Desktop tab. Optionally navigate the new-tab target directly to a chart, or use the saved-layout picker workflow.',
     inputSchema: {
-      layout: z.string().optional().describe('"new" for a blank new layout, or a saved layout name (substring match). Omit to leave the tab on the layout picker.'),
+      layout: z.string().optional().describe('"new" for a blank new layout, or a saved layout name (substring match). Omit to leave the tab on the new-tab page.'),
       name: z.string().optional().describe('Name for the new layout (used with layout: "new"; default "New layout")'),
+      symbol: z.string().optional().describe('Optional symbol/expression to load by navigating the new-tab target directly to a chart.'),
+      as_chart: z.coerce.boolean().optional().describe('Navigate the new-tab target directly to /chart/ without using the saved-layout picker.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, async ({ layout, name }) => {
-    try { return jsonResult(await core.newTab({ layout, name })); }
+  }, async ({ layout, name, symbol, as_chart }) => {
+    try { return jsonResult(await core.newTab({ layout, name, symbol, as_chart })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
