@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  activePaneStates,
   buildWorkerLayoutName,
+  closeTabByOwned,
   layoutCodeForPaneCount,
   pendingPaneIndexes,
   provisionWorker,
@@ -26,6 +28,63 @@ test('worker pane counts map only to supported TradingView layouts', () => {
 test('worker layout names are technical and deterministic', () => {
   assert.equal(buildWorkerLayoutName('Worker', 0), 'Worker 01');
   assert.equal(buildWorkerLayoutName('Worker', 6), 'Worker 07');
+});
+
+test('worker cleanup closes the exact owned target without shell switching', async () => {
+  const targets = [
+    { id: 'worker-a', url: 'https://www.tradingview.com/chart/shared/' },
+    { id: 'worker-b', url: 'https://www.tradingview.com/chart/shared/' },
+  ];
+  let shellTouched = false;
+
+  const result = await closeTabByOwned(
+    { target_id: 'worker-a', chart_id: 'shared' },
+    {
+      listTargets: async () => targets.slice(),
+      closeTarget: async targetId => {
+        const index = targets.findIndex(target => target.id === targetId);
+        if (index >= 0) targets.splice(index, 1);
+      },
+      listTabs: async () => { shellTouched = true; throw new Error('shell list must not run'); },
+      switchTab: async () => { shellTouched = true; throw new Error('shell switch must not run'); },
+      closeTab: async () => { shellTouched = true; throw new Error('shell close must not run'); },
+      wait: async () => {},
+    },
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.closed, true);
+  assert.equal(result.via, 'target_id');
+  assert.equal(shellTouched, false);
+  assert.deepEqual(targets.map(target => target.id), ['worker-b']);
+});
+
+test('legacy chart-id cleanup fails closed when multiple tabs share the chart id', async () => {
+  await assert.rejects(
+    () => closeTabByOwned(
+      { chart_id: 'shared' },
+      {
+        listTabs: async () => ({
+          tabs: [
+            { id: 'a', chart_id: 'shared', is_chart: true, index: 0 },
+            { id: 'b', chart_id: 'shared', is_chart: true, index: 1 },
+          ],
+        }),
+      },
+    ),
+    /Cannot safely close worker chart shared without target_id because 2 matching tabs are open/,
+  );
+});
+
+test('active pane state follows inlineChartsCount when getAll retains stale hidden widgets', () => {
+  const panes = Array.from({ length: 8 }, (_, pane_index) => ({ pane_index }));
+
+  assert.deepEqual(
+    activePaneStates({ inline_count: 4, panes }).map(pane => pane.pane_index),
+    [0, 1, 2, 3],
+  );
+  assert.equal(activePaneStates({ inline_count: 8, panes: panes.slice(0, 4) }).length, 4);
+  assert.equal(activePaneStates({ inline_count: null, panes }).length, 8);
 });
 
 test('pending pane detection skips already-correct resident panes', () => {

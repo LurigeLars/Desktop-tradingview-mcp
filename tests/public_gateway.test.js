@@ -25,7 +25,13 @@ const baseEnv = {
 describe('public gateway configuration', () => {
   it('requires Cloudflare Access configuration and an explicit email allowlist', () => {
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_AUD: '' }), /ACCESS_AUD is required/);
+    assert.throws(() => loadConfig({ ...baseEnv, ACCESS_TEAM_DOMAIN: 'http://127.0.0.1' }), /Cloudflare Access team domain/);
+    assert.throws(() => loadConfig({ ...baseEnv, ACCESS_TEAM_DOMAIN: 'evil.example.com' }), /Cloudflare Access team domain/);
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_ALLOWED_EMAILS: '' }), /ACCESS_ALLOWED_EMAILS/);
+  });
+
+  it('defaults to an MCP-aware HTTP transport rate budget', () => {
+    assert.equal(loadConfig(baseEnv).ratePerMin, 360);
   });
 
   it('accepts only the MCP path', () => {
