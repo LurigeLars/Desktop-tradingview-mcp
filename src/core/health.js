@@ -3,7 +3,7 @@
  */
 import { getClient, getTargetInfo, evaluate, disconnect, CDP_HOST, CDP_PORT } from '../connection.js';
 import { existsSync, cpSync, rmSync, readdirSync } from 'fs';
-import { execSync, spawn } from 'child_process';
+import { execFileSync, execSync, spawn } from 'child_process';
 import { dirname, basename, join } from 'path';
 
 // Best-effort git-pull update check: compare local HEAD to origin's default
@@ -206,6 +206,7 @@ function _resolveLaunchDeps(deps) {
   return {
     spawn: deps?.spawn || spawn,
     execSync: deps?.execSync || execSync,
+    execFileSync: deps?.execFileSync || execFileSync,
     existsSync: deps?.existsSync || existsSync,
     cpSync: deps?.cpSync || cpSync,
     rmSync: deps?.rmSync || rmSync,
@@ -354,7 +355,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
 
   const killExisting = async () => {
     try {
-      if (platform === 'win32') deps.execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
+      if (platform === 'win32') deps.execFileSync('taskkill.exe', ['/F', '/IM', 'TradingView.exe'], { timeout: 5000 });
       else deps.execSync('pkill -f TradingView', { timeout: 5000 });
       await deps.delay(1500);
     } catch { /* may not be running */ }
@@ -446,8 +447,9 @@ export async function close({ force = false, _deps } = {}) {
   let terminationError = null;
   try {
     if (managed.platform === 'win32') {
-      const forceArg = force ? ' /F' : '';
-      deps.execSync(`taskkill /PID ${managed.pid} /T${forceArg}`, { timeout: 5000, stdio: 'ignore' });
+      const args = ['/PID', String(managed.pid), '/T'];
+      if (force) args.push('/F');
+      deps.execFileSync('taskkill.exe', args, { timeout: 5000, stdio: 'ignore' });
     } else {
       deps.processKill(-managed.pid, force ? 'SIGKILL' : 'SIGTERM');
     }

@@ -16,7 +16,7 @@ import {
 } from './policy.mjs';
 
 export function loadConfig(env = process.env) {
-  const accessTeamDomain = String(env.ACCESS_TEAM_DOMAIN ?? '').trim();
+  const accessTeamDomain = String(env.ACCESS_TEAM_DOMAIN ?? '').trim().toLowerCase();
   const accessAud = String(env.ACCESS_AUD ?? '').trim();
   const allowedEmails = new Set(
     String(env.ACCESS_ALLOWED_EMAILS ?? '')
@@ -26,6 +26,9 @@ export function loadConfig(env = process.env) {
   );
 
   if (!accessTeamDomain) throw new Error('ACCESS_TEAM_DOMAIN is required');
+  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+cloudflareaccess\.com$/.test(accessTeamDomain)) {
+    throw new Error('ACCESS_TEAM_DOMAIN must be a Cloudflare Access team domain');
+  }
   if (!accessAud) throw new Error('ACCESS_AUD is required');
   if (allowedEmails.size === 0) throw new Error('ACCESS_ALLOWED_EMAILS must contain at least one address');
 

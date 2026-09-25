@@ -28,11 +28,14 @@ function msixDeps({ spawnFailures = [], cdpBindsFor = [], copyExists = false } =
       if (p.includes('tradingview-mcp')) return copyExists || state.copies.length > 0;
       return false;
     },
+    execFileSync: (file, args) => {
+      if (file === 'taskkill.exe' && args.includes('TradingView.exe')) { state.killed++; return ''; }
+      throw new Error(`unexpected execFileSync: ${file} ${args.join(' ')}`);
+    },
     execSync: (cmd) => {
       if (cmd.includes('Get-AppxPackage')) {
         return 'C:\\Program Files\\WindowsApps\\TradingView.Desktop_3.1.0.7818_x64__n534cwy3pjxzj\n';
       }
-      if (cmd.includes('taskkill')) { state.killed++; return ''; }
       throw new Error(`unexpected execSync: ${cmd}`);
     },
     spawn: (exe) => {
@@ -110,7 +113,8 @@ describe('launch() — classic install path', { skip: !onWindows }, () => {
     const state = { spawned: [], cdpUp: false };
     const deps = {
       existsSync: (p) => p === classicExe,
-      execSync: (cmd) => { if (cmd.includes('taskkill')) return ''; throw new Error(`unexpected: ${cmd}`); },
+      execFileSync: (file, args) => { if (file === 'taskkill.exe' && args.includes('TradingView.exe')) return ''; throw new Error(`unexpected: ${file}`); },
+      execSync: (cmd) => { throw new Error(`unexpected: ${cmd}`); },
       spawn: (exe) => { state.spawned.push(exe); state.cdpUp = true; return mockChild(); },
       cpSync: () => { throw new Error('should not copy'); },
       rmSync: () => {},
