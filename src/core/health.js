@@ -240,7 +240,7 @@ function _spawnDetached(spawnFn, exe, args) {
     throw new Error('Refusing unexpected TradingView launch arguments');
   }
   // spawn receives a validated executable name and fixed-shape argument array and never invokes a shell.
-  // codeql[js/command-line-injection]
+  // lgtm[js/command-line-injection]
   const child = spawnFn(exe, args, { detached: true, stdio: 'ignore', shell: false });
   child.unref();
   return child;
