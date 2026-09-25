@@ -5,12 +5,15 @@ let targetInfo = null;
 // Overridable via TV_CDP_HOST/TV_CDP_PORT (or CDP_HOST/CDP_PORT) env vars.
 // Default is 127.0.0.1, not localhost: on some Windows machines localhost
 // resolves to ::1 first, and Electron's --remote-debugging-port only listens on IPv4.
-export const CDP_HOST = process.env.TV_CDP_HOST || process.env.CDP_HOST || '127.0.0.1';
-export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) || 9222;
+const requestedHost = process.env.TV_CDP_HOST || process.env.CDP_HOST || '127.0.0.1';
+if (!['127.0.0.1', 'localhost'].includes(requestedHost)) throw new Error('TV_CDP_HOST must be loopback');
+export const CDP_HOST = '127.0.0.1';
+const requestedPort = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT || 9222);
+if (!Number.isInteger(requestedPort) || requestedPort < 1024 || requestedPort > 65535) throw new Error('TV_CDP_PORT must be an integer from 1024 to 65535');
+export const CDP_PORT = requestedPort;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
-// Known direct API paths discovered via live probing (see PROBE_RESULTS.md)
 const KNOWN_PATHS = {
   chartApi: 'window.TradingViewApi._activeChartWidgetWV.value()',
   chartWidgetCollection: 'window.TradingViewApi._chartWidgetCollection',
@@ -19,46 +22,36 @@ const KNOWN_PATHS = {
   alertService: 'window.TradingViewApi._alertService',
   chartApiInstance: 'window.ChartApiInstance',
   mainSeriesBars: 'window.TradingViewApi._activeChartWidgetWV.value()._chartWidget.model().mainSeries().bars()',
-  // Phase 1: Strategy data — model().dataSources() → find strategy → .performance().value(), .ordersData(), .reportData()
   strategyStudy: 'chart._chartWidget.model().model().dataSources()',
-  // Phase 2: Layouts — getSavedCharts(cb), loadChartFromServer(id)
   layoutManager: 'window.TradingViewApi.getSavedCharts',
-  // Phase 5: Symbol search — searchSymbols(query) returns Promise
   symbolSearchApi: 'window.TradingViewApi.searchSymbols',
-  // Phase 6: Pine scripts — REST API at pine-facade.tradingview.com/pine-facade/list/?filter=saved
   pineFacadeApi: 'https://pine-facade.tradingview.com/pine-facade',
 };
 
 export { KNOWN_PATHS };
 
-/**
- * Sanitize a string for safe interpolation into JavaScript code evaluated via CDP.
- * Uses JSON.stringify to produce a properly escaped JS string literal (with quotes).
- * Prevents injection via quotes, backticks, template literals, or control chars.
- */
-export function safeString(str) {
-  return JSON.stringify(String(str));
-}
+export function safeString(str) { return JSON.stringify(String(str)); }
 
-/**
- * Validate that a value is a finite number. Throws if NaN, Infinity, or non-numeric.
- * Prevents corrupt values from reaching TradingView APIs that persist to cloud state.
- */
 export function requireFinite(value, name) {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(`${name} must be a finite number, got: ${value}`);
   return n;
 }
 
+async function invalidateCachedClient() {
+  const stale = client;
+  client = null;
+  targetInfo = null;
+  if (stale) { try { await stale.close(); } catch { /* transport already gone */ } }
+}
+
 export async function getClient() {
   if (client) {
     try {
-      // Quick liveness check
       await client.Runtime.evaluate({ expression: '1', returnByValue: true });
       return client;
     } catch {
-      client = null;
-      targetInfo = null;
+      await invalidateCachedClient();
     }
   }
   return connect();
@@ -76,15 +69,13 @@ export async function connect(targetId = null) {
       }
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
-
-      // Enable required domains
       await client.Runtime.enable();
       await client.Page.enable();
       await client.DOM.enable();
-
       return client;
     } catch (err) {
       lastError = err;
+      await invalidateCachedClient();
       const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
       await new Promise(r => setTimeout(r, delay));
     }
@@ -92,18 +83,8 @@ export async function connect(targetId = null) {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
-/**
- * Re-attach the cached CDP client to a specific target id.
- * Used by tab_switch so subsequent reads (chart_get_state, data_get_*,
- * quote_get, screenshots) follow the activated tab instead of staying
- * glued to the target picked at first connect.
- */
 export async function reconnectTo(targetId) {
-  if (client) {
-    try { await client.close(); } catch { /* already gone */ }
-    client = null;
-    targetInfo = null;
-  }
+  await invalidateCachedClient();
   return connect(targetId);
 }
 
@@ -111,98 +92,79 @@ export function isTradingViewUrl(value) {
   try {
     const url = new URL(String(value));
     const hostname = url.hostname.toLowerCase();
-    return hostname === 'tradingview.com' || hostname.endsWith('.tradingview.com');
-  } catch {
-    return false;
-  }
+    return url.protocol === 'https:' && (hostname === 'tradingview.com' || hostname.endsWith('.tradingview.com'));
+  } catch { return false; }
+}
+
+export async function listCdpTargets() {
+  const resp = await fetch(new URL('/json/list', `http://127.0.0.1:${CDP_PORT}`), {
+    redirect: 'error',
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!resp.ok) throw new Error(`CDP target list failed (HTTP ${resp.status})`);
+  return resp.json();
+}
+
+export async function listTradingViewChartTargets() {
+  const targets = await listCdpTargets();
+  return targets.filter(t => {
+    if (t.type !== 'page' || !isTradingViewUrl(t.url)) return false;
+    try { return new URL(t.url).pathname.toLowerCase().startsWith('/chart'); }
+    catch { return false; }
+  });
 }
 
 async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
-
+  const targets = await listCdpTargets();
   const tradingViewPages = targets.filter(t => t.type === 'page' && isTradingViewUrl(t.url));
-
-  // Prefer an actual chart URL, then any other TradingView page.
   return tradingViewPages.find(t => {
-    try {
-      return new URL(t.url).pathname.toLowerCase().startsWith('/chart');
-    } catch {
-      return false;
-    }
+    try { return new URL(t.url).pathname.toLowerCase().startsWith('/chart'); }
+    catch { return false; }
   }) || tradingViewPages[0] || null;
 }
 
 async function findTargetById(id) {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
-  const targets = await resp.json();
-  return targets.find(t => t.id === id) || null;
+  const targets = await listCdpTargets();
+  return targets.find(t => t.id === id && t.type === 'page' && isTradingViewUrl(t.url)) || null;
 }
 
 export async function getTargetInfo() {
-  if (!targetInfo) {
-    await getClient();
-  }
+  if (!targetInfo) await getClient();
   return targetInfo;
 }
 
 export async function evaluate(expression, opts = {}) {
   const c = await getClient();
-  const result = await c.Runtime.evaluate({
-    expression,
-    returnByValue: true,
-    awaitPromise: opts.awaitPromise ?? false,
-    ...opts,
-  });
+  let result;
+  try {
+    result = await c.Runtime.evaluate({
+      expression,
+      returnByValue: true,
+      awaitPromise: opts.awaitPromise ?? false,
+      ...opts,
+    });
+  } catch (error) {
+    await invalidateCachedClient();
+    throw error;
+  }
   if (result.exceptionDetails) {
-    const msg = result.exceptionDetails.exception?.description
-      || result.exceptionDetails.text
-      || 'Unknown evaluation error';
+    const msg = result.exceptionDetails.exception?.description || result.exceptionDetails.text || 'Unknown evaluation error';
     throw new Error(`JS evaluation error: ${msg}`);
   }
   return result.result?.value;
 }
 
-export async function evaluateAsync(expression) {
-  return evaluate(expression, { awaitPromise: true });
-}
-
-export async function disconnect() {
-  if (client) {
-    try { await client.close(); } catch {}
-    client = null;
-    targetInfo = null;
-  }
-}
-
-// --- Direct API path helpers ---
-// Each returns the STRING expression path after verifying it exists.
-// Callers use the returned string in their own evaluate() calls.
+export async function evaluateAsync(expression) { return evaluate(expression, { awaitPromise: true }); }
+export async function disconnect() { await invalidateCachedClient(); }
 
 async function verifyAndReturn(path, name) {
   const exists = await evaluate(`typeof (${path}) !== 'undefined' && (${path}) !== null`);
-  if (!exists) {
-    throw new Error(`${name} not available at ${path}`);
-  }
+  if (!exists) throw new Error(`${name} not available at ${path}`);
   return path;
 }
 
-export async function getChartApi() {
-  return verifyAndReturn(KNOWN_PATHS.chartApi, 'Chart API');
-}
-
-export async function getChartCollection() {
-  return verifyAndReturn(KNOWN_PATHS.chartWidgetCollection, 'Chart Widget Collection');
-}
-
-export async function getBottomBar() {
-  return verifyAndReturn(KNOWN_PATHS.bottomWidgetBar, 'Bottom Widget Bar');
-}
-
-export async function getReplayApi() {
-  return verifyAndReturn(KNOWN_PATHS.replayApi, 'Replay API');
-}
-
-export async function getMainSeriesBars() {
-  return verifyAndReturn(KNOWN_PATHS.mainSeriesBars, 'Main Series Bars');
-}
+export async function getChartApi() { return verifyAndReturn(KNOWN_PATHS.chartApi, 'Chart API'); }
+export async function getChartCollection() { return verifyAndReturn(KNOWN_PATHS.chartWidgetCollection, 'Chart Widget Collection'); }
+export async function getBottomBar() { return verifyAndReturn(KNOWN_PATHS.bottomWidgetBar, 'Bottom Widget Bar'); }
+export async function getReplayApi() { return verifyAndReturn(KNOWN_PATHS.replayApi, 'Replay API'); }
+export async function getMainSeriesBars() { return verifyAndReturn(KNOWN_PATHS.mainSeriesBars, 'Main Series Bars'); }

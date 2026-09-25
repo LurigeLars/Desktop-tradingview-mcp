@@ -11,7 +11,12 @@ export const DEFAULT_HTTP_PORT = 8765;
 export const DEFAULT_HTTP_PATH = '/mcp';
 export const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_MAX_SESSIONS = 32;
-export const DEFAULT_SESSION_IDLE_MS = 60 * 60 * 1000;
+export const DEFAULT_SESSION_IDLE_MS = 5 * 60 * 1000;
+export const DEFAULT_SESSION_PRESSURE_IDLE_MS = 30 * 1000;
+
+export function isSessionReclaimable(entry, now, idleMs) {
+  return (entry.activeRequests ?? 0) === 0 && now - entry.lastSeen > idleMs;
+}
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -149,6 +154,11 @@ export function resolveHttpConfig(overrides = {}) {
       DEFAULT_SESSION_IDLE_MS,
       'TV_MCP_HTTP_SESSION_IDLE_MS'
     ),
+    sessionPressureIdleMs: toPositiveInt(
+      overrides.sessionPressureIdleMs ?? process.env.TV_MCP_HTTP_SESSION_PRESSURE_IDLE_MS,
+      DEFAULT_SESSION_PRESSURE_IDLE_MS,
+      'TV_MCP_HTTP_SESSION_PRESSURE_IDLE_MS'
+    ),
   };
 }
 
@@ -167,15 +177,40 @@ export async function startTradingViewHttpServer(overrides = {}) {
     }
   }
 
-  async function purgeIdleSessions(now = Date.now()) {
+  async function purgeIdleSessions(now = Date.now(), idleMs = config.sessionIdleMs) {
     const expired = [];
     for (const [sessionId, entry] of sessions.entries()) {
-      if (now - entry.lastSeen > config.sessionIdleMs) {
+      if (isSessionReclaimable(entry, now, idleMs)) {
         expired.push(sessionId);
       }
     }
     await Promise.all(expired.map(closeSession));
   }
+
+  async function handleSessionRequest(entry, handler) {
+    entry.activeRequests += 1;
+    entry.lastSeen = Date.now();
+    try {
+      return await handler();
+    } finally {
+      entry.activeRequests = Math.max(0, entry.activeRequests - 1);
+      entry.lastSeen = Date.now();
+    }
+  }
+
+  const sessionSweepMs = Math.max(
+    10,
+    Math.min(60_000, Math.floor(config.sessionIdleMs / 2))
+  );
+  let sweepPromise = Promise.resolve();
+  const sweepTimer = setInterval(() => {
+    sweepPromise = sweepPromise
+      .then(() => purgeIdleSessions())
+      .catch(error => {
+        process.stderr.write(`[tradingview-mcp:http] session cleanup failed: ${error?.stack || error}\n`);
+      });
+  }, sessionSweepMs);
+  sweepTimer.unref();
 
   const httpServer = createServer(async (req, res) => {
     try {
@@ -205,8 +240,10 @@ export async function startTradingViewHttpServer(overrides = {}) {
             sendProtocolError(res, 404, 'Session not found');
             return;
           }
-          entry.lastSeen = Date.now();
-          await entry.transport.handleRequest(req, res, body);
+          await handleSessionRequest(
+            entry,
+            () => entry.transport.handleRequest(req, res, body)
+          );
           return;
         }
 
@@ -215,6 +252,9 @@ export async function startTradingViewHttpServer(overrides = {}) {
           return;
         }
 
+        if (sessions.size >= config.maxSessions) {
+          await purgeIdleSessions(Date.now(), config.sessionPressureIdleMs);
+        }
         if (sessions.size >= config.maxSessions) {
           sendProtocolError(res, 503, 'Too many active MCP sessions');
           return;
@@ -231,6 +271,7 @@ export async function startTradingViewHttpServer(overrides = {}) {
               server,
               transport,
               lastSeen: Date.now(),
+              activeRequests: 1,
             });
           },
         });
@@ -241,7 +282,16 @@ export async function startTradingViewHttpServer(overrides = {}) {
         };
 
         await server.connect(transport);
-        await transport.handleRequest(req, res, body);
+        try {
+          await transport.handleRequest(req, res, body);
+        } finally {
+          const initializedId = transport.sessionId;
+          const entry = initializedId ? sessions.get(initializedId) : null;
+          if (entry) {
+            entry.activeRequests = Math.max(0, entry.activeRequests - 1);
+            entry.lastSeen = Date.now();
+          }
+        }
         return;
       }
 
@@ -255,8 +305,10 @@ export async function startTradingViewHttpServer(overrides = {}) {
           sendProtocolError(res, 404, 'Session not found');
           return;
         }
-        entry.lastSeen = Date.now();
-        await entry.transport.handleRequest(req, res);
+        await handleSessionRequest(
+          entry,
+          () => entry.transport.handleRequest(req, res)
+        );
         return;
       }
 
@@ -290,6 +342,8 @@ export async function startTradingViewHttpServer(overrides = {}) {
   const port = typeof address === 'object' && address ? address.port : config.port;
 
   async function close() {
+    clearInterval(sweepTimer);
+    await sweepPromise;
     await Promise.all([...sessions.keys()].map(closeSession));
     if (!httpServer.listening) return;
     await new Promise((resolvePromise, rejectPromise) => {

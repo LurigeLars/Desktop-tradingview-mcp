@@ -25,7 +25,13 @@ const baseEnv = {
 describe('public gateway configuration', () => {
   it('requires Cloudflare Access configuration and an explicit email allowlist', () => {
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_AUD: '' }), /ACCESS_AUD is required/);
+    assert.throws(() => loadConfig({ ...baseEnv, ACCESS_TEAM_DOMAIN: 'http://127.0.0.1' }), /Cloudflare Access team domain/);
+    assert.throws(() => loadConfig({ ...baseEnv, ACCESS_TEAM_DOMAIN: 'evil.example.com' }), /Cloudflare Access team domain/);
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_ALLOWED_EMAILS: '' }), /ACCESS_ALLOWED_EMAILS/);
+  });
+
+  it('defaults to an MCP-aware HTTP transport rate budget', () => {
+    assert.equal(loadConfig(baseEnv).ratePerMin, 360);
   });
 
   it('accepts only the MCP path', () => {
@@ -59,20 +65,24 @@ describe('public gateway configuration', () => {
     assert.equal(headers['content-length'], '12');
   });
 
-  it('preserves the full 85-tool TradingView surface by default', () => {
+  it('preserves the full 89-tool TradingView surface by default', () => {
     const allowed = parseAllowedTools();
-    assert.equal(allowed.size, 85);
+    assert.equal(allowed.size, 89);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('pine_set_source'), true);
     assert.equal(allowed.has('replay_start'), true);
     assert.equal(allowed.has('draw_shape'), true);
     assert.equal(allowed.has('ui_evaluate'), true);
     assert.equal(allowed.has('tv_update'), true);
+    assert.equal(allowed.has('realtime_snapshot'), true);
+    assert.equal(allowed.has('worker_status'), true);
+    assert.equal(allowed.has('worker_set_universe'), true);
+    assert.equal(allowed.has('worker_provision'), true);
   });
 
   it('supports an explicit operator-controlled core profile', () => {
     const allowed = parseAllowedTools('core');
-    assert.equal(allowed.size, 43);
+    assert.equal(allowed.size, 47);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('data_get_ohlcv'), true);
     assert.equal(allowed.has('pine_set_source'), false);
@@ -85,7 +95,7 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit full profile', () => {
     const allowed = parseAllowedTools('full');
-    assert.equal(allowed.size, 85);
+    assert.equal(allowed.size, 89);
     assert.equal(allowed.has('ui_evaluate'), true);
     assert.equal(allowed.has('tv_update'), true);
   });

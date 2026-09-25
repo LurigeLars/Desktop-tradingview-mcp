@@ -5,6 +5,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { CDP_PORT, isTradingViewUrl } from '../src/connection.js';
 import {
+  DEFAULT_SESSION_IDLE_MS,
+  DEFAULT_SESSION_PRESSURE_IDLE_MS,
   resolveHttpConfig,
   startTradingViewHttpServer,
 } from '../src/server/http.js';
@@ -26,6 +28,122 @@ test('HTTP transport refuses non-loopback binds', () => {
     () => resolveHttpConfig({ host: '0.0.0.0' }),
     /Refusing non-loopback HTTP bind host/
   );
+});
+
+test('HTTP transport defaults abandoned sessions to a five-minute idle timeout', () => {
+  assert.equal(DEFAULT_SESSION_IDLE_MS, 5 * 60 * 1000);
+  assert.equal(resolveHttpConfig().sessionIdleMs, 5 * 60 * 1000);
+});
+
+test('HTTP transport uses a shorter default idle threshold only under session pressure', () => {
+  assert.equal(DEFAULT_SESSION_PRESSURE_IDLE_MS, 30 * 1000);
+  assert.equal(resolveHttpConfig().sessionPressureIdleMs, 30 * 1000);
+});
+
+async function initializeTestSession(runtime, clientName = 'session-test') {
+  const response = await fetch(runtime.url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: clientName, version: '1.0.0' },
+      },
+    }),
+  });
+  return {
+    status: response.status,
+    sessionId: response.headers.get('mcp-session-id'),
+    body: await response.json(),
+  };
+}
+
+test('HTTP transport rejects new sessions at the configured capacity', async () => {
+  const runtime = await startTradingViewHttpServer({
+    host: '127.0.0.1',
+    port: 0,
+    maxSessions: 2,
+    sessionIdleMs: 60_000,
+  });
+
+  try {
+    const first = await initializeTestSession(runtime, 'session-capacity-1');
+    const second = await initializeTestSession(runtime, 'session-capacity-2');
+
+    assert.equal(first.status, 200);
+    assert.ok(first.sessionId);
+    assert.equal(second.status, 200);
+    assert.ok(second.sessionId);
+    assert.equal(runtime.sessionCount(), 2);
+
+    const blocked = await initializeTestSession(runtime, 'session-capacity-3');
+    assert.equal(blocked.status, 503);
+    assert.equal(blocked.body.error?.message, 'Too many active MCP sessions');
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('HTTP transport reclaims pressure-idle sessions before rejecting a new session', async () => {
+  const runtime = await startTradingViewHttpServer({
+    host: '127.0.0.1',
+    port: 0,
+    maxSessions: 2,
+    sessionIdleMs: 60_000,
+    sessionPressureIdleMs: 40,
+  });
+
+  try {
+    const first = await initializeTestSession(runtime, 'session-pressure-1');
+    const second = await initializeTestSession(runtime, 'session-pressure-2');
+
+    assert.equal(first.status, 200);
+    assert.ok(first.sessionId);
+    assert.equal(second.status, 200);
+    assert.ok(second.sessionId);
+    assert.equal(runtime.sessionCount(), 2);
+
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 80));
+
+    const recovered = await initializeTestSession(runtime, 'session-pressure-3');
+    assert.equal(recovered.status, 200);
+    assert.ok(recovered.sessionId);
+    assert.equal(runtime.sessionCount(), 1);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('HTTP transport automatically reclaims abandoned sessions after the idle timeout', async () => {
+  const runtime = await startTradingViewHttpServer({
+    host: '127.0.0.1',
+    port: 0,
+    maxSessions: 2,
+    sessionIdleMs: 40,
+  });
+
+  try {
+    const created = await initializeTestSession(runtime, 'session-cleanup');
+    assert.equal(created.status, 200);
+    assert.ok(created.sessionId);
+    assert.equal(runtime.sessionCount(), 1);
+
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 160));
+    assert.equal(runtime.sessionCount(), 0);
+
+    const recovered = await initializeTestSession(runtime, 'session-recovered');
+    assert.equal(recovered.status, 200);
+    assert.ok(recovered.sessionId);
+  } finally {
+    await runtime.close();
+  }
 });
 
 test('HTTP transport exposes the complete tool surface with explicit safety annotations and no output schemas', async () => {
