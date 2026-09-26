@@ -43,7 +43,7 @@ function mockDeps(responses = {}, sequence) {
 
 describe('start() — date selection and polling', () => {
   it('awaits selectDate with timestamp in ms for date param', async () => {
-    const { _deps } = mockDeps({
+    const { _deps, evaluate } = mockDeps({
       'isReplayAvailable': true,
       'showReplayToolbar': undefined,
       'selectDate': 'ok',
@@ -288,7 +288,7 @@ describe('stop()', () => {
 describe('trade()', () => {
   for (const action of ['buy', 'sell', 'close']) {
     it(`executes ${action} action`, async () => {
-      const { _deps, evaluate } = mockDeps({
+      const { _deps } = mockDeps({
         'isReplayStarted': true,
         [action === 'close' ? 'closePosition' : action]: undefined,
         'position': 1,
