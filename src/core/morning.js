@@ -159,13 +159,13 @@ export function loadMorningRules({ _deps } = {}) {
   for (const path of candidates) {
     if (!existsSync(path)) continue;
     return {
-      path,
+      source: path === d.projectRules ? 'project' : 'user_state',
       rules: normalizeMorningRules(readJsonFile(path, MAX_RULES_BYTES, 'morning rules')),
     };
   }
 
   throw new Error(
-    `No morning rules found. Create ${join(d.stateRoot, RULES_FILENAME)} or project rules.json from rules.example.json.`,
+    'No morning rules found. Create morning-rules.json in the TradingView MCP state directory or project rules.json from rules.example.json.',
   );
 }
 
@@ -235,7 +235,7 @@ export async function runMorningBrief({
   return {
     success: evidence.success === true,
     generated_at: generatedAt,
-    rules_loaded_from: loaded.path,
+    rules_source: loaded.source,
     selection,
     rules: {
       bias_criteria: rules.bias_criteria,
