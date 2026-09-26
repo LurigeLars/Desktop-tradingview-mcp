@@ -174,7 +174,7 @@ Copy `public/gateway.env.example` to the gitignored `public/gateway.env`, replac
 docker compose -f compose.public.yaml up -d
 ```
 
-The gateway requires a valid Cloudflare Access JWT, strips client credentials before proxying, applies request/rate limits, and exposes the full 92-tool surface by default. Set `ALLOWED_TOOLS=core` to select the smaller reviewed profile.
+The gateway requires a valid Cloudflare Access JWT, strips client credentials before proxying, applies request/rate limits, and exposes the full 93-tool surface by default. Set `ALLOWED_TOOLS=core` to select the smaller reviewed profile.
 
 ## CLI
 
@@ -259,7 +259,15 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Run my morning brief" | `morning_brief` → interpret the returned evidence with configured rules → `session_save` when the brief is complete |
 | "What did yesterday's brief say?" | `session_get` |
 
-## Tool Reference (92 MCP tools)
+## Tool Reference (93 MCP tools)
+
+### Market Watch Manifest
+
+`watch-manifest.json` is the canonical resident-market configuration for this fork. It groups broad regime, rates/FX, AI/semis, volatility/credit, energy, refiners, gold and current tactical context without duplicating equivalent symbol/timeframe workers.
+
+Use `watch_manifest_apply` with no theme arguments to load the defaults. Optional `extra_entries` are intended for temporary active trades or WATCH candidates and are tagged as `watch:dynamic`. The manifest reserves connection capacity for ad-hoc/event work instead of filling the worker budget completely.
+
+After applying the manifest, run `worker_provision` until it reports `complete: true`.
 
 ### Morning Brief
 
@@ -267,7 +275,7 @@ The morning workflow is deliberately split into collection, interpretation, and 
 
 1. Configure resident worker symbols/indicators and put the relevant entries in a logical group such as `morning`.
 2. Copy `rules.example.json` to either the project `rules.json` or the local TradingView MCP state directory as `morning-rules.json`, then define the selection, evidence settings, bias criteria, and risk rules.
-3. Call `morning_brief`. It reads already-resident charts through the realtime snapshot path; it does **not** switch symbols or mutate the active chart.
+3. Call `morning_brief`. It reads already-resident charts through the realtime snapshot path; it does **not** switch symbols or mutate the active chart. Compact evidence is the default; request `evidence_mode=full` only when raw recent bars are needed.
 4. Apply the returned rules to the returned evidence. Missing, ambiguous, delayed, or stale evidence should remain explicit rather than being inferred.
 5. Once the human-readable brief is complete, call `session_save` to persist it. Use `session_get` later to compare sessions.
 

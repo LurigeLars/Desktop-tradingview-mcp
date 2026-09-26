@@ -65,10 +65,12 @@ test('morning brief uses resident decision snapshot and keeps evidence separate 
 
     assert.equal(result.success, true);
     assert.equal(result.rules_source, 'user_state');
+    assert.equal(result.evidence_mode, 'compact');
     assert.equal('rules_loaded_from' in result, false);
     assert.deepEqual(result.selection.groups, ['morning']);
     assert.deepEqual(result.rules.bias_criteria, { bullish: ['Price above EMA'] });
     assert.equal(result.evidence.snapshots[0].resolved_symbol, 'EX:AAA');
+    assert.equal('recent_bars' in result.evidence.snapshots[0], false);
     assert.equal(snapshotArgs.mode, 'decision');
     assert.equal(snapshotArgs.include_studies, true);
     assert.equal(snapshotArgs.bars, 12);
@@ -144,6 +146,39 @@ test('session save/get stays inside the fixed state directory and falls back to 
     assert.equal(fallback.success, true);
     assert.equal(fallback.source, 'yesterday');
     assert.equal(fallback.brief, 'Yesterday brief');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('morning brief full evidence mode preserves recent bars', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dtv-morning-'));
+  try {
+    writeFileSync(join(root, 'morning-rules.json'), JSON.stringify({
+      selection: { groups: ['morning'] },
+    }), 'utf8');
+
+    const result = await runMorningBrief({
+      evidence_mode: 'full',
+      _deps: {
+        stateRoot: root,
+        projectRules: join(root, 'unused-rules.json'),
+        now: () => new Date(2026, 8, 26, 9, 30, 0),
+        snapshot: async () => ({
+          success: true,
+          snapshots: [{
+            resolved_symbol: 'EX:AAA',
+            recent_bars: [
+              { time: 1, open: 10, high: 11, low: 9, close: 10, volume: 100 },
+              { time: 2, open: 10, high: 12, low: 10, close: 11, volume: 120 },
+            ],
+          }],
+        }),
+      },
+    });
+
+    assert.equal(result.evidence_mode, 'full');
+    assert.equal(result.evidence.snapshots[0].recent_bars.length, 2);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

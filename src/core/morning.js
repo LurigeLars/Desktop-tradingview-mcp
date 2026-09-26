@@ -195,6 +195,7 @@ export async function runMorningBrief({
   bars,
   study_filters,
   stale_after_ms,
+  evidence_mode = 'compact',
   _deps,
 } = {}) {
   const d = deps(_deps);
@@ -229,13 +230,21 @@ export async function runMorningBrief({
     if (selection.groups.length) snapshotArgs.groups = selection.groups;
   }
 
-  const evidence = await d.snapshot(snapshotArgs);
+  const rawEvidence = await d.snapshot(snapshotArgs);
+  const normalizedEvidenceMode = String(evidence_mode ?? 'compact').trim().toLowerCase();
+  if (!['compact', 'full'].includes(normalizedEvidenceMode)) {
+    throw new Error('evidence_mode must be compact or full');
+  }
+  const evidence = normalizedEvidenceMode === 'full'
+    ? rawEvidence
+    : compactMorningEvidence(rawEvidence);
   const generatedAt = normalizeNow(d.now()).toISOString();
 
   return {
-    success: evidence.success === true,
+    success: rawEvidence.success === true,
     generated_at: generatedAt,
     rules_source: loaded.source,
+    evidence_mode: normalizedEvidenceMode,
     selection,
     rules: {
       bias_criteria: rules.bias_criteria,
@@ -250,6 +259,62 @@ export async function runMorningBrief({
       'Call out missing, ambiguous, delayed or stale evidence explicitly.',
       'Keep factual evidence separate from the resulting bullish, bearish or neutral interpretation.',
     ],
+  };
+}
+
+
+function summarizeRecentBars(bars) {
+  if (!Array.isArray(bars) || !bars.length) return null;
+  const valid = bars.filter(bar => bar && Number.isFinite(Number(bar.close)));
+  if (!valid.length) return null;
+  const first = valid[0];
+  const last = valid[valid.length - 1];
+  const highs = valid.map(bar => Number(bar.high)).filter(Number.isFinite);
+  const lows = valid.map(bar => Number(bar.low)).filter(Number.isFinite);
+  const volumes = valid.map(bar => Number(bar.volume)).filter(Number.isFinite);
+  const firstClose = Number(first.close);
+  const lastClose = Number(last.close);
+  return {
+    bar_count: valid.length,
+    first_time: first.time ?? null,
+    last_time: last.time ?? null,
+    first_close: firstClose,
+    last_close: lastClose,
+    change: lastClose - firstClose,
+    change_percent: firstClose ? ((lastClose / firstClose) - 1) * 100 : null,
+    high: highs.length ? Math.max(...highs) : null,
+    low: lows.length ? Math.min(...lows) : null,
+    volume_sum: volumes.length ? volumes.reduce((sum, value) => sum + value, 0) : null,
+  };
+}
+
+function compactSnapshot(snapshot) {
+  return {
+    pane_index: snapshot.pane_index ?? null,
+    success: snapshot.success === true,
+    worker_handle: snapshot.worker_handle ?? null,
+    worker_groups: snapshot.worker_groups ?? [],
+    requested_symbol: snapshot.requested_symbol ?? null,
+    requested_timeframe: snapshot.requested_timeframe ?? null,
+    resolved_symbol: snapshot.resolved_symbol ?? null,
+    resolution: snapshot.resolution ?? null,
+    quote: snapshot.quote ?? null,
+    current_bar: snapshot.current_bar ?? null,
+    recent_bar_summary: summarizeRecentBars(snapshot.recent_bars),
+    studies: snapshot.studies ?? [],
+    metadata: snapshot.metadata ?? null,
+    retrieved_at: snapshot.retrieved_at ?? null,
+    error: snapshot.error ?? null,
+  };
+}
+
+export function compactMorningEvidence(evidence) {
+  if (!plainObject(evidence)) return evidence;
+  return {
+    ...evidence,
+    snapshots: Array.isArray(evidence.snapshots)
+      ? evidence.snapshots.map(compactSnapshot)
+      : [],
   };
 }
 
