@@ -1,0 +1,357 @@
+{
+  "version": 1,
+  "defaults": {
+    "themes": [
+      "core_regime",
+      "rates_fx",
+      "ai_semis",
+      "vol_credit",
+      "energy",
+      "refiners",
+      "gold_macro",
+      "tactical_current"
+    ],
+    "capacity": 50,
+    "reserve_slots": 6,
+    "max_charts_per_tab": 8
+  },
+  "themes": {
+    "core_regime": {
+      "description": "Broad U.S. risk appetite, breadth and growth leadership.",
+      "entries": [
+        {
+          "symbol": "NASDAQ:QQQ",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "AMEX:SPY",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "AMEX:IWM",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "AMEX:RSP",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NASDAQ:QQQ/AMEX:SPY",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NASDAQ:QQQ",
+          "timeframe": "1D",
+          "groups": [
+            "context:daily"
+          ]
+        },
+        {
+          "symbol": "AMEX:SPY",
+          "timeframe": "1D",
+          "groups": [
+            "context:daily"
+          ]
+        }
+      ]
+    },
+    "rates_fx": {
+      "description": "Rates and dollar regime relevant to growth, gold and portfolio FX.",
+      "entries": [
+        {
+          "symbol": "TVC:US02Y",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "TVC:US10Y",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "TVC:DXY",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "OANDA:USDSEK",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "TVC:US10Y",
+          "timeframe": "1D",
+          "groups": [
+            "context:daily"
+          ]
+        },
+        {
+          "symbol": "TVC:DXY",
+          "timeframe": "1D",
+          "groups": [
+            "context:daily"
+          ]
+        }
+      ]
+    },
+    "ai_semis": {
+      "description": "AI/semiconductor leadership and concentration risk.",
+      "entries": [
+        {
+          "symbol": "NASDAQ:SMH",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NASDAQ:NVDA",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NASDAQ:AMD",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NASDAQ:MU",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NASDAQ:SMH",
+          "timeframe": "1D",
+          "groups": [
+            "context:daily"
+          ]
+        },
+        {
+          "symbol": "NASDAQ:NVDA",
+          "timeframe": "1D",
+          "groups": [
+            "context:daily"
+          ]
+        }
+      ]
+    },
+    "vol_credit": {
+      "description": "Volatility, credit and implied-correlation stress.",
+      "entries": [
+        {
+          "symbol": "TVC:VIX",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "TVC:MOVE",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "AMEX:HYG",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "CBOE:COR1M",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "CBOE:COR3M",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        }
+      ]
+    },
+    "energy": {
+      "description": "Crude and refined products for inflation, Hormuz and crack-spread transmission.",
+      "entries": [
+        {
+          "symbol": "NYMEX:CL1!",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "ICEEUR:BRN1!",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NYMEX:RB1!",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NYMEX:HO1!",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NYMEX:CL1!",
+          "timeframe": "1D",
+          "groups": [
+            "context:daily"
+          ]
+        }
+      ]
+    },
+    "refiners": {
+      "description": "Current refinery-margin watch and relative equity transmission.",
+      "entries": [
+        {
+          "symbol": "NYSE:VLO",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NYSE:MPC",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NYSE:PSX",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "NYSE:VLO",
+          "timeframe": "1D",
+          "groups": [
+            "context:daily"
+          ]
+        }
+      ]
+    },
+    "gold_macro": {
+      "description": "Gold reversal regime versus dollar and rates, plus miner confirmation.",
+      "entries": [
+        {
+          "symbol": "COMEX:GC1!",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "AMEX:GDX",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "TVC:DXY",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "TVC:US10Y",
+          "timeframe": "60",
+          "groups": [
+            "morning"
+          ]
+        },
+        {
+          "symbol": "COMEX:GC1!",
+          "timeframe": "1D",
+          "groups": [
+            "context:daily"
+          ]
+        },
+        {
+          "symbol": "AMEX:GDX",
+          "timeframe": "1D",
+          "groups": [
+            "context:daily"
+          ]
+        }
+      ]
+    },
+    "tactical_current": {
+      "description": "Small 5-minute execution context for current tactical monitoring.",
+      "entries": [
+        {
+          "handle": "usdsek-5m",
+          "symbol": "OANDA:USDSEK",
+          "timeframe": "5",
+          "groups": [
+            "tactical"
+          ]
+        },
+        {
+          "handle": "qqq-5m",
+          "symbol": "NASDAQ:QQQ",
+          "timeframe": "5",
+          "groups": [
+            "tactical"
+          ]
+        },
+        {
+          "handle": "qqq-spy-5m",
+          "symbol": "NASDAQ:QQQ/AMEX:SPY",
+          "timeframe": "5",
+          "groups": [
+            "tactical"
+          ]
+        }
+      ]
+    }
+  }
+}
