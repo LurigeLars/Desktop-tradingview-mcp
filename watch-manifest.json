@@ -13,7 +13,8 @@
     ],
     "capacity": 50,
     "reserve_slots": 6,
-    "max_charts_per_tab": 8
+    "max_charts_per_tab": 8,
+    "layout_prefix": "DTV Market"
   },
   "themes": {
     "core_regime": {

@@ -16,6 +16,7 @@ const sample = {
     capacity: 8,
     reserve_slots: 2,
     max_charts_per_tab: 4,
+    layout_prefix: 'DTV Market',
   },
   themes: {
     core: {
@@ -138,6 +139,53 @@ test('apply writes compiled defaults through worker_set_universe contract', () =
     assert.equal(received.capacity, 8);
     assert.equal(received.reserve_slots, 2);
     assert.equal(received.entries.length, 3);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test('apply canonicalizes worker metadata labels without touching chart state', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dtv-watch-manifest-'));
+  try {
+    writeFileSync(join(root, 'watch-manifest.json'), JSON.stringify(sample), 'utf8');
+    let recorded = null;
+    const result = applyWatchManifest({
+      _deps: {
+        stateRoot: root,
+        projectFile: join(root, 'unused.json'),
+        status: () => ({
+          entries: [],
+          worker_tabs: [{ slot: 0, target_id: 'T1', chart_id: 'C1', layout_name: 'DTV Morning 01', pane_count: 3 }],
+        }),
+        setUniverse: () => ({
+          configured: 3,
+          assigned: 3,
+          unassigned: 0,
+          capacity: 8,
+          reserve_slots: 2,
+          free_slots: 3,
+          groups: [],
+          worker_tabs: [{ slot: 0, target_id: 'T1', chart_id: 'C1', layout_name: 'DTV Morning 01', pane_count: 3 }],
+        }),
+        record: args => {
+          recorded = args;
+          return {
+            configured: 3,
+            assigned: 3,
+            unassigned: 0,
+            capacity: 8,
+            reserve_slots: 2,
+            free_slots: 3,
+            groups: [],
+            worker_tabs: args.worker_tabs,
+          };
+        },
+      },
+    });
+    assert.equal(result.worker_labels_reconciled, true);
+    assert.equal(result.layout_prefix, 'DTV Market');
+    assert.equal(recorded.worker_tabs[0].layout_name, 'DTV Market 01');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

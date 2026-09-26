@@ -149,24 +149,53 @@ function readJsonFile(path, maxBytes, label) {
   }
 }
 
+function mergeMorningRuleObjects(projectRaw, userRaw) {
+  const project = plainObject(projectRaw) ? projectRaw : {};
+  const user = plainObject(userRaw) ? userRaw : {};
+
+  const projectSelection = plainObject(project.selection) ? project.selection : {};
+  const userSelection = plainObject(user.selection) ? user.selection : {};
+  const projectSnapshot = plainObject(project.snapshot) ? project.snapshot : {};
+  const userSnapshot = plainObject(user.snapshot) ? user.snapshot : {};
+
+  const projectRisk = Array.isArray(project.risk_rules) ? project.risk_rules : [];
+  const userRisk = Array.isArray(user.risk_rules) ? user.risk_rules : [];
+
+  return {
+    selection: { ...projectSelection, ...userSelection },
+    snapshot: { ...projectSnapshot, ...userSnapshot },
+    bias_criteria: Object.prototype.hasOwnProperty.call(user, 'bias_criteria')
+      ? user.bias_criteria
+      : project.bias_criteria,
+    risk_rules: [...projectRisk, ...userRisk],
+    notes: Object.prototype.hasOwnProperty.call(user, 'notes') ? user.notes : project.notes,
+  };
+}
+
 export function loadMorningRules({ _deps } = {}) {
   const d = deps(_deps);
-  const candidates = [
-    join(d.stateRoot, RULES_FILENAME),
-    d.projectRules,
-  ];
+  const userPath = join(d.stateRoot, RULES_FILENAME);
+  const hasUser = existsSync(userPath);
+  const hasProject = existsSync(d.projectRules);
 
-  for (const path of candidates) {
-    if (!existsSync(path)) continue;
-    return {
-      source: path === d.projectRules ? 'project' : 'user_state',
-      rules: normalizeMorningRules(readJsonFile(path, MAX_RULES_BYTES, 'morning rules')),
-    };
+  if (!hasUser && !hasProject) {
+    throw new Error(
+      'No morning rules found. Create morning-rules.json in the TradingView MCP state directory or project rules.json from rules.example.json.',
+    );
   }
 
-  throw new Error(
-    'No morning rules found. Create morning-rules.json in the TradingView MCP state directory or project rules.json from rules.example.json.',
-  );
+  const projectRaw = hasProject
+    ? readJsonFile(d.projectRules, MAX_RULES_BYTES, 'project morning rules')
+    : {};
+  const userRaw = hasUser
+    ? readJsonFile(userPath, MAX_RULES_BYTES, 'user morning rules')
+    : {};
+
+  const merged = mergeMorningRuleObjects(projectRaw, userRaw);
+  return {
+    source: hasUser && hasProject ? 'project+user_state' : (hasUser ? 'user_state' : 'project'),
+    rules: normalizeMorningRules(merged),
+  };
 }
 
 function effectiveSelection(rules, { symbols, handles, groups }) {

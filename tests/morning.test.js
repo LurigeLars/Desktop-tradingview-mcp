@@ -183,3 +183,44 @@ test('morning brief full evidence mode preserves recent bars', async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test('project defaults merge with local morning overrides without losing bias criteria', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dtv-morning-'));
+  try {
+    const projectRules = join(root, 'rules.json');
+    writeFileSync(projectRules, JSON.stringify({
+      selection: { groups: ['morning'] },
+      snapshot: { bars: 12, stale_after_ms: 5000 },
+      bias_criteria: { bullish: ['project bullish rule'], bearish: ['project bearish rule'] },
+      risk_rules: ['project risk'],
+      notes: 'project note',
+    }), 'utf8');
+    writeFileSync(join(root, 'morning-rules.json'), JSON.stringify({
+      selection: { groups: ['morning'] },
+      snapshot: { bars: 20 },
+      risk_rules: ['local risk'],
+      notes: 'local note',
+    }), 'utf8');
+
+    const result = await runMorningBrief({
+      _deps: {
+        stateRoot: root,
+        projectRules,
+        now: () => new Date(2026, 8, 27, 9, 0, 0),
+        snapshot: async () => ({ success: true, snapshots: [] }),
+      },
+    });
+
+    assert.equal(result.rules_source, 'project+user_state');
+    assert.equal(result.evidence.bars_requested, undefined);
+    assert.deepEqual(result.rules.bias_criteria, {
+      bullish: ['project bullish rule'],
+      bearish: ['project bearish rule'],
+    });
+    assert.deepEqual(result.rules.risk_rules, ['project risk', 'local risk']);
+    assert.equal(result.rules.notes, 'local note');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
