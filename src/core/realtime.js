@@ -272,7 +272,7 @@ async function mapLimit(items, limit, fn) {
     while (true) {
       const index = next++;
       if (index >= items.length) return;
-      results[index] = await fn(items[index], index);
+      results[index] = await fn(items[index]);
     }
   }
 

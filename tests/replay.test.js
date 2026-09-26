@@ -43,7 +43,7 @@ function mockDeps(responses = {}, sequence) {
 
 describe('start() — date selection and polling', () => {
   it('awaits selectDate with timestamp in ms for date param', async () => {
-    const { _deps, evaluate } = mockDeps({
+    const { _deps } = mockDeps({
       'isReplayAvailable': true,
       'showReplayToolbar': undefined,
       'selectDate': 'ok',
