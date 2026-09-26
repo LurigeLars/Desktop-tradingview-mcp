@@ -20,11 +20,7 @@ so the MCP server's DNS-rebinding/loopback guard remains intact.
 
 ## Security requirements
 
-The gateway refuses to start unless all of these are configured:
-
-- `ACCESS_TEAM_DOMAIN`
-- `ACCESS_AUD`
-- at least one `ACCESS_ALLOWED_EMAILS` entry
+The gateway refuses to start unless the required local Cloudflare Access settings and an explicit identity allowlist are configured.
 
 Every MCP request must carry a valid Cloudflare Access JWT in
 `Cf-Access-Jwt-Assertion`. The gateway validates signature, issuer, audience,
@@ -45,30 +41,17 @@ The gateway instead reduces repeated context by compacting tool descriptions and
 prose and by removing advertised output schemas. Upstream validation and the underlying MCP
 implementation remain unchanged.
 
-For a deliberately restricted session, an operator can set `ALLOWED_TOOLS=core` or provide
-an explicit comma-separated allowlist in `public/gateway.env`, then recreate only the gateway
-container. `ALLOWED_TOOLS=full` is an explicit alias for the default full surface. Agents cannot
+For a deliberately restricted session, an operator can configure a reduced tool profile or explicit
+allowlist in local deployment configuration, then recreate only the gateway container. Agents cannot
 change this profile themselves.
 
 ## Deployment
 
 1. Start the host HTTP transport with `npm run start:http` and verify it listens only
    on `127.0.0.1:8765/mcp`.
-2. Copy `public/gateway.env.example` to `public/gateway.env` and fill in the
-   Cloudflare Access values. Do not commit the real file.
-3. Copy `public/tunnel.env.example` to `public/tunnel.env` and add the token for a
-   dedicated remotely managed tunnel. Do not commit the real file.
-4. In Cloudflare, route the tunnel's public hostname to `http://gateway:8080`.
-5. Protect that hostname with a Cloudflare Access application and enable Managed OAuth
-   for MCP clients. The Access application audience must match `ACCESS_AUD`.
-6. Start the edge stack with:
+2. Provide all deployment-local gateway settings out of band and keep them out of Git.
+3. Configure the shared tunnel route and Cloudflare Access application outside this repository.
+4. Start the edge stack with:
    `docker compose -f compose.public.yaml up -d`.
 
-Kill switch:
-
-`docker stop tradingview-mcp-cloudflared`
-
-Stopping the tunnel leaves local stdio and local HTTP operation unaffected.
-
-Do not start the tunnel until Access is configured and the gateway has the matching
-audience/team/email settings.
+Do not expose the gateway until Access and the local authorization settings are configured.
