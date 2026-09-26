@@ -18,6 +18,7 @@ export function registerMorningTools(server) {
       bars: z.coerce.number().int().min(1).max(100).optional().describe('Recent bars per resident chart. Defaults to morning-rules.json snapshot.bars.'),
       study_filters: z.array(z.string()).optional().describe('Optional study-name filters overriding morning-rules.json.'),
       stale_after_ms: z.coerce.number().min(0).optional().describe('Last-trade freshness threshold. Defaults to morning-rules.json.'),
+      evidence_mode: z.enum(['compact', 'full']).optional().describe('Compact is the default and summarizes recent bars; full returns raw recent bars.'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {
