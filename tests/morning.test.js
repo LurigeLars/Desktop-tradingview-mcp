@@ -64,6 +64,8 @@ test('morning brief uses resident decision snapshot and keeps evidence separate 
     });
 
     assert.equal(result.success, true);
+    assert.equal(result.rules_source, 'user_state');
+    assert.equal('rules_loaded_from' in result, false);
     assert.deepEqual(result.selection.groups, ['morning']);
     assert.deepEqual(result.rules.bias_criteria, { bullish: ['Price above EMA'] });
     assert.equal(result.evidence.snapshots[0].resolved_symbol, 'EX:AAA');
