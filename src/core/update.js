@@ -45,22 +45,36 @@ export async function update({ _deps } = {}) {
     };
   }
 
-  const dirty = git('status --porcelain');
-  if (dirty) {
-    return {
-      success: false,
-      error: 'Working tree has local changes — commit or stash them, then retry.',
-      changed_files: dirty.split('\n').slice(0, 10),
-    };
-  }
-
   const before = git('rev-parse HEAD');
+  const dirty = git('status --porcelain');
   try {
     git('fetch origin main', 30000);
   } catch (err) {
     return { success: false, error: `git fetch failed (offline? no origin?): ${err.message}` };
   }
   const remote = git('rev-parse origin/main');
+
+  let reconciledFiles = [];
+  if (dirty) {
+    // A common safe case is a locally edited tracked file whose content has since
+    // landed unchanged on origin/main. In that case there is no unique local work
+    // to preserve: the complete tracked working tree already equals the incoming
+    // canonical tree. Reconcile only that exact case; otherwise fail closed.
+    const untracked = git('ls-files --others --exclude-standard');
+    const trackedDirty = git('status --porcelain --untracked-files=no');
+    const differsFromRemote = git('diff --name-only origin/main');
+
+    if (untracked || !trackedDirty || differsFromRemote) {
+      return {
+        success: false,
+        error: 'Working tree has local changes — commit or stash them, then retry.',
+        changed_files: dirty.split('\n').slice(0, 10),
+      };
+    }
+
+    reconciledFiles = trackedDirty.split('\n').slice(0, 10);
+    git('reset --hard HEAD');
+  }
   if (before === remote) {
     return { success: true, updated: false, status: 'up_to_date', commit: before.slice(0, 8) };
   }
@@ -97,6 +111,7 @@ export async function update({ _deps } = {}) {
     to_commit: after.slice(0, 8),
     commits_pulled: behind,
     deps_installed: depsInstalled,
+    ...(reconciledFiles.length && { reconciled_files: reconciledFiles }),
     ...(depsWarning && { warning: depsWarning }),
     restart_required: true,
     note: 'Update applied. Restart the MCP server (reconnect it in your client) to load the new code — the running process still has the old version.',
