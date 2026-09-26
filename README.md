@@ -232,8 +232,26 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
+| "Run my morning brief" | `morning_brief` → interpret the returned evidence with configured rules → `session_save` when the brief is complete |
+| "What did yesterday's brief say?" | `session_get` |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (92 MCP tools)
+
+### Morning Brief
+
+The morning workflow is deliberately split into collection, interpretation, and storage:
+
+1. Configure resident worker symbols/indicators and put the relevant entries in a logical group such as `morning`.
+2. Copy `rules.example.json` to either the project `rules.json` or the local TradingView MCP state directory as `morning-rules.json`, then define the selection, evidence settings, bias criteria, and risk rules.
+3. Call `morning_brief`. It reads already-resident charts through the realtime snapshot path; it does **not** switch symbols or mutate the active chart.
+4. Apply the returned rules to the returned evidence. Missing, ambiguous, delayed, or stale evidence should remain explicit rather than being inferred.
+5. Once the human-readable brief is complete, call `session_save` to persist it. Use `session_get` later to compare sessions.
+
+| Tool | What it does |
+|------|--------------|
+| `morning_brief` | Collect resident market evidence and the configured interpretation/risk rules |
+| `session_save` | Explicitly save a completed brief (and optional structured evidence) by local session date |
+| `session_get` | Retrieve a saved date; without a date, use today or fall back to yesterday |
 
 ### Chart Reading
 

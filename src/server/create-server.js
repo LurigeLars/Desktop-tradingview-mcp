@@ -16,6 +16,7 @@ import { registerTabTools } from '../tools/tab.js';
 import { registerRealtimeTools } from '../tools/realtime.js';
 import { registerWorkerTools } from '../tools/worker.js';
 import { registerWorkerProvisionTools } from '../tools/worker-provision.js';
+import { registerMorningTools } from '../tools/morning.js';
 import { installLegacyToolAnnotationAdapter } from './tool-annotations.js';
 
 export const SERVER_INFO = {
@@ -24,7 +25,7 @@ export const SERVER_INFO = {
   description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
 };
 
-export const SERVER_INSTRUCTIONS = `TradingView MCP — 89 tools for reading and controlling live TradingView Desktop charts.
+export const SERVER_INSTRUCTIONS = `TradingView MCP — 92 tools for reading and controlling live TradingView Desktop charts.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -58,6 +59,7 @@ Replay: replay_start → replay_step → replay_trade → replay_status → repl
 Batch: batch_run → run action across multiple symbols/timeframes
 Realtime: realtime_snapshot → read all currently resident open chart panes without symbol switching
 Worker: worker_set_universe / worker_status / worker_provision → configure and reconcile logical resident handles/groups without exposing tabs/panes
+Morning brief: morning_brief → collect resident decision evidence + configured rules; session_save / session_get → persist and compare completed briefs
 Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
 Alerts: alert_create, alert_list, alert_delete
 Lifecycle: tv_health_check → tv_launch when needed → tv_close when finished. tv_close exits the entire verified MCP-managed TradingView Desktop application, including after an MCP-server restart.
@@ -100,6 +102,7 @@ export function createTradingViewServer() {
   registerRealtimeTools(server);
   registerWorkerTools(server);
   registerWorkerProvisionTools(server);
+  registerMorningTools(server);
 
   return server;
 }
