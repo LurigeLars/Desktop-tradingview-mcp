@@ -1,0 +1,25 @@
+{
+  "selection": {
+    "groups": ["morning"]
+  },
+  "snapshot": {
+    "bars": 12,
+    "study_filters": [],
+    "stale_after_ms": 5000
+  },
+  "bias_criteria": {
+    "bullish": [
+      "Define the concrete indicator/price conditions that count as bullish."
+    ],
+    "bearish": [
+      "Define the concrete indicator/price conditions that count as bearish."
+    ],
+    "neutral": [
+      "Define the conditions that should remain neutral or inconclusive."
+    ]
+  },
+  "risk_rules": [
+    "Add the risk checks that should be surfaced before the session."
+  ],
+  "notes": "Optional context that should be included with the daily evidence pack."
+}
