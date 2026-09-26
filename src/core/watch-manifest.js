@@ -13,6 +13,7 @@ import {
   normalizeWorkerUniverse,
   setUniverse,
   status as workerStatus,
+  recordWorkerProvision,
 } from './worker.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -89,6 +90,7 @@ export function normalizeWatchManifest(raw) {
     capacity: Number(raw.defaults.capacity ?? 50),
     reserve_slots: Number(raw.defaults.reserve_slots ?? 0),
     max_charts_per_tab: Number(raw.defaults.max_charts_per_tab ?? 8),
+    layout_prefix: String(raw.defaults.layout_prefix ?? 'DTV Market').trim() || 'DTV Market',
   };
   if (!defaults.themes.length) throw new Error('defaults.themes must contain at least one theme');
   if (!Number.isInteger(defaults.capacity) || defaults.capacity < 1) {
@@ -127,6 +129,7 @@ function deps(overrides) {
     projectFile: resolve(overrides?.projectFile || PROJECT_FILE),
     status: overrides?.status || workerStatus,
     setUniverse: overrides?.setUniverse || setUniverse,
+    record: overrides?.record || recordWorkerProvision,
   };
 }
 
@@ -207,6 +210,7 @@ export function compileWatchManifest({
     unique_entries: normalized.entries.length,
     free_slots: normalized.usable_capacity - normalized.entries.length,
     max_charts_per_tab: config.defaults.max_charts_per_tab,
+    layout_prefix: config.defaults.layout_prefix,
     entries: normalized.entries.map(entry => ({
       handle: entry.handle,
       symbol: entry.symbol,
@@ -237,13 +241,24 @@ export function applyWatchManifest({ themes, extra_entries, dry_run = false, _de
     };
   }
 
-  const state = d.setUniverse({
+  let state = d.setUniverse({
     entries: compiled.entries,
     replace: true,
     capacity: compiled.capacity,
     reserve_slots: compiled.reserve_slots,
     max_charts_per_tab: compiled.max_charts_per_tab,
   });
+
+  const canonicalTabs = (state.worker_tabs || []).map(tab => ({
+    ...tab,
+    layout_name: compiled.layout_prefix + ' ' + String(Number(tab.slot) + 1).padStart(2, '0'),
+  }));
+  const labelsChanged = canonicalTabs.some((tab, index) =>
+    tab.layout_name !== state.worker_tabs?.[index]?.layout_name
+  );
+  if (labelsChanged) {
+    state = d.record({ worker_tabs: canonicalTabs });
+  }
 
   return {
     success: true,
@@ -258,6 +273,8 @@ export function applyWatchManifest({ themes, extra_entries, dry_run = false, _de
     capacity: state.capacity,
     reserve_slots: state.reserve_slots,
     free_slots: state.free_slots,
+    layout_prefix: compiled.layout_prefix,
+    worker_labels_reconciled: labelsChanged,
     groups: state.groups,
   };
 }

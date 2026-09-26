@@ -273,6 +273,8 @@ After applying the manifest, run `worker_provision` until it reports `complete: 
 
 The morning workflow is deliberately split into collection, interpretation, and storage:
 
+The project `rules.json` supplies a default cross-market regime rubric with `BULLISH / BEARISH / NEUTRAL_MIXED / UNAVAILABLE` labels and a separate evidence scope (`LIVE`, `LAST_COMPLETED_SESSION`, or `UNAVAILABLE`). A local `morning-rules.json` overlays project defaults instead of silently removing the default bias criteria unless it explicitly sets `bias_criteria`.
+
 1. Configure resident worker symbols/indicators and put the relevant entries in a logical group such as `morning`.
 2. Copy `rules.example.json` to either the project `rules.json` or the local TradingView MCP state directory as `morning-rules.json`, then define the selection, evidence settings, bias criteria, and risk rules.
 3. Call `morning_brief`. It reads already-resident charts through the realtime snapshot path; it does **not** switch symbols or mutate the active chart. Compact evidence is the default; request `evidence_mode=full` only when raw recent bars are needed.
