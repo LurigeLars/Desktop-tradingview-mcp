@@ -288,7 +288,7 @@ describe('stop()', () => {
 describe('trade()', () => {
   for (const action of ['buy', 'sell', 'close']) {
     it(`executes ${action} action`, async () => {
-      const { _deps, evaluate } = mockDeps({
+      const { _deps } = mockDeps({
         'isReplayStarted': true,
         [action === 'close' ? 'closePosition' : action]: undefined,
         'position': 1,

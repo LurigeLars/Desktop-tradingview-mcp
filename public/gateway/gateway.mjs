@@ -164,9 +164,6 @@ export function createAccessVerifier(config, fetchImpl = fetch) {
   };
 }
 
-function clientIp(req) {
-  return req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? 'unknown';
-}
 
 function send(res, status, body = '') {
   res.writeHead(status, {
