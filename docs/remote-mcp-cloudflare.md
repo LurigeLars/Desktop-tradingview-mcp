@@ -6,8 +6,7 @@ Remote access is isolated in Docker:
 ```text
 remote MCP client
   -> Cloudflare Access / Managed OAuth
-  -> dedicated Cloudflare Tunnel
-  -> cloudflared container
+  -> shared Cloudflare Tunnel
   -> JWT-validating gateway container
   -> host.docker.internal:8765
   -> TradingView MCP HTTP transport
@@ -49,8 +48,8 @@ change this profile themselves.
 
 1. Start the host HTTP transport with `npm run start:http` and verify it listens only
    on `127.0.0.1:8765/mcp`.
-2. Provide all deployment-local gateway settings out of band and keep them out of Git.
-3. Configure the shared tunnel route and Cloudflare Access application outside this repository.
+2. Copy `public/gateway.env.example` to `public/gateway.env` and replace the placeholders with your own deployment values. Keep the real file out of Git.
+3. Configure the shared tunnel route and Cloudflare Access application for your own hostname.
 4. Start the edge stack with:
    `docker compose -f compose.public.yaml up -d`.
 
