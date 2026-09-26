@@ -167,6 +167,28 @@ test('apply canonicalizes worker metadata labels without touching chart state', 
           free_slots: 3,
           groups: [],
           worker_tabs: [{ slot: 0, target_id: 'T1', chart_id: 'C1', layout_name: 'DTV Morning 01', pane_count: 3 }],
+          entries: [
+            {
+              handle: 'a',
+              assignment: {
+                worker_slot: 0,
+                target_id: 'T1',
+                chart_id: 'C1',
+                pane_index: 0,
+                layout_name: 'DTV Morning 01',
+              },
+            },
+            {
+              handle: 'b',
+              assignment: {
+                worker_slot: 0,
+                target_id: 'T1',
+                chart_id: 'C1',
+                pane_index: 1,
+                layout_name: 'DTV Morning 01',
+              },
+            },
+          ],
         }),
         record: args => {
           recorded = args;
@@ -179,13 +201,21 @@ test('apply canonicalizes worker metadata labels without touching chart state', 
             free_slots: 3,
             groups: [],
             worker_tabs: args.worker_tabs,
+            entries: [
+              { handle: 'a', assignment: args.assignments.a },
+              { handle: 'b', assignment: args.assignments.b },
+            ],
           };
         },
       },
     });
     assert.equal(result.worker_labels_reconciled, true);
+    assert.equal(result.worker_tab_labels_reconciled, true);
+    assert.equal(result.worker_assignment_labels_reconciled, true);
     assert.equal(result.layout_prefix, 'DTV Market');
     assert.equal(recorded.worker_tabs[0].layout_name, 'DTV Market 01');
+    assert.equal(recorded.assignments.a.layout_name, 'DTV Market 01');
+    assert.equal(recorded.assignments.b.layout_name, 'DTV Market 01');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
