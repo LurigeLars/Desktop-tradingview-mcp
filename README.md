@@ -1,5 +1,21 @@
 # TradingView MCP Bridge
 
+## About this fork
+
+This is a maintained fork of [tradesdontlie/tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp). It preserves the upstream TradingView Desktop/CDP approach while hardening it for long-running local and remote MCP use.
+
+Fork-specific changes include:
+
+- fresher real-time quote reads from resident TradingView runtime fields and stricter symbol-identity validation;
+- more resilient worker/tab/pane reconciliation, including bounded CDP target discovery and handling of stale or hidden TradingView views;
+- MCP session-pressure and rate-budget handling intended to keep active sessions usable under bursty connector traffic;
+- hardened Windows executable discovery, launch inputs, and local lifecycle behavior;
+- Cloudflare Access gateway support using the shared-tunnel deployment model and sanitized public configuration examples; and
+- fork-specific CI, dependency maintenance, and Advanced CodeQL security-and-quality scanning.
+
+The fork remains focused on interacting with a user's own local TradingView Desktop session; it is not a separate TradingView data service.
+
+
 [![MCP Toplist](https://mcptoplist.com/badge/glama%2Ftradesdontlie%2Ftradingview-mcp.svg)](https://mcptoplist.com/server/glama%2Ftradesdontlie%2Ftradingview-mcp)
 
 Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
