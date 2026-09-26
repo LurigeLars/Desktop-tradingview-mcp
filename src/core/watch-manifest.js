@@ -253,11 +253,31 @@ export function applyWatchManifest({ themes, extra_entries, dry_run = false, _de
     ...tab,
     layout_name: compiled.layout_prefix + ' ' + String(Number(tab.slot) + 1).padStart(2, '0'),
   }));
-  const labelsChanged = canonicalTabs.some((tab, index) =>
+  const canonicalLayoutBySlot = new Map(
+    canonicalTabs.map(tab => [Number(tab.slot), tab.layout_name]),
+  );
+  const tabLabelsChanged = canonicalTabs.some((tab, index) =>
     tab.layout_name !== state.worker_tabs?.[index]?.layout_name
   );
+
+  const canonicalAssignments = {};
+  for (const entry of state.entries || []) {
+    const assignment = entry.assignment;
+    if (!assignment) continue;
+    const layoutName = canonicalLayoutBySlot.get(Number(assignment.worker_slot));
+    if (!layoutName || assignment.layout_name === layoutName) continue;
+    canonicalAssignments[entry.handle] = {
+      ...assignment,
+      layout_name: layoutName,
+    };
+  }
+  const assignmentLabelsChanged = Object.keys(canonicalAssignments).length > 0;
+  const labelsChanged = tabLabelsChanged || assignmentLabelsChanged;
   if (labelsChanged) {
-    state = d.record({ worker_tabs: canonicalTabs });
+    state = d.record({
+      assignments: canonicalAssignments,
+      worker_tabs: canonicalTabs,
+    });
   }
 
   return {
@@ -275,6 +295,8 @@ export function applyWatchManifest({ themes, extra_entries, dry_run = false, _de
     free_slots: state.free_slots,
     layout_prefix: compiled.layout_prefix,
     worker_labels_reconciled: labelsChanged,
+    worker_tab_labels_reconciled: tabLabelsChanged,
+    worker_assignment_labels_reconciled: assignmentLabelsChanged,
     groups: state.groups,
   };
 }
