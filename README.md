@@ -6,19 +6,16 @@ This is a maintained fork of [tradesdontlie/tradingview-mcp](https://github.com/
 
 Fork-specific changes include:
 
-- fresher real-time quote reads from resident TradingView runtime fields and stricter symbol-identity validation;
-- more resilient worker/tab/pane reconciliation, including bounded CDP target discovery and handling of stale or hidden TradingView views;
-- MCP session-pressure and rate-budget handling intended to keep active sessions usable under bursty connector traffic;
-- hardened Windows executable discovery, launch inputs, and local lifecycle behavior;
-- Cloudflare Access gateway support using the shared-tunnel deployment model and sanitized public configuration examples; and
-- fork-specific CI, dependency maintenance, and Advanced CodeQL security-and-quality scanning.
+- Fresher real-time quote reads from resident TradingView runtime fields and stricter symbol-identity validation.
+- More resilient worker/tab/pane reconciliation, including bounded CDP target discovery and handling of stale or hidden TradingView views.
+- MCP session-pressure and rate-budget handling intended to keep active sessions usable under bursty connector traffic.
+- Hardened Windows executable discovery, launch inputs, and local lifecycle behavior.
+- Cloudflare Access gateway support using the shared-tunnel deployment model and sanitized public configuration examples.
+- Fork-specific CI, dependency maintenance, and Advanced CodeQL security-and-quality scanning.
 
 The fork remains focused on interacting with a user's own local TradingView Desktop session; it is not a separate TradingView data service.
 
-
-[![MCP Toplist](https://mcptoplist.com/badge/glama%2Ftradesdontlie%2Ftradingview-mcp.svg)](https://mcptoplist.com/server/glama%2Ftradesdontlie%2Ftradingview-mcp)
-
-Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
+Personal AI assistant for your TradingView Desktop charts. Connects compatible MCP clients to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
 
 > [!WARNING]
 > **This tool is not affiliated with, endorsed by, or associated with TradingView Inc.** It interacts with your locally running TradingView Desktop application via Chrome DevTools Protocol. Review the [Disclaimer](#disclaimer) before use.
@@ -27,7 +24,7 @@ Personal AI assistant for your TradingView Desktop charts. Connects Claude Code 
 > **Requires a valid TradingView subscription.** This tool does not bypass or circumvent any TradingView paywall or access control. It reads from and controls the TradingView Desktop app already running on your machine.
 
 > [!NOTE]
-> **All data processing occurs locally on your machine.** No TradingView data is transmitted, stored, or redistributed externally by this tool.
+> **Local stdio and CLI modes process data on your machine.** If you enable the optional HTTP/Cloudflare gateway, MCP responses are transmitted to the remote client you connect. The gateway does not turn this project into a hosted TradingView data service.
 
 > [!CAUTION]
 > This tool accesses undocumented internal TradingView APIs via the Electron debug interface. These can change or break without notice in any TradingView update. Pin your TradingView Desktop version if stability matters to you.
@@ -41,7 +38,7 @@ The debug port is disabled by default and must be explicitly enabled by you usin
 ## What This Tool Does Not Do
 
 - Connect to TradingView's servers or APIs
-- Store, transmit, or redistribute any market data
+- Operate as a hosted market-data feed or redistribute TradingView data on its own
 - Work without a valid TradingView subscription and installed Desktop app
 - Bypass any TradingView paywall or access restriction
 - Execute real trades (chart interaction only)
@@ -67,7 +64,7 @@ See [RESEARCH.md](RESEARCH.md) for open questions, findings, and related work.
 
 - **TradingView Desktop app** (paid subscription required for real-time data)
 - **Node.js 18+**
-- **Claude Code** with MCP support (for MCP tools) or any terminal (for CLI)
+- **A compatible MCP client** (Claude Code, Codex, ChatGPT through the optional gateway, etc.) or any terminal for CLI use
 - **macOS, Windows, or Linux**
 
 ## What It Does
@@ -90,7 +87,7 @@ Gives your AI assistant eyes and hands on your own chart:
 
 Paste this into Claude Code and it will handle the rest:
 
-> Install the TradingView MCP server. Clone https://github.com/tradesdontlie/tradingview-mcp.git, run npm install, add it to my MCP config at ~/.claude/.mcp.json, and launch TradingView with the debug port. Then verify the connection with tv_health_check.
+> Install this TradingView MCP fork. Clone https://github.com/LurigeLars/Desktop-tradingview-mcp.git, run npm install, add it to my MCP config at ~/.claude/.mcp.json, and launch TradingView with the debug port. Then verify the connection with tv_health_check.
 
 Or follow the manual steps below.
 
@@ -99,8 +96,8 @@ Or follow the manual steps below.
 ### 1. Install
 
 ```bash
-git clone https://github.com/tradesdontlie/tradingview-mcp.git
-cd tradingview-mcp
+git clone https://github.com/LurigeLars/Desktop-tradingview-mcp.git
+cd Desktop-tradingview-mcp
 npm install
 ```
 
@@ -151,6 +148,33 @@ Replace `/path/to/tradingview-mcp` with your actual path.
 ### 4. Verify
 
 Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
+
+## Optional HTTP and ChatGPT access
+
+The normal local transport is stdio. This fork also includes a loopback-only Streamable HTTP server for clients that need HTTP:
+
+```bash
+node src/server/http.js
+```
+
+By default it listens on `http://127.0.0.1:8765/mcp` and refuses non-loopback bind hosts.
+
+For remote clients such as ChatGPT, keep that HTTP server on loopback and place the included gateway behind Cloudflare Access:
+
+```text
+Remote MCP client -> Cloudflare Access -> shared Cloudflare Tunnel
+                  -> tradingview-gateway:8080
+                  -> 127.0.0.1:8765/mcp
+                  -> TradingView Desktop via CDP on 127.0.0.1:9222
+```
+
+Copy `public/gateway.env.example` to the gitignored `public/gateway.env`, replace the placeholders with your own Cloudflare Access values, then start the gateway:
+
+```bash
+docker compose -f compose.public.yaml up -d
+```
+
+The gateway requires a valid Cloudflare Access JWT, strips client credentials before proxying, applies request/rate limits, and exposes the full 92-tool surface by default. Set `ALLOWED_TOOLS=core` to select the smaller reviewed profile.
 
 ## CLI
 
@@ -379,18 +403,20 @@ The key flag: `--remote-debugging-port=9222`
 npm test
 ```
 
-29 tests covering: Pine Script static analysis, server-side compilation, and CLI routing.
+The test suite covers Pine Script analysis/compilation, CLI routing, HTTP transport and session pressure, public-gateway behavior, realtime reads, tab/worker reconciliation, and related regression cases.
 
 ## Architecture
 
-```
-Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
+```text
+Local MCP client  <-> MCP server (stdio) ---------------------> CDP :9222 <-> TradingView Desktop
+Remote MCP client <-> Cloudflare Access <-> gateway <-> HTTP :8765 <-> CDP :9222 <-> TradingView Desktop
 ```
 
-- **Transport**: MCP over stdio (84 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
-- **Connection**: Chrome DevTools Protocol on localhost:9222
-- **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
-- **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
+- **Transport**: MCP over stdio or loopback-only Streamable HTTP (92 tools), plus the `tv` CLI.
+- **Connection**: Chrome DevTools Protocol on `127.0.0.1:9222`.
+- **Remote gateway**: optional Cloudflare Access path; the host MCP server remains loopback-only.
+- **Streaming**: poll-and-diff loop with deduplication and JSONL output to stdout.
+- **Runtime dependencies**: `@modelcontextprotocol/sdk` and `chrome-remote-interface`.
 
 ## Attributions
 
@@ -398,7 +424,7 @@ This project is not affiliated with, endorsed by, or associated with:
 - **TradingView Inc.** — TradingView is a trademark of TradingView Inc.
 - **Anthropic** — Claude and Claude Code are trademarks of Anthropic, PBC.
 
-This tool is an independent MCP server that connects to Claude Code via the standard MCP protocol. It does not contain or modify any Anthropic software.
+This tool is an independent MCP server that connects to compatible clients through the standard MCP protocol. It does not contain or modify any Anthropic software.
 
 ## Disclaimer
 
