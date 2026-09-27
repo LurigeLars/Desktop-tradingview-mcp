@@ -149,6 +149,49 @@ Replace `/path/to/tradingview-mcp` with your actual path.
 
 Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
 
+## Claude Desktop, Codex and other clients
+
+The transport is stdio, so every local client uses the same command with a different
+configuration file. Replace the path with your own checkout.
+
+| Client | Where the configuration lives |
+|---|---|
+| Claude Code | `~/.claude/.mcp.json`, or a project `.mcp.json` |
+| Claude Desktop | Settings > Developer > Edit Config, then restart Desktop fully |
+| Codex | `codex mcp add tradingview -- node /path/to/Desktop-tradingview-mcp/src/server.js` |
+| Cursor, VS Code | `.cursor/mcp.json`, `.vscode/mcp.json` |
+
+Claude Desktop takes the same block as Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "node",
+      "args": ["/path/to/Desktop-tradingview-mcp/src/server.js"]
+    }
+  }
+}
+```
+
+On Windows, give `command` the absolute path to `node.exe` if the client does not resolve it from
+`PATH`; Claude Desktop in particular does not.
+
+### One app, one chart, several clients
+
+Every client drives the *same* running TradingView Desktop over the same debug port. There is no
+per-client session, so the chart is shared state:
+
+- Changing the symbol, timeframe or layout changes what the person sees, immediately.
+- Two clients working at once will fight over the chart, and a read taken after the other one moved
+  it returns the wrong instrument's data without any error.
+- `tv_launch` with `kill_existing` restarts the application and closes what was open.
+
+So a client that changes the chart should record what it was and put it back, and an automated job
+should not share an app with an interactive session. This is the cost of driving the real app
+instead of a headless browser -- and the reason the interactive session can never be displaced,
+which was the point of the fork.
+
 ## Optional HTTP and ChatGPT access
 
 The normal local transport is stdio. This fork also includes a loopback-only Streamable HTTP server for clients that need HTTP:
