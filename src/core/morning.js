@@ -375,7 +375,6 @@ export function saveMorningSession({ brief, evidence, date, _deps } = {}) {
   const dir = sessionsDir(d.stateRoot);
   mkdirSync(dir, { recursive: true });
   const path = sessionFile(d.stateRoot, dateStr);
-  const overwritten = existsSync(path);
   const record = {
     date: dateStr,
     saved_at: now.toISOString(),
@@ -386,7 +385,16 @@ export function saveMorningSession({ brief, evidence, date, _deps } = {}) {
   if (Buffer.byteLength(payload, 'utf8') > MAX_SESSION_BYTES) {
     throw new Error(`saved morning session exceeds the ${MAX_SESSION_BYTES}-byte limit`);
   }
-  writeFileSync(path, payload, 'utf8');
+
+  let overwritten = false;
+  try {
+    writeFileSync(path, payload, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    overwritten = true;
+    writeFileSync(path, payload, { encoding: 'utf8', flag: 'w', mode: 0o600 });
+  }
+
   return { success: true, date: dateStr, overwritten };
 }
 
