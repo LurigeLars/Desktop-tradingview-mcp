@@ -332,7 +332,7 @@ export function createGatewayServer(env = process.env, dependencies = {}) {
         for (const message of messages) {
           const verdict = checkRequest(message, config.allowedTools);
           if (verdict.error) {
-            console.warn(`blocked tool ${message?.params?.name} for ${identity.email}`);
+            console.warn(`blocked tool ${message?.params?.name}`);
             return sendJson(res, rpcError(message.id, verdict.error));
           }
 
@@ -342,7 +342,7 @@ export function createGatewayServer(env = process.env, dependencies = {}) {
         }
       }
 
-      console.log(`${new Date().toISOString()} ${identity.email} ${req.method} /mcp`);
+      console.log(`${new Date().toISOString()} authenticated ${req.method} /mcp`);
       forward(req, res, body, config, ctx);
     } catch (error) {
       const status = Number(error?.status) || 500;
