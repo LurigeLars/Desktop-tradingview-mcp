@@ -131,10 +131,19 @@ test('session save/get stays inside the fixed state directory and falls back to 
       _deps: depsToday,
     });
     assert.deepEqual(saved, { success: true, date: '2026-09-26', overwritten: false });
+
+    const overwritten = saveMorningSession({
+      brief: 'Updated today brief',
+      evidence: { success: true, revision: 2 },
+      _deps: depsToday,
+    });
+    assert.deepEqual(overwritten, { success: true, date: '2026-09-26', overwritten: true });
+
     const current = getMorningSession({ _deps: depsToday });
     assert.equal(current.success, true);
     assert.equal(current.source, 'today');
-    assert.equal(current.brief, 'Today brief');
+    assert.equal(current.brief, 'Updated today brief');
+    assert.deepEqual(current.evidence, { success: true, revision: 2 });
 
     rmSync(join(root, 'sessions', '2026-09-26.json'));
     saveMorningSession({
