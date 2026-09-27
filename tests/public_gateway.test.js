@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   loadConfig,
   isAllowedPath,
@@ -28,6 +29,12 @@ describe('public gateway configuration', () => {
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_TEAM_DOMAIN: 'http://127.0.0.1' }), /Cloudflare Access team domain/);
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_TEAM_DOMAIN: 'evil.example.com' }), /Cloudflare Access team domain/);
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_ALLOWED_EMAILS: '' }), /ACCESS_ALLOWED_EMAILS/);
+  });
+
+  it('does not write authenticated email identities to gateway logs', () => {
+    const source = readFileSync(new URL('../public/gateway/gateway.mjs', import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /console\.(?:log|warn|error)\([^\n]*identity\.email/);
+    assert.match(source, /authenticated \$\{req\.method\} \/mcp/);
   });
 
   it('defaults to an MCP-aware HTTP transport rate budget', () => {
