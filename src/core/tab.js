@@ -416,7 +416,8 @@ export async function newTab({
     const chartTarget = await createPersistentTarget(chartUrl, {
       timeoutMs: chartTimeoutMs,
     });
-    await reconnectTo(chartTarget.id);
+    const reconnect = _deps?.reconnectTo || reconnectTo;
+    await reconnect(chartTarget.id);
     return {
       success: true,
       action: 'new_chart_target_opened',
