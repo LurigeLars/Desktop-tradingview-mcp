@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanupOrphanShellTabs, closeTabByTargetId, isChartPageTarget, isNewTabPageTarget, rankLandingCandidates, rankShellCandidates, withDeadline } from '../src/core/tab.js';
+import { cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, newTab, rankLandingCandidates, rankShellCandidates, withDeadline } from '../src/core/tab.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
   assert.equal(isChartPageTarget({
@@ -76,6 +76,60 @@ test('landing candidates exclude chart and shell targets', () => {
     rankLandingCandidates(targets).map(target => target.id),
     ['landing'],
   );
+});
+
+test('direct CDP chart target bootstrap creates and waits for exact target', async () => {
+  const seen = [];
+  let polls = 0;
+  const result = await createDirectChartTarget('https://www.tradingview.com/chart/abc123/', {
+    createTarget: async options => {
+      seen.push(options);
+      return { id: 'target-1' };
+    },
+    listTargets: async () => {
+      polls += 1;
+      if (polls < 2) return [];
+      return [{
+        id: 'target-1',
+        type: 'page',
+        url: 'https://www.tradingview.com/chart/abc123/',
+      }];
+    },
+    isReady: async id => id === 'target-1',
+    wait: async () => {},
+    timeoutMs: 1000,
+  });
+
+  assert.equal(result.id, 'target-1');
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].url, 'https://www.tradingview.com/chart/abc123/');
+});
+
+test('persistent exact-token newTab bypasses the Electron shell on cold start', async () => {
+  const calls = [];
+  const result = await newTab({
+    as_chart: true,
+    chart_id: 'abc123',
+    force_new_tab: true,
+    _deps: {
+      createDirectChartTarget: async (url, options) => {
+        calls.push({ url, options });
+        return {
+          id: 'cold-target',
+          type: 'page',
+          url: 'https://www.tradingview.com/chart/abc123/',
+        };
+      },
+      reconnectTo: async id => calls.push({ reconnect: id }),
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.direct_target_creation, true);
+  assert.equal(result.target_id, 'cold-target');
+  assert.equal(result.chart_id, 'abc123');
+  assert.deepEqual(calls[0].url, 'https://www.tradingview.com/chart/abc123/');
+  assert.deepEqual(calls[1], { reconnect: 'cold-target' });
 });
 
 test('new CDP targets are preferred over stale title hints', () => {
