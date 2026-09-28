@@ -546,6 +546,7 @@ export async function cloneTargetAsLayout(target, name, {
   listTargets = listTradingViewChartTargets,
   wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
   timeoutMs = 8000,
+  findSavedLayout,
 } = {}) {
   if (!target?.id) throw new Error('CDP target id is required to clone a worker layout');
   const desiredName = String(name || '').trim();
@@ -554,20 +555,66 @@ export async function cloneTargetAsLayout(target, name, {
 
   let client = null;
   let dialogOpened = false;
+
+  const readSavedLayout = findSavedLayout || (async (activeClient, layoutName) => {
+    const literal = JSON.stringify(String(layoutName));
+    return evaluateValue(activeClient, `
+      new Promise(function(resolve) {
+        var settled = false;
+        function finish(value) {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        }
+        try {
+          var api = window.TradingViewApi;
+          if (!api || typeof api.getSavedCharts !== 'function') {
+            finish({ error: 'getSavedCharts unavailable' });
+            return;
+          }
+          api.getSavedCharts(function(charts) {
+            var wanted = ${literal}.toLowerCase();
+            var match = null;
+            for (var i = 0; i < (charts || []).length; i++) {
+              var item = charts[i] || {};
+              var itemName = String(item.name || item.title || '');
+              if (itemName.toLowerCase() === wanted) {
+                match = {
+                  id: item.id || item.chartId || null,
+                  name: itemName,
+                  url: item.url || item.image_url || null
+                };
+                break;
+              }
+            }
+            finish(match);
+          });
+          setTimeout(function() { finish({ error: 'getSavedCharts timed out' }); }, 3000);
+        } catch(e) {
+          finish({ error: e.message });
+        }
+      })
+    `, { awaitPromise: true });
+  });
+
+  const findLiveSavedTarget = async saved => {
+    if (!saved?.url) return null;
+    const targets = await listTargets();
+    return targets.find(item => String(chartIdFromTarget(item)) === String(saved.url)) || null;
+  };
+
   try {
     client = await connect(target.id);
     await client.Runtime.enable();
 
-    const before = await evaluateValue(client, `
-      (function() {
-        var api = window.TradingViewApi;
-        return {
-          href: location.href,
-          layout_id: api && typeof api.layoutId === 'function' ? api.layoutId() : null,
-          layout_name: api && typeof api.layoutName === 'function' ? api.layoutName() : null
-        };
-      })()
-    `);
+    // Retry/resume path: Save As may already have completed on a previous
+    // attempt even if the caller timed out before ownership was journaled.
+    let saved = await readSavedLayout(client, desiredName);
+    if (saved?.error) throw new Error('Saved-layout lookup failed: ' + saved.error);
+    if (saved?.url) {
+      const existingTarget = await findLiveSavedTarget(saved);
+      if (existingTarget) return existingTarget;
+    }
 
     const opened = await evaluateValue(client, `
       (function() {
@@ -630,35 +677,27 @@ export async function cloneTargetAsLayout(target, name, {
       })()
     `);
     if (!clicked) throw new Error('TradingView Make copy button was not available');
+    dialogOpened = false;
 
-    let observed = null;
+    // Desktop 3.4.x keeps the source tab on the old layout and opens the
+    // newly-saved copy as a distinct chart target. Verify the saved layout via
+    // getSavedCharts and discover that new target by the layout's URL token.
+    let lastSaved = null;
     do {
       await wait(150);
-      observed = await evaluateValue(client, `
-        (function() {
-          var api = window.TradingViewApi;
-          return {
-            href: location.href,
-            layout_id: api && typeof api.layoutId === 'function' ? api.layoutId() : null,
-            layout_name: api && typeof api.layoutName === 'function' ? api.layoutName() : null
-          };
-        })()
-      `);
-      const newId = observed?.layout_id != null
-        && String(observed.layout_id) !== String(before?.layout_id ?? '');
-      if (newId && String(observed?.layout_name || '') === desiredName) break;
-      if (Date.now() >= deadline) {
-        throw new Error(
-          'TradingView layout copy did not become persistent: ' +
-          JSON.stringify({ desired_name: desiredName, before, observed }),
-        );
+      lastSaved = await readSavedLayout(client, desiredName);
+      if (lastSaved?.error) throw new Error('Saved-layout lookup failed: ' + lastSaved.error);
+      if (lastSaved?.url) {
+        const savedTarget = await findLiveSavedTarget(lastSaved);
+        if (savedTarget) return savedTarget;
       }
+      if (Date.now() >= deadline) break;
     } while (true);
 
-    dialogOpened = false;
-    const freshTargets = await listTargets();
-    const fresh = freshTargets.find(item => String(item.id) === String(target.id));
-    return fresh || { ...target, url: observed.href };
+    throw new Error(
+      'TradingView saved layout was not discoverable as a chart target: ' +
+      JSON.stringify({ desired_name: desiredName, saved_layout: lastSaved }),
+    );
   } catch (error) {
     if (client && dialogOpened) {
       try {
@@ -1059,6 +1098,17 @@ export async function provisionWorker({
         liveTargets: await deps.listTargets(),
         legacyTarget,
       });
+
+      if (
+        legacyTarget?.target_id
+        && String(opened.target.id) !== String(legacyTarget.target_id)
+      ) {
+        stage = 'retire_legacy_direct_tab';
+        await deps.closeTabByOwned({
+          target_id: legacyTarget.target_id,
+          chart_id: legacyTarget.chart_id,
+        });
+      }
 
       const openDurationMs = Date.now() - started;
       const chartId = chartIdFromTarget(opened.target);
