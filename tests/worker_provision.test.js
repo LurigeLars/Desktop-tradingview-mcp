@@ -5,6 +5,7 @@ import {
   buildWorkerLayoutName,
   closeTabByOwned,
   layoutCodeForPaneCount,
+  legacyDirectWorkerRecovery,
   pendingPaneIndexes,
   provisionWorker,
   recordedTabComplete,
@@ -239,7 +240,7 @@ test('recorded tab completeness prefers target id when chart ids can collide', (
       },
     }],
   };
-  const liveKeys = new Set(['target:target-worker', 'chart:shared-chart']);
+  const liveKeys = new Set(['target:target-worker']);
   const live = new Map([['target:target-worker', {
     target_id: 'target-worker',
     chart_id: 'shared-chart',
@@ -250,6 +251,61 @@ test('recorded tab completeness prefers target id when chart ids can collide', (
 
   state.entries[0].assignment.target_id = 'target-other';
   assert.equal(recordedTabComplete(plan, state, liveKeys, live), false);
+});
+
+test('recorded tab completeness survives target-id rotation when chart id is unique', () => {
+  const plan = { tab_index: 0, pane_count: 1, handles: ['a'] };
+  const state = {
+    worker_tabs: [{
+      slot: 0,
+      target_id: 'target-before-restart',
+      chart_id: 'stable-layout',
+      layout_name: 'Worker 01',
+      pane_count: 1,
+      persistent_layout: true,
+    }],
+    entries: [{
+      handle: 'a',
+      symbol: 'EX:AAA',
+      timeframe: '5',
+      studies: [],
+      assignment: {
+        worker_slot: 0,
+        target_id: 'target-before-restart',
+        chart_id: 'stable-layout',
+        pane_index: 0,
+      },
+    }],
+  };
+  const liveKeys = new Set(['target:target-after-restart', 'chart:stable-layout']);
+  const live = new Map([['chart:stable-layout', {
+    target_id: 'target-after-restart',
+    chart_id: 'stable-layout',
+    panes: [{ resolved_symbol: 'EX:AAA', resolution: '5', studies: [] }],
+  }]]);
+
+  assert.equal(recordedTabComplete(plan, state, liveKeys, live), true);
+});
+
+test('legacy direct worker recovery requires an exact duplicated chart-id group', () => {
+  const state = {
+    worker_tabs: [
+      { slot: 0, target_id: 'old-a', chart_id: 'shared', pane_count: 8 },
+      { slot: 1, target_id: 'old-b', chart_id: 'shared', pane_count: 2 },
+    ],
+  };
+  const recovered = legacyDirectWorkerRecovery(state, [
+    { target_id: 'new-b', chart_id: 'shared', pane_count: 2 },
+    { target_id: 'new-a', chart_id: 'shared', pane_count: 8 },
+  ]);
+  assert.deepEqual([...recovered.bySlot.keys()].sort((a, b) => a - b), [0, 1]);
+  assert.deepEqual([...recovered.targetIds].sort(), ['new-a', 'new-b']);
+
+  const incomplete = legacyDirectWorkerRecovery(state, [
+    { target_id: 'new-a', chart_id: 'shared', pane_count: 8 },
+  ]);
+  assert.equal(incomplete.bySlot.size, 0);
+  assert.equal(incomplete.targetIds.size, 0);
 });
 
 test('recorded tab completeness rejects stale live pane content', () => {
@@ -338,9 +394,10 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
       pane_count: 1,
     })),
     newTab: async args => {
-      assert.equal(args.as_chart, true);
-      assert.equal(args.force_new_tab, true);
       chartCounter += 1;
+      assert.equal(args.layout, 'new');
+      assert.equal(args.name, 'Worker ' + String(chartCounter).padStart(2, '0'));
+      assert.equal(args.force_new_tab, true);
       const targetId = 'target-' + chartCounter;
       const chartId = 'chart-' + chartCounter;
       liveTargets.push({
@@ -651,7 +708,103 @@ test('reserved slots reduce the total usable budget including external charts', 
 });
 
 
-test('persisted worker intent creates a direct chart tab without saved-layout recovery', async () => {
+test('legacy shared direct tabs are replaced one at a time with saved layouts', async () => {
+  const store = makeStore();
+  setUniverse({
+    capacity: 4,
+    max_charts_per_tab: 1,
+    entries: [
+      { handle: 'a', symbol: 'EX:AAA', timeframe: '5' },
+      { handle: 'b', symbol: 'EX:BBB', timeframe: '5' },
+    ],
+    _deps: store.deps,
+  });
+  recordWorkerProvision({
+    assignments: {
+      a: {
+        worker_slot: 0,
+        target_id: 'old-a',
+        chart_id: 'shared-layout',
+        pane_index: 0,
+      },
+      b: {
+        worker_slot: 1,
+        target_id: 'old-b',
+        chart_id: 'shared-layout',
+        pane_index: 0,
+      },
+    },
+    worker_tabs: [
+      { slot: 0, target_id: 'old-a', chart_id: 'shared-layout', layout_name: 'Worker 01', pane_count: 1 },
+      { slot: 1, target_id: 'old-b', chart_id: 'shared-layout', layout_name: 'Worker 02', pane_count: 1 },
+    ],
+    _deps: store.deps,
+  });
+
+  const liveTargets = [
+    { id: 'live-a', type: 'page', url: 'https://www.tradingview.com/chart/shared-layout/' },
+    { id: 'live-b', type: 'page', url: 'https://www.tradingview.com/chart/shared-layout/' },
+  ];
+  const inspectTargets = async targets => targets.map(target => ({
+    target_id: target.id,
+    chart_id: target.url.match(/\/chart\/([^/]+)/)?.[1] || null,
+    pane_count: 1,
+    panes: [{ resolved_symbol: 'EX:BBB', resolution: '5', studies: [] }],
+  }));
+
+  let created = 0;
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => liveTargets,
+    inspectTargets,
+    closeTabByOwned: async owned => {
+      const index = liveTargets.findIndex(target => target.id === owned.target_id);
+      assert.notEqual(index, -1);
+      liveTargets.splice(index, 1);
+      return { success: true, closed: true };
+    },
+    newTab: async args => {
+      created += 1;
+      assert.equal(args.layout, 'new');
+      assert.equal(args.name, 'Worker 01');
+      assert.equal(args.force_new_tab, true);
+      const target = {
+        id: 'saved-' + created,
+        type: 'page',
+        url: 'https://www.tradingview.com/chart/persistent-' + created + '/',
+      };
+      liveTargets.push(target);
+      return {
+        success: true,
+        target_id: target.id,
+        chart_id: 'persistent-' + created,
+      };
+    },
+    configureTarget: async () => {
+      throw new Error('configureTarget must not run in the replacement tab-open phase');
+    },
+    now: () => Date.parse('2026-09-28T08:00:00Z'),
+  };
+
+  const preview = await provisionWorker({ dry_run: true, layout_prefix: 'Worker', _deps: runtime });
+  assert.equal(preview.capacity_projection.external_connections, 0);
+  assert.deepEqual(preview.legacy_direct_recovery.slots, [0, 1]);
+
+  const result = await provisionWorker({ max_tabs: 1, layout_prefix: 'Worker', _deps: runtime });
+  assert.equal(result.success, true);
+  assert.equal(result.results[0].stage, 'tab_ready');
+  assert.equal(result.results[0].legacy_replaced, true);
+  assert.equal(result.results[0].persistent_layout, true);
+
+  const after = status({ _deps: store.deps });
+  assert.equal(after.worker_tabs[0].chart_id, 'persistent-1');
+  assert.equal(after.worker_tabs[0].persistent_layout, true);
+  assert.equal(after.worker_tabs[1].chart_id, 'shared-layout');
+  assert.notEqual(after.worker_tabs[1].persistent_layout, true);
+});
+
+test('persisted worker intent creates a restart-stable saved layout', async () => {
   const store = makeStore();
   setUniverse({
     entries: [{ handle: 'a', symbol: 'EX:AAA', timeframe: '5' }],
@@ -689,7 +842,8 @@ test('persisted worker intent creates a direct chart tab without saved-layout re
     })),
     newTab: async args => {
       newTabCalls += 1;
-      assert.equal(args.as_chart, true);
+      assert.equal(args.layout, 'new');
+      assert.equal(args.name, 'DTV Worker 01');
       assert.equal(args.force_new_tab, true);
       const created = {
         id: 'worker-target',
@@ -710,10 +864,12 @@ test('persisted worker intent creates a direct chart tab without saved-layout re
   assert.equal(result.success, true);
   assert.equal(result.complete, false);
   assert.equal(result.results[0].stage, 'tab_ready');
-  assert.equal(result.results[0].direct_chart, true);
+  assert.equal(result.results[0].direct_chart, false);
+  assert.equal(result.results[0].persistent_layout, true);
 
   const owned = status({ _deps: store.deps }).worker_tabs[0];
   assert.equal(owned.target_id, 'worker-target');
   assert.equal(owned.chart_id, 'worker-chart');
   assert.equal(owned.layout_name, 'DTV Worker 01');
+  assert.equal(owned.persistent_layout, true);
 });
