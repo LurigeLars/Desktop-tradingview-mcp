@@ -548,6 +548,53 @@ export async function newTab({
 /**
  * Close the currently active tab by clicking its close button in the shell.
  */
+export async function closeTabByTargetId({ target_id, _deps } = {}) {
+  const targetId = String(target_id || '').trim();
+  if (!targetId) throw new Error('target_id is required');
+
+  const listTargets = _deps?.listTargets || listCdpTargets;
+  const listTabs = _deps?.listTabs || list;
+  const closeTarget = _deps?.closeTarget
+    || (id => CDP.Close({ host: CDP_HOST, port: CDP_PORT, id }));
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const timeoutMs = Number(_deps?.timeoutMs || 3000);
+
+  const tabs = await listTabs();
+  if (Number(tabs?.tab_count || 0) <= 1) {
+    throw new Error('Cannot close the last tab. Use tv_launch to restart TradingView instead.');
+  }
+
+  const target = (tabs?.tabs || []).find(tab => String(tab.id) === targetId);
+  if (!target) {
+    throw new Error('TradingView tab target ' + targetId + ' is not an open chart/new-tab target.');
+  }
+
+  const beforeTargets = await listTargets();
+  if (!beforeTargets.some(item => String(item.id) === targetId)) {
+    throw new Error('TradingView tab target ' + targetId + ' disappeared before close.');
+  }
+
+  await closeTarget(targetId);
+
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const remaining = await listTargets();
+    if (!remaining.some(item => String(item.id) === targetId)) {
+      try { await getClient(); } catch { /* next tool call will reconnect */ }
+      return {
+        success: true,
+        action: 'tab_closed',
+        target_id: targetId,
+        chart_id: target.chart_id || null,
+      };
+    }
+    if (Date.now() >= deadline) break;
+    await wait(100);
+  } while (true);
+
+  throw new Error('TradingView tab target ' + targetId + ' remained present after close request.');
+}
+
 export async function closeTab() {
   const before = await withShell((evalIn) => evalIn(`document.querySelectorAll('.tabs-container .tab').length`));
   if (before <= 1) {
