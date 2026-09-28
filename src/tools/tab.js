@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/tab.js';
-import { status as workerStatus } from '../core/worker.js';
+import { isWorkerOwnedTab, status as workerStatus } from '../core/worker.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerTabTools(server) {
@@ -74,16 +74,7 @@ export function registerTabTools(server) {
           target = tabs.tabs[0] || null;
         }
 
-        const workers = workerStatus().worker_tabs || [];
-        const workerOwned = workers.some(worker =>
-          (worker?.target_id && String(worker.target_id) === String(target.id))
-          || (
-            worker?.chart_id
-            && target?.chart_id
-            && String(worker.chart_id) === String(target.chart_id)
-          )
-        );
-        if (workerOwned) {
+        if (isWorkerOwnedTab(target, workerStatus())) {
           throw new Error(
             'Refusing to close a DTV-owned worker tab through tab_close. ' +
             'Worker tabs are server-owned; use worker_provision/reconciliation instead.'
