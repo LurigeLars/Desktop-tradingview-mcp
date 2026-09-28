@@ -10,6 +10,7 @@ import {
   planPaneCounts,
   planWorkerTopology,
   normalizeStudySpecs,
+  isWorkerOwnedTab,
 } from '../src/core/worker.js';
 
 test('timeframe normalization is generic across seconds, minutes, hours and calendar units', () => {
@@ -207,4 +208,18 @@ test('duplicate equivalent parameterized studies are normalized once', () => {
     ]),
     [{ name: 'Study', inputs: { a: 1, b: 2 } }],
   );
+});
+
+
+test('worker tab ownership matches exact target id and restart-stable chart id', () => {
+  const state = {
+    worker_tabs: [
+      { slot: 0, target_id: 'live-a', chart_id: 'layout-a', persistent_layout: true },
+      { slot: 1, target_id: 'stale-b', chart_id: 'layout-b', persistent_layout: true },
+    ],
+  };
+
+  assert.equal(isWorkerOwnedTab({ id: 'live-a', chart_id: 'other' }, state), true);
+  assert.equal(isWorkerOwnedTab({ id: 'rotated-b', chart_id: 'layout-b' }, state), true);
+  assert.equal(isWorkerOwnedTab({ id: 'external', chart_id: 'external-layout' }, state), false);
 });

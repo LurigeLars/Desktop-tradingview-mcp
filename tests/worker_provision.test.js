@@ -4,16 +4,67 @@ import {
   activePaneStates,
   buildWorkerLayoutName,
   closeTabByOwned,
+  closeWorkerTargetGracefully,
+  cloneTargetAsLayout,
   layoutCodeForPaneCount,
+  legacyDirectWorkerRecovery,
   pendingPaneIndexes,
+  persistentWorkerRecovery,
   provisionWorker,
   recordedTabComplete,
+  settlePersistentWorkerRestore,
 } from '../src/core/worker-provision.js';
 import {
   recordWorkerProvision,
   setUniverse,
   status,
 } from '../src/core/worker.js';
+
+test('restart restore settle waits for persistent chart tokens when all recorded target ids are stale', async () => {
+  const state = {
+    worker_tabs: [
+      { target_id: 'old-a', chart_id: 'chart-a', persistent_layout: true },
+      { target_id: 'old-b', chart_id: 'chart-b', persistent_layout: true },
+    ],
+  };
+  let now = 0;
+  let polls = 0;
+  const snapshots = [
+    [{ id: 'new-a', url: 'https://www.tradingview.com/chart/chart-a/' }],
+    [
+      { id: 'new-a', url: 'https://www.tradingview.com/chart/chart-a/' },
+      { id: 'new-b', url: 'https://www.tradingview.com/chart/chart-b/' },
+    ],
+  ];
+
+  const result = await settlePersistentWorkerRestore(state, snapshots[0], {
+    listTargets: async () => snapshots[Math.min(polls++, snapshots.length - 1)],
+    wait: async ms => { now += ms; },
+    now: () => now,
+    timeoutMs: 6000,
+    pollMs: 250,
+  });
+
+  assert.deepEqual(result.map(target => target.id), ['new-a', 'new-b']);
+  assert.ok(now < 6000);
+});
+
+test('restart restore settle does not delay ordinary same-session reconciliation', async () => {
+  const initial = [{ id: 'live-a', url: 'https://www.tradingview.com/chart/chart-a/' }];
+  let waited = false;
+  const result = await settlePersistentWorkerRestore({
+    worker_tabs: [
+      { target_id: 'live-a', chart_id: 'chart-a', persistent_layout: true },
+      { target_id: 'live-b', chart_id: 'chart-b', persistent_layout: true },
+    ],
+  }, initial, {
+    listTargets: async () => { throw new Error('must not poll same-session state'); },
+    wait: async () => { waited = true; },
+  });
+
+  assert.equal(waited, false);
+  assert.equal(result, initial);
+});
 
 test('worker pane counts map only to supported TradingView layouts', () => {
   assert.equal(layoutCodeForPaneCount(1), 's');
@@ -30,21 +81,62 @@ test('worker layout names are technical and deterministic', () => {
   assert.equal(buildWorkerLayoutName('Worker', 6), 'Worker 07');
 });
 
-test('worker cleanup closes the exact owned target without shell switching', async () => {
+
+test('Save As recovery reuses an already-created saved-layout target', async () => {
+  const source = {
+    id: 'legacy-target',
+    type: 'page',
+    url: 'https://www.tradingview.com/chart/shared-layout/',
+  };
+  const saved = {
+    id: 'saved-target',
+    type: 'page',
+    url: 'https://www.tradingview.com/chart/persistent-layout/',
+  };
+  let dialogEvaluated = false;
+  const fakeClient = {
+    Runtime: {
+      enable: async () => {},
+      evaluate: async () => {
+        dialogEvaluated = true;
+        throw new Error('Save As dialog should not be reopened on resume');
+      },
+    },
+    close: async () => {},
+  };
+
+  const result = await cloneTargetAsLayout(source, 'Worker 01', {
+    connect: async () => fakeClient,
+    listTargets: async () => [source, saved],
+    findSavedLayout: async () => ({
+      id: 123,
+      name: 'Worker 01',
+      url: 'persistent-layout',
+    }),
+  });
+
+  assert.equal(result.id, 'saved-target');
+  assert.equal(dialogEvaluated, false);
+});
+
+test('worker cleanup prefers graceful renderer close for an exact duplicate target', async () => {
   const targets = [
     { id: 'worker-a', url: 'https://www.tradingview.com/chart/shared/' },
     { id: 'worker-b', url: 'https://www.tradingview.com/chart/shared/' },
   ];
+  let hardCloseCalled = false;
   let shellTouched = false;
 
   const result = await closeTabByOwned(
     { target_id: 'worker-a', chart_id: 'shared' },
     {
       listTargets: async () => targets.slice(),
-      closeTarget: async targetId => {
+      gracefulCloseTarget: async targetId => {
         const index = targets.findIndex(target => target.id === targetId);
         if (index >= 0) targets.splice(index, 1);
+        return true;
       },
+      closeTarget: async () => { hardCloseCalled = true; },
       listTabs: async () => { shellTouched = true; throw new Error('shell list must not run'); },
       switchTab: async () => { shellTouched = true; throw new Error('shell switch must not run'); },
       closeTab: async () => { shellTouched = true; throw new Error('shell close must not run'); },
@@ -54,9 +146,64 @@ test('worker cleanup closes the exact owned target without shell switching', asy
 
   assert.equal(result.success, true);
   assert.equal(result.closed, true);
-  assert.equal(result.via, 'target_id');
+  assert.equal(result.via, 'renderer_close');
+  assert.equal(hardCloseCalled, false);
   assert.equal(shellTouched, false);
   assert.deepEqual(targets.map(target => target.id), ['worker-b']);
+});
+
+test('worker cleanup falls back to hard target close when graceful close cannot remove it', async () => {
+  const targets = [
+    { id: 'worker-a', url: 'https://www.tradingview.com/chart/shared/' },
+    { id: 'worker-b', url: 'https://www.tradingview.com/chart/shared/' },
+  ];
+
+  const result = await closeTabByOwned(
+    { target_id: 'worker-a', chart_id: 'shared' },
+    {
+      listTargets: async () => targets.slice(),
+      gracefulCloseTarget: async () => false,
+      closeTarget: async targetId => {
+        const index = targets.findIndex(target => target.id === targetId);
+        if (index >= 0) targets.splice(index, 1);
+      },
+      wait: async () => {},
+    },
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.closed, true);
+  assert.equal(result.via, 'target_id_fallback');
+  assert.deepEqual(targets.map(target => target.id), ['worker-b']);
+});
+
+test('graceful worker close reports success when renderer lifecycle removes the target', async () => {
+  const targets = [{ id: 'worker-a', url: 'https://www.tradingview.com/chart/shared/' }];
+  const evaluated = [];
+  const fakeClient = {
+    Runtime: {
+      enable: async () => {},
+      evaluate: async args => {
+        evaluated.push(args.expression);
+        targets.splice(0, targets.length);
+      },
+    },
+    Page: {
+      enable: async () => {},
+      close: async () => {},
+    },
+    close: async () => {},
+  };
+
+  const result = await closeWorkerTargetGracefully('worker-a', {
+    connect: async () => fakeClient,
+    listTargets: async () => targets.slice(),
+    wait: async () => {},
+    timeoutMs: 100,
+  });
+
+  assert.equal(result, true);
+  assert.match(evaluated[0], /window\.close/);
 });
 
 test('legacy chart-id cleanup fails closed when multiple tabs share the chart id', async () => {
@@ -239,7 +386,7 @@ test('recorded tab completeness prefers target id when chart ids can collide', (
       },
     }],
   };
-  const liveKeys = new Set(['target:target-worker', 'chart:shared-chart']);
+  const liveKeys = new Set(['target:target-worker']);
   const live = new Map([['target:target-worker', {
     target_id: 'target-worker',
     chart_id: 'shared-chart',
@@ -250,6 +397,71 @@ test('recorded tab completeness prefers target id when chart ids can collide', (
 
   state.entries[0].assignment.target_id = 'target-other';
   assert.equal(recordedTabComplete(plan, state, liveKeys, live), false);
+});
+
+test('recorded tab completeness survives target-id rotation when chart id is unique', () => {
+  const plan = { tab_index: 0, pane_count: 1, handles: ['a'] };
+  const state = {
+    worker_tabs: [{
+      slot: 0,
+      target_id: 'target-before-restart',
+      chart_id: 'stable-layout',
+      layout_name: 'Worker 01',
+      pane_count: 1,
+      persistent_layout: true,
+    }],
+    entries: [{
+      handle: 'a',
+      symbol: 'EX:AAA',
+      timeframe: '5',
+      studies: [],
+      assignment: {
+        worker_slot: 0,
+        target_id: 'target-before-restart',
+        chart_id: 'stable-layout',
+        pane_index: 0,
+      },
+    }],
+  };
+  const liveKeys = new Set(['target:target-after-restart', 'chart:stable-layout']);
+  const live = new Map([['chart:stable-layout', {
+    target_id: 'target-after-restart',
+    chart_id: 'stable-layout',
+    panes: [{ resolved_symbol: 'EX:AAA', resolution: '5', studies: [] }],
+  }]]);
+
+  assert.equal(recordedTabComplete(plan, state, liveKeys, live), true);
+});
+
+test('legacy direct worker recovery requires an exact chart-id group and supports singleton tail migration', () => {
+  const state = {
+    worker_tabs: [
+      { slot: 0, target_id: 'old-a', chart_id: 'shared', pane_count: 8 },
+      { slot: 1, target_id: 'old-b', chart_id: 'shared', pane_count: 2 },
+    ],
+  };
+  const recovered = legacyDirectWorkerRecovery(state, [
+    { target_id: 'new-b', chart_id: 'shared', pane_count: 2 },
+    { target_id: 'new-a', chart_id: 'shared', pane_count: 8 },
+  ]);
+  assert.deepEqual([...recovered.bySlot.keys()].sort((a, b) => a - b), [0, 1]);
+  assert.deepEqual([...recovered.targetIds].sort(), ['new-a', 'new-b']);
+
+  const incomplete = legacyDirectWorkerRecovery(state, [
+    { target_id: 'new-a', chart_id: 'shared', pane_count: 8 },
+  ]);
+  assert.equal(incomplete.bySlot.size, 0);
+  assert.equal(incomplete.targetIds.size, 0);
+
+  const singleton = legacyDirectWorkerRecovery({
+    worker_tabs: [
+      { slot: 4, target_id: 'old-tail', chart_id: 'shared-tail', pane_count: 8 },
+    ],
+  }, [
+    { target_id: 'live-tail', chart_id: 'shared-tail', pane_count: 8 },
+  ]);
+  assert.deepEqual([...singleton.bySlot.keys()], [4]);
+  assert.deepEqual([...singleton.targetIds], ['live-tail']);
 });
 
 test('recorded tab completeness rejects stale live pane content', () => {
@@ -328,6 +540,7 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
 
   let liveTargets = [];
   let chartCounter = 0;
+  let cloneCounter = 0;
   const runtime = {
     status: () => status({ _deps: store.deps }),
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
@@ -338,11 +551,11 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
       pane_count: 1,
     })),
     newTab: async args => {
+      chartCounter += 1;
       assert.equal(args.as_chart, true);
       assert.equal(args.force_new_tab, true);
-      chartCounter += 1;
       const targetId = 'target-' + chartCounter;
-      const chartId = 'chart-' + chartCounter;
+      const chartId = 'direct-' + chartCounter;
       liveTargets.push({
         id: targetId,
         type: 'page',
@@ -350,6 +563,14 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
         url: 'https://www.tradingview.com/chart/' + chartId + '/',
       });
       return { success: true, target_id: targetId, chart_id: chartId };
+    },
+    cloneTargetAsLayout: async (target, name) => {
+      cloneCounter += 1;
+      assert.equal(name, 'Worker ' + String(cloneCounter).padStart(2, '0'));
+      const live = liveTargets.find(item => item.id === target.id);
+      assert.ok(live);
+      live.url = 'https://www.tradingview.com/chart/persistent-' + cloneCounter + '/';
+      return live;
     },
     configureTarget: async ({ target, paneCount, entries, maxPanes }) => {
       assert.equal(maxPanes, 1);
@@ -426,8 +647,8 @@ test('force provisioning remains resumable and does not report complete early', 
   recordWorkerProvision({
     assignments: initialAssignments,
     worker_tabs: [
-      { slot: 0, chart_id: 'chart-1', layout_name: 'Worker 01', pane_count: 8 },
-      { slot: 1, chart_id: 'chart-2', layout_name: 'Worker 02', pane_count: 2 },
+      { slot: 0, chart_id: 'chart-1', layout_name: 'Worker 01', pane_count: 8, persistent_layout: true },
+      { slot: 1, chart_id: 'chart-2', layout_name: 'Worker 02', pane_count: 2, persistent_layout: true },
     ],
     _deps: store.deps,
   });
@@ -651,7 +872,296 @@ test('reserved slots reduce the total usable budget including external charts', 
 });
 
 
-test('persisted worker intent creates a direct chart tab without saved-layout recovery', async () => {
+test('partial Save As target is recovered as worker-owned before capacity projection', async () => {
+  const store = makeStore();
+  setUniverse({
+    capacity: 2,
+    max_charts_per_tab: 1,
+    entries: [
+      { handle: 'a', symbol: 'EX:AAA', timeframe: '5' },
+      { handle: 'b', symbol: 'EX:BBB', timeframe: '5' },
+    ],
+    _deps: store.deps,
+  });
+  recordWorkerProvision({
+    worker_tabs: [
+      { slot: 0, target_id: 'old-a', chart_id: 'shared-layout', layout_name: 'Worker 01', pane_count: 1 },
+      { slot: 1, target_id: 'old-b', chart_id: 'shared-layout', layout_name: 'Worker 02', pane_count: 1 },
+    ],
+    _deps: store.deps,
+  });
+
+  const liveTargets = [
+    { id: 'live-a', type: 'page', url: 'https://www.tradingview.com/chart/shared-layout/' },
+    { id: 'live-b', type: 'page', url: 'https://www.tradingview.com/chart/shared-layout/' },
+    { id: 'saved-target', type: 'page', url: 'https://www.tradingview.com/chart/persistent-1/' },
+  ];
+
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => liveTargets,
+    inspectTargets: async targets => targets.map(target => ({
+      target_id: target.id,
+      chart_id: target.url.match(/\/chart\/([^/]+)/)?.[1] || null,
+      pane_count: 1,
+    })),
+    listSavedLayouts: async () => [
+      { id: 123, name: 'Worker 01', url: 'persistent-1' },
+    ],
+  };
+
+  const preview = await provisionWorker({
+    dry_run: true,
+    layout_prefix: 'Worker',
+    _deps: runtime,
+  });
+
+  assert.equal(preview.capacity_projection.external_connections, 0);
+  assert.equal(preview.capacity_projection.projected_connections, 2);
+  assert.deepEqual(preview.partial_saved_layout_recovery.slots, [0]);
+  assert.deepEqual(preview.partial_saved_layout_recovery.target_ids, ['saved-target']);
+});
+
+test('legacy shared direct tabs are replaced one at a time with saved layouts', async () => {
+  const store = makeStore();
+  setUniverse({
+    capacity: 4,
+    max_charts_per_tab: 1,
+    entries: [
+      { handle: 'a', symbol: 'EX:AAA', timeframe: '5' },
+      { handle: 'b', symbol: 'EX:BBB', timeframe: '5' },
+    ],
+    _deps: store.deps,
+  });
+  recordWorkerProvision({
+    assignments: {
+      a: {
+        worker_slot: 0,
+        target_id: 'old-a',
+        chart_id: 'shared-layout',
+        pane_index: 0,
+      },
+      b: {
+        worker_slot: 1,
+        target_id: 'old-b',
+        chart_id: 'shared-layout',
+        pane_index: 0,
+      },
+    },
+    worker_tabs: [
+      { slot: 0, target_id: 'old-a', chart_id: 'shared-layout', layout_name: 'Worker 01', pane_count: 1 },
+      { slot: 1, target_id: 'old-b', chart_id: 'shared-layout', layout_name: 'Worker 02', pane_count: 1 },
+    ],
+    _deps: store.deps,
+  });
+
+  const liveTargets = [
+    { id: 'live-a', type: 'page', url: 'https://www.tradingview.com/chart/shared-layout/' },
+    { id: 'live-b', type: 'page', url: 'https://www.tradingview.com/chart/shared-layout/' },
+  ];
+  const inspectTargets = async targets => targets.map(target => ({
+    target_id: target.id,
+    chart_id: target.url.match(/\/chart\/([^/]+)/)?.[1] || null,
+    pane_count: 1,
+    panes: [{ resolved_symbol: 'EX:BBB', resolution: '5', studies: [] }],
+  }));
+
+  let cloned = 0;
+  const closed = [];
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => liveTargets,
+    inspectTargets,
+    listSavedLayouts: async () => [],
+    newTab: async () => {
+      throw new Error('legacy migration must use Save As from the existing tab');
+    },
+    cloneTargetAsLayout: async (target, name) => {
+      cloned += 1;
+      assert.equal(name, 'Worker 01');
+      assert.ok(liveTargets.some(item => item.id === target.id));
+      const saved = {
+        id: 'saved-' + cloned,
+        type: 'page',
+        url: 'https://www.tradingview.com/chart/persistent-' + cloned + '/',
+      };
+      liveTargets.push(saved);
+      return saved;
+    },
+    closeTabByOwned: async owned => {
+      closed.push(owned.target_id);
+      const index = liveTargets.findIndex(item => item.id === owned.target_id);
+      assert.notEqual(index, -1);
+      liveTargets.splice(index, 1);
+      return { success: true, closed: true };
+    },
+    configureTarget: async () => {
+      throw new Error('configureTarget must not run in the clone phase');
+    },
+    now: () => Date.parse('2026-09-28T08:00:00Z'),
+  };
+
+  const preview = await provisionWorker({ dry_run: true, layout_prefix: 'Worker', _deps: runtime });
+  assert.equal(preview.capacity_projection.external_connections, 0);
+  assert.deepEqual(preview.legacy_direct_recovery.slots, [0, 1]);
+
+  const result = await provisionWorker({ max_tabs: 1, layout_prefix: 'Worker', _deps: runtime });
+  assert.equal(result.success, true);
+  assert.equal(result.results[0].stage, 'tab_ready');
+  assert.equal(result.results[0].legacy_replaced, true);
+  assert.equal(result.results[0].persistent_layout, true);
+  assert.equal(closed.length, 1);
+  assert.ok(['live-a', 'live-b'].includes(closed[0]));
+  assert.equal(liveTargets.length, 2);
+
+  const after = status({ _deps: store.deps });
+  assert.equal(after.worker_tabs[0].chart_id, 'persistent-1');
+  assert.equal(after.worker_tabs[0].persistent_layout, true);
+  assert.equal(after.worker_tabs[1].chart_id, 'shared-layout');
+  assert.notEqual(after.worker_tabs[1].persistent_layout, true);
+});
+
+test('persistent worker reopens exact saved chart token when layout names are duplicated', async () => {
+  const store = makeStore();
+  setUniverse({
+    entries: [{ handle: 'a', symbol: 'EX:AAA', timeframe: '5' }],
+    _deps: store.deps,
+  });
+  recordWorkerProvision({
+    assignments: {
+      a: { worker_slot: 0, target_id: 'stale', chart_id: 'good-token', pane_index: 0 },
+    },
+    worker_tabs: [{
+      slot: 0,
+      target_id: 'stale',
+      chart_id: 'good-token',
+      layout_name: 'DTV Worker 01',
+      pane_count: 1,
+      persistent_layout: true,
+    }],
+    _deps: store.deps,
+  });
+
+  const liveTargets = [];
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => liveTargets,
+    inspectTargets: async () => [],
+    listSavedLayouts: async () => {
+      throw new Error('registry chart_id must avoid saved-layout lookup');
+    },
+    newTab: async args => {
+      assert.equal(args.as_chart, true);
+      assert.equal(args.chart_id, 'good-token');
+      assert.equal(args.force_new_tab, true);
+      const target = {
+        id: 'new-target',
+        type: 'page',
+        url: 'https://www.tradingview.com/chart/good-token/',
+      };
+      liveTargets.push(target);
+      return { success: true, target_id: target.id, chart_id: 'good-token' };
+    },
+    configureTarget: async () => {
+      throw new Error('configureTarget must not run in a tab-open phase');
+    },
+    closeTabByOwned: async () => ({ success: true }),
+  };
+
+  const result = await provisionWorker({ max_tabs: 1, _deps: runtime });
+  assert.equal(result.success, true);
+  assert.equal(result.results[0].stage, 'tab_ready');
+  assert.equal(result.results[0].chart_id, 'good-token');
+
+  const owned = status({ _deps: store.deps }).worker_tabs[0];
+  assert.equal(owned.target_id, 'new-target');
+  assert.equal(owned.chart_id, 'good-token');
+  assert.equal(owned.persistent_layout, true);
+});
+
+test('persistent worker recovery dedupes identical live chart instances by pane signature', async () => {
+  const store = makeStore();
+  setUniverse({
+    entries: [{ handle: 'a', symbol: 'EX:AAA', timeframe: '5' }],
+    _deps: store.deps,
+  });
+  recordWorkerProvision({
+    assignments: {
+      a: { worker_slot: 0, target_id: 'stale-target', chart_id: 'stable-token', pane_index: 0 },
+    },
+    worker_tabs: [{
+      slot: 0,
+      target_id: 'stale-target',
+      chart_id: 'stable-token',
+      layout_name: 'DTV Worker 01',
+      pane_count: 1,
+      persistent_layout: true,
+    }],
+    _deps: store.deps,
+  });
+
+  const liveTargets = [
+    { id: 'live-b', type: 'page', url: 'https://www.tradingview.com/chart/stable-token/' },
+    { id: 'live-a', type: 'page', url: 'https://www.tradingview.com/chart/stable-token/' },
+  ];
+  const inspected = () => liveTargets.map(target => ({
+    target_id: target.id,
+    chart_id: 'stable-token',
+    pane_count: 1,
+    panes: [{ resolved_symbol: 'EX:AAA', resolution: '5', studies: [] }],
+  }));
+
+  const previewRecovery = persistentWorkerRecovery(
+    status({ _deps: store.deps }),
+    status({ _deps: store.deps }).topology_plan,
+    new Map(status({ _deps: store.deps }).entries.map(entry => [entry.handle, entry])),
+    inspected(),
+  );
+  assert.equal(previewRecovery.bySlot.get(0).target_id, 'live-a');
+  assert.deepEqual(
+    previewRecovery.duplicatesBySlot.get(0).map(item => item.target_id),
+    ['live-b'],
+  );
+
+  const closed = [];
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => liveTargets,
+    inspectTargets: async () => inspected(),
+    listSavedLayouts: async () => [{ id: 1, name: 'DTV Worker 01', url: 'stable-token' }],
+    newTab: async () => { throw new Error('must reuse a matching live target'); },
+    closeTabByOwned: async owned => {
+      closed.push(owned.target_id);
+      const index = liveTargets.findIndex(target => target.id === owned.target_id);
+      if (index >= 0) liveTargets.splice(index, 1);
+      return { success: true, closed: index >= 0 };
+    },
+    configureTarget: async ({ target }) => ({
+      success: true,
+      complete: true,
+      layout_code: 's',
+      configured_panes: [],
+      pending_panes: [],
+      verified: [{ resolved_symbol: 'EX:AAA', resolution: '5', studies: [] }],
+      target_id: target.id,
+    }),
+  };
+
+  const result = await provisionWorker({ max_tabs: 1, _deps: runtime });
+  assert.equal(result.success, true);
+  assert.equal(result.complete, true);
+  assert.deepEqual(closed, ['live-b']);
+
+  const after = status({ _deps: store.deps });
+  assert.equal(after.worker_tabs[0].target_id, 'live-a');
+  assert.equal(after.entries[0].assignment.target_id, 'live-a');
+});
+
+test('persisted worker intent creates a restart-stable saved layout', async () => {
   const store = makeStore();
   setUniverse({
     entries: [{ handle: 'a', symbol: 'EX:AAA', timeframe: '5' }],
@@ -699,6 +1209,13 @@ test('persisted worker intent creates a direct chart tab without saved-layout re
       liveTargets.push(created);
       return { success: true, target_id: created.id, chart_id: 'worker-chart' };
     },
+    cloneTargetAsLayout: async (target, name) => {
+      assert.equal(name, 'DTV Worker 01');
+      const live = liveTargets.find(item => item.id === target.id);
+      assert.ok(live);
+      live.url = 'https://www.tradingview.com/chart/persistent-worker/';
+      return live;
+    },
     configureTarget: async () => {
       throw new Error('configureTarget must not run in a tab-open phase');
     },
@@ -710,10 +1227,12 @@ test('persisted worker intent creates a direct chart tab without saved-layout re
   assert.equal(result.success, true);
   assert.equal(result.complete, false);
   assert.equal(result.results[0].stage, 'tab_ready');
-  assert.equal(result.results[0].direct_chart, true);
+  assert.equal(result.results[0].direct_chart, false);
+  assert.equal(result.results[0].persistent_layout, true);
 
   const owned = status({ _deps: store.deps }).worker_tabs[0];
   assert.equal(owned.target_id, 'worker-target');
-  assert.equal(owned.chart_id, 'worker-chart');
+  assert.equal(owned.chart_id, 'persistent-worker');
   assert.equal(owned.layout_name, 'DTV Worker 01');
+  assert.equal(owned.persistent_layout, true);
 });

@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/tab.js';
+import { isWorkerOwnedTab, status as workerStatus } from '../core/worker.js';
+import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerTabTools(server) {
   server.registerTool('tab_list', {
@@ -22,7 +24,12 @@ export function registerTabTools(server) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ layout, name, symbol, as_chart }) => {
-    try { return jsonResult(await core.newTab({ layout, name, symbol, as_chart })); }
+    try {
+      return jsonResult(await withTopologyMutationLock(
+        'tab_new',
+        () => core.newTab({ layout, name, symbol, as_chart }),
+      ));
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -33,16 +40,50 @@ export function registerTabTools(server) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ name }) => {
-    try { return jsonResult(await core.newTab({ layout: 'new', name })); }
+    try {
+      return jsonResult(await withTopologyMutationLock(
+        'layout_new',
+        () => core.newTab({ layout: 'new', name }),
+      ));
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
   server.registerTool('tab_close', {
-    description: 'Close only the currently active TradingView Desktop chart tab while leaving the application running. To close a specific tab, use tab_list/tab_switch first, then tab_close. This is not an application shutdown; use tv_close to exit TradingView Desktop.',
-    inputSchema: {},
+    description: 'Close one non-worker TradingView Desktop tab. In multi-tab runtimes target_id is required so concurrent MCP clients cannot close whichever tab happens to be active. DTV-owned worker tabs are protected; worker lifecycle changes must go through worker_provision.',
+    inputSchema: {
+      target_id: z.string().optional().describe('Exact CDP target ID from tab_list. Required when more than one tab is open.'),
+    },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  }, async () => {
-    try { return jsonResult(await core.closeTab()); }
+  }, async ({ target_id }) => {
+    try {
+      return jsonResult(await withTopologyMutationLock('tab_close', async () => {
+        const tabs = await core.list();
+        let target = null;
+
+        if (target_id) {
+          target = tabs.tabs.find(tab => String(tab.id) === String(target_id)) || null;
+          if (!target) throw new Error('tab_close target_id is not present in tab_list.');
+        } else {
+          if (tabs.tab_count !== 1) {
+            throw new Error(
+              'tab_close requires target_id when multiple TradingView Desktop tabs are open. ' +
+              'Use tab_list and pass the exact target_id; do not rely on shared active-tab state.'
+            );
+          }
+          target = tabs.tabs[0] || null;
+        }
+
+        if (isWorkerOwnedTab(target, workerStatus())) {
+          throw new Error(
+            'Refusing to close a DTV-owned worker tab through tab_close. ' +
+            'Worker tabs are server-owned; use worker_provision/reconciliation instead.'
+          );
+        }
+
+        return core.closeTabByTargetId({ target_id: target.id });
+      }));
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -53,7 +94,12 @@ export function registerTabTools(server) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ index }) => {
-    try { return jsonResult(await core.switchTab({ index })); }
+    try {
+      return jsonResult(await withTopologyMutationLock(
+        'tab_switch',
+        () => core.switchTab({ index }),
+      ));
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }

@@ -49,9 +49,13 @@ function resolveDeps(overrides) {
     record: overrides?.record || recordWorkerProvision,
     listTargets: overrides?.listTargets || listTradingViewChartTargets,
     newTab: overrides?.newTab || tabCore.newTab,
+    cloneTargetAsLayout: overrides?.cloneTargetAsLayout || cloneTargetAsLayout,
     closeTabByOwned: overrides?.closeTabByOwned || closeTabByOwned,
+    cleanupOrphanShellTabs: overrides?.cleanupOrphanShellTabs || tabCore.cleanupOrphanShellTabs,
     configureTarget: overrides?.configureTarget || configureTarget,
     inspectTargets: overrides?.inspectTargets || inspectTargetPaneCounts,
+    listSavedLayouts: overrides?.listSavedLayouts || listSavedWorkerLayouts,
+    wait: overrides?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms))),
     now: overrides?.now || (() => Date.now()),
   };
 }
@@ -64,10 +68,256 @@ function workerTabMap(state) {
   return new Map((state.worker_tabs || []).map(tab => [Number(tab.slot), tab]));
 }
 
+function runtimeKeys(value) {
+  const keys = [];
+  if (value?.target_id) keys.push('target:' + String(value.target_id));
+  if (value?.chart_id) keys.push('chart:' + String(value.chart_id));
+  return keys;
+}
+
 function ownedRuntimeKey(value) {
-  if (value?.target_id) return 'target:' + String(value.target_id);
-  if (value?.chart_id) return 'chart:' + String(value.chart_id);
-  return null;
+  return runtimeKeys(value)[0] || null;
+}
+
+function countChartIds(items) {
+  const counts = new Map();
+  for (const item of items || []) {
+    if (!item?.chart_id) continue;
+    const key = String(item.chart_id);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+function stableOwnedRuntimeKeys(workerTabs) {
+  const tabs = workerTabs || [];
+  const chartCounts = countChartIds(tabs);
+  const keys = new Set();
+  for (const tab of tabs) {
+    if (tab?.target_id) keys.add('target:' + String(tab.target_id));
+    if (tab?.chart_id && chartCounts.get(String(tab.chart_id)) === 1) {
+      keys.add('chart:' + String(tab.chart_id));
+    }
+  }
+  return keys;
+}
+
+function sameNumberMultiset(left, right) {
+  const count = values => {
+    const out = new Map();
+    for (const value of values) {
+      const key = Number(value);
+      out.set(key, (out.get(key) || 0) + 1);
+    }
+    return out;
+  };
+  const a = count(left);
+  const b = count(right);
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
+  }
+  return true;
+}
+
+
+export async function listSavedWorkerLayouts(targets, {
+  connect = targetId => CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId }),
+} = {}) {
+  const target = (targets || [])[0];
+  if (!target?.id) return [];
+
+  let client = null;
+  try {
+    client = await connect(target.id);
+    await client.Runtime.enable();
+    const layouts = await evaluateValue(client, `
+      new Promise(function(resolve) {
+        var settled = false;
+        function finish(value) {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        }
+        try {
+          var api = window.TradingViewApi;
+          if (!api || typeof api.getSavedCharts !== 'function') {
+            finish({ error: 'getSavedCharts unavailable' });
+            return;
+          }
+          api.getSavedCharts(function(charts) {
+            finish((charts || []).map(function(item) {
+              return {
+                id: item.id || item.chartId || null,
+                name: String(item.name || item.title || ''),
+                url: item.url || item.image_url || null
+              };
+            }));
+          });
+          setTimeout(function() { finish({ error: 'getSavedCharts timed out' }); }, 3000);
+        } catch(e) {
+          finish({ error: e.message });
+        }
+      })
+    `, { awaitPromise: true });
+
+    if (Array.isArray(layouts)) return layouts;
+    throw new Error('Saved-layout lookup failed: ' + (layouts?.error || 'unknown response'));
+  } finally {
+    try { if (client) await client.close(); } catch { /* best effort */ }
+  }
+}
+
+export function partialSavedLayoutRecovery(state, inspectedTargets, savedLayouts) {
+  const liveByChart = new Map();
+  const chartCounts = countChartIds(inspectedTargets || []);
+  for (const item of inspectedTargets || []) {
+    if (
+      item?.chart_id
+      && item?.target_id
+      && chartCounts.get(String(item.chart_id)) === 1
+    ) {
+      liveByChart.set(String(item.chart_id), item);
+    }
+  }
+
+  const savedByName = new Map();
+  for (const layout of savedLayouts || []) {
+    const name = String(layout?.name || '').trim().toLowerCase();
+    const url = String(layout?.url || '').trim();
+    if (!name || !url) continue;
+    savedByName.set(name, { ...layout, url });
+  }
+
+  const bySlot = new Map();
+  const targetIds = new Set();
+
+  for (const tab of state?.worker_tabs || []) {
+    if (tab?.persistent_layout === true) continue;
+    const name = String(tab?.layout_name || '').trim().toLowerCase();
+    if (!name) continue;
+
+    const saved = savedByName.get(name);
+    if (!saved) continue;
+
+    const live = liveByChart.get(String(saved.url));
+    if (!live) continue;
+    if (
+      Number(tab?.pane_count || 0) > 0
+      && Number(live?.pane_count || 0) !== Number(tab.pane_count)
+    ) continue;
+
+    const slot = Number(tab.slot);
+    bySlot.set(slot, live);
+    targetIds.add(String(live.target_id));
+  }
+
+  return { bySlot, targetIds };
+}
+
+export function persistentWorkerRecovery(state, topology, byHandle, inspectedTargets) {
+  const ownedBySlot = workerTabMap(state);
+  const bySlot = new Map();
+  const duplicatesBySlot = new Map();
+  const targetIds = new Set();
+  const pendingSlots = new Set();
+  const conflicts = [];
+
+  for (const plan of topology?.tabs || []) {
+    const slot = Number(plan.tab_index);
+    const owned = ownedBySlot.get(slot);
+    if (!owned?.persistent_layout || !owned?.chart_id) continue;
+
+    const candidates = (inspectedTargets || []).filter(item =>
+      item?.chart_id && String(item.chart_id) === String(owned.chart_id)
+    );
+    if (!candidates.length) continue;
+
+    const entries = (plan.handles || []).map(handle => byHandle.get(handle));
+    const matching = candidates.filter(item =>
+      Number(item?.pane_count || 0) === Number(plan.pane_count)
+      && Array.isArray(item?.panes)
+      && entries.every((entry, index) => entry && paneMatchesEntry(entry, item.panes[index]))
+    ).sort((a, b) => String(a.target_id).localeCompare(String(b.target_id)));
+
+    if (!matching.length) {
+      conflicts.push({
+        slot,
+        chart_id: owned.chart_id,
+        candidate_target_ids: candidates.map(item => item.target_id),
+      });
+      continue;
+    }
+
+    const selected = matching[0];
+    const duplicates = matching.slice(1);
+    bySlot.set(slot, selected);
+    targetIds.add(String(selected.target_id));
+    for (const item of duplicates) targetIds.add(String(item.target_id));
+    if (duplicates.length) duplicatesBySlot.set(slot, duplicates);
+
+    if (
+      String(owned.target_id || '') !== String(selected.target_id || '')
+      || duplicates.length > 0
+    ) {
+      pendingSlots.add(slot);
+    }
+  }
+
+  return { bySlot, duplicatesBySlot, targetIds, pendingSlots, conflicts };
+}
+
+export function legacyDirectWorkerRecovery(state, inspectedTargets) {
+  const tabs = (state?.worker_tabs || []).filter(tab =>
+    tab?.chart_id && tab?.persistent_layout !== true
+  );
+  const tabGroups = new Map();
+  for (const tab of tabs) {
+    const chartId = String(tab.chart_id);
+    if (!tabGroups.has(chartId)) tabGroups.set(chartId, []);
+    tabGroups.get(chartId).push(tab);
+  }
+
+  const liveGroups = new Map();
+  for (const target of inspectedTargets || []) {
+    if (!target?.chart_id || !target?.target_id) continue;
+    const chartId = String(target.chart_id);
+    if (!liveGroups.has(chartId)) liveGroups.set(chartId, []);
+    liveGroups.get(chartId).push(target);
+  }
+
+  const bySlot = new Map();
+  const targetIds = new Set();
+  const groups = [];
+
+  for (const [chartId, recorded] of tabGroups) {
+    const live = liveGroups.get(chartId) || [];
+    if (live.length !== recorded.length) continue;
+    if (!sameNumberMultiset(
+      recorded.map(tab => tab.pane_count),
+      live.map(target => target.pane_count),
+    )) continue;
+
+    const sortedRecorded = [...recorded].sort((a, b) => Number(a.slot) - Number(b.slot));
+    const sortedLive = [...live].sort((a, b) =>
+      String(a.target_id).localeCompare(String(b.target_id))
+    );
+
+    for (let index = 0; index < sortedRecorded.length; index++) {
+      const slot = Number(sortedRecorded[index].slot);
+      const target = sortedLive[index];
+      bySlot.set(slot, target);
+      targetIds.add(String(target.target_id));
+    }
+
+    groups.push({
+      chart_id: chartId,
+      slots: sortedRecorded.map(tab => Number(tab.slot)),
+      target_count: sortedLive.length,
+    });
+  }
+
+  return { bySlot, targetIds, groups };
 }
 
 export function recordedTabComplete(
@@ -79,18 +329,17 @@ export function recordedTabComplete(
   const tabs = workerTabMap(state);
   const entries = entryMap(state);
   const owned = tabs.get(Number(plan.tab_index));
-  const ownedKey = ownedRuntimeKey(owned);
-  if (!ownedKey || !liveRuntimeKeys.has(ownedKey)) return false;
+  const ownedKey = runtimeKeys(owned).find(key => liveRuntimeKeys.has(key)) || null;
+  if (!ownedKey) return false;
 
   const live = liveByRuntimeKey?.get?.(ownedKey) || null;
 
   return plan.handles.every((handle, paneIndex) => {
     const entry = entries.get(handle);
     const assignment = entry?.assignment;
-    const assignmentKey = ownedRuntimeKey(assignment);
     const assignmentMatches = assignment
       && Number(assignment.worker_slot) === Number(plan.tab_index)
-      && assignmentKey === ownedKey
+      && runtimeKeys(assignment).includes(ownedKey)
       && Number(assignment.pane_index) === paneIndex;
 
     if (!assignmentMatches) return false;
@@ -433,9 +682,194 @@ async function findTargetForOwned(owned, targets = null, listTargets = listTradi
     if (byTarget) return byTarget;
   }
   if (owned?.chart_id) {
-    return available.find(target => String(chartIdFromTarget(target)) === String(owned.chart_id)) || null;
+    const byChart = available.filter(
+      target => String(chartIdFromTarget(target)) === String(owned.chart_id)
+    );
+    if (byChart.length === 1) return byChart[0];
   }
   return null;
+}
+
+export async function cloneTargetAsLayout(target, name, {
+  connect = targetId => CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId }),
+  listTargets = listTradingViewChartTargets,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  timeoutMs = 8000,
+  findSavedLayout,
+} = {}) {
+  if (!target?.id) throw new Error('CDP target id is required to clone a worker layout');
+  const desiredName = String(name || '').trim();
+  if (!desiredName) throw new Error('Worker layout name is required');
+  const desiredLiteral = JSON.stringify(desiredName);
+
+  let client = null;
+  let dialogOpened = false;
+
+  const readSavedLayout = findSavedLayout || (async (activeClient, layoutName) => {
+    const literal = JSON.stringify(String(layoutName));
+    return evaluateValue(activeClient, `
+      new Promise(function(resolve) {
+        var settled = false;
+        function finish(value) {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        }
+        try {
+          var api = window.TradingViewApi;
+          if (!api || typeof api.getSavedCharts !== 'function') {
+            finish({ error: 'getSavedCharts unavailable' });
+            return;
+          }
+          api.getSavedCharts(function(charts) {
+            var wanted = ${literal}.toLowerCase();
+            var match = null;
+            for (var i = 0; i < (charts || []).length; i++) {
+              var item = charts[i] || {};
+              var itemName = String(item.name || item.title || '');
+              if (itemName.toLowerCase() === wanted) {
+                match = {
+                  id: item.id || item.chartId || null,
+                  name: itemName,
+                  url: item.url || item.image_url || null
+                };
+                break;
+              }
+            }
+            finish(match);
+          });
+          setTimeout(function() { finish({ error: 'getSavedCharts timed out' }); }, 3000);
+        } catch(e) {
+          finish({ error: e.message });
+        }
+      })
+    `, { awaitPromise: true });
+  });
+
+  const findLiveSavedTarget = async saved => {
+    if (!saved?.url) return null;
+    const targets = await listTargets();
+    return targets.find(item => String(chartIdFromTarget(item)) === String(saved.url)) || null;
+  };
+
+  try {
+    client = await connect(target.id);
+    await client.Runtime.enable();
+
+    // Retry/resume path: Save As may already have completed on a previous
+    // attempt even if the caller timed out before ownership was journaled.
+    let saved = await readSavedLayout(client, desiredName);
+    if (saved?.error) throw new Error('Saved-layout lookup failed: ' + saved.error);
+    if (saved?.url) {
+      const existingTarget = await findLiveSavedTarget(saved);
+      if (existingTarget) return existingTarget;
+    }
+
+    const opened = await evaluateValue(client, `
+      (function() {
+        var api = window.TradingViewApi;
+        if (!api || typeof api.showSaveAsChartDialog !== 'function') {
+          return { success: false, error: 'showSaveAsChartDialog unavailable' };
+        }
+        api.showSaveAsChartDialog();
+        return { success: true };
+      })()
+    `);
+    if (!opened?.success) throw new Error(opened?.error || 'Could not open Save As dialog');
+    dialogOpened = true;
+
+    const deadline = Date.now() + Number(timeoutMs);
+    let filled = false;
+    do {
+      filled = await evaluateValue(client, `
+        (function() {
+          var desired = ${desiredLiteral};
+          var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [class*="dialog"], [class*="popupDialog"]'));
+          for (var di = dialogs.length - 1; di >= 0; di--) {
+            var dialog = dialogs[di];
+            var buttons = Array.from(dialog.querySelectorAll('button'));
+            var copy = buttons.find(function(button) {
+              return (button.textContent || '').trim().toLowerCase() === 'make copy';
+            });
+            var input = dialog.querySelector('input[type="text"], input:not([type])');
+            if (!copy || !input) continue;
+
+            var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+            setter.call(input, desired);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }
+          return false;
+        })()
+      `);
+      if (filled) break;
+      if (Date.now() >= deadline) break;
+      await wait(100);
+    } while (true);
+    if (!filled) throw new Error('TradingView Save As dialog did not expose its layout-name input');
+
+    const clicked = await evaluateValue(client, `
+      (function() {
+        var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [class*="dialog"], [class*="popupDialog"]'));
+        for (var di = dialogs.length - 1; di >= 0; di--) {
+          var dialog = dialogs[di];
+          var copy = Array.from(dialog.querySelectorAll('button')).find(function(button) {
+            return (button.textContent || '').trim().toLowerCase() === 'make copy';
+          });
+          if (copy && !copy.disabled) {
+            copy.click();
+            return true;
+          }
+        }
+        return false;
+      })()
+    `);
+    if (!clicked) throw new Error('TradingView Make copy button was not available');
+    dialogOpened = false;
+
+    // Desktop 3.4.x keeps the source tab on the old layout and opens the
+    // newly-saved copy as a distinct chart target. Verify the saved layout via
+    // getSavedCharts and discover that new target by the layout's URL token.
+    let lastSaved = null;
+    do {
+      await wait(150);
+      lastSaved = await readSavedLayout(client, desiredName);
+      if (lastSaved?.error) throw new Error('Saved-layout lookup failed: ' + lastSaved.error);
+      if (lastSaved?.url) {
+        const savedTarget = await findLiveSavedTarget(lastSaved);
+        if (savedTarget) return savedTarget;
+      }
+      if (Date.now() >= deadline) break;
+    } while (true);
+
+    throw new Error(
+      'TradingView saved layout was not discoverable as a chart target: ' +
+      JSON.stringify({ desired_name: desiredName, saved_layout: lastSaved }),
+    );
+  } catch (error) {
+    if (client && dialogOpened) {
+      try {
+        await evaluateValue(client, `
+          (function() {
+            var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [class*="dialog"], [class*="popupDialog"]'));
+            for (var di = dialogs.length - 1; di >= 0; di--) {
+              var dialog = dialogs[di];
+              var cancel = Array.from(dialog.querySelectorAll('button')).find(function(button) {
+                var text = (button.textContent || '').trim().toLowerCase();
+                return text === 'cancel' || text === 'close';
+              });
+              if (cancel) { cancel.click(); return true; }
+            }
+            return false;
+          })()
+        `);
+      } catch { /* best effort */ }
+    }
+    throw error;
+  } finally {
+    try { if (client) await client.close(); } catch { /* best effort */ }
+  }
 }
 
 export async function inspectTargetPaneCounts(targets) {
@@ -469,35 +903,131 @@ async function openOrCreateWorkerTab({
   layoutPrefix,
   deps,
   liveTargets,
+  legacyTarget = null,
+  preferredTarget = null,
 }) {
   const newTabOptions = {
     landing_timeout_ms: 4000,
     chart_timeout_ms: 8000,
   };
+  const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
+
+  if (legacyTarget) {
+    const liveLegacy = (liveTargets || []).find(
+      target => String(target.id) === String(legacyTarget.target_id)
+    );
+    if (!liveLegacy) {
+      throw new Error(
+        'Legacy worker target ' + String(legacyTarget.target_id || '') +
+        ' was not discoverable for in-place layout cloning'
+      );
+    }
+    const cloned = await deps.cloneTargetAsLayout(liveLegacy, desiredName);
+    return {
+      target: cloned,
+      layoutName: desiredName,
+      reused: false,
+      openedThisCall: true,
+      directChart: false,
+      persistentLayout: true,
+    };
+  }
+
+  if (preferredTarget?.target_id) {
+    const livePreferred = (liveTargets || []).find(
+      target => String(target.id) === String(preferredTarget.target_id)
+    );
+    if (livePreferred) {
+      return {
+        target: livePreferred,
+        layoutName: desiredName,
+        reused: true,
+        openedThisCall: false,
+        directChart: false,
+        persistentLayout: true,
+      };
+    }
+  }
 
   if (owned?.target_id || owned?.chart_id) {
     const live = await findTargetForOwned(owned, liveTargets);
     if (live) {
       return {
         target: live,
-        layoutName: owned.layout_name,
+        layoutName: desiredName,
         reused: true,
         openedThisCall: false,
-        directChart: true,
+        directChart: owned?.persistent_layout !== true,
+        persistentLayout: owned?.persistent_layout === true,
       };
     }
   }
 
-  const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
+  if (owned?.persistent_layout === true && desiredName) {
+    // Registry chart_id is the canonical persistent worker identity. Prefer it
+    // directly so cold-start recovery does not depend on getSavedCharts being
+    // available from an already-open chart target.
+    let savedChartId = owned?.chart_id ? String(owned.chart_id).trim() : '';
 
-  // Worker provisioning only needs a dedicated chart target. Do not depend on
-  // TradingView's saved-layout picker UI; open a new Desktop tab and navigate
-  // its known new-tab target directly to /chart/.
-  let created;
+    if (!savedChartId) {
+      const savedLayouts = await deps.listSavedLayouts(liveTargets);
+      const exact = (savedLayouts || []).filter(layout =>
+        String(layout?.name || '').trim().toLowerCase() === desiredName.toLowerCase()
+        && String(layout?.url || '').trim()
+      );
+
+      if (exact.length === 1) {
+        savedChartId = String(exact[0].url);
+      } else if (exact.length > 1) {
+        throw new Error(
+          'Worker saved-layout reopen is ambiguous for "' + desiredName + '": ' +
+          exact.map(layout => String(layout.url)).join(', ')
+        );
+      }
+    }
+
+    if (savedChartId) {
+      try {
+        const reopened = await deps.newTab({
+          as_chart: true,
+          chart_id: savedChartId,
+          force_new_tab: true,
+          ...newTabOptions,
+        });
+        if (String(reopened.chart_id || '') !== savedChartId) {
+          throw new Error(
+            'Exact saved-layout navigation returned chart ' + String(reopened.chart_id || '') +
+            ' instead of ' + savedChartId
+          );
+        }
+        const target = await findTargetForOwned(
+          { target_id: reopened.target_id, chart_id: reopened.chart_id },
+          null,
+          deps.listTargets,
+        );
+        if (!target) throw new Error('Reopened worker saved-layout target was not discoverable');
+        return {
+          target,
+          layoutName: desiredName,
+          reused: reopened.reused_existing_target === true || reopened.reused_existing_tab === true,
+          openedThisCall: reopened.reused_existing_target !== true,
+          directChart: false,
+          persistentLayout: true,
+        };
+      } catch (error) {
+        throw new Error(
+          'Worker saved-layout direct reopen failed for "' + desiredName + '": ' +
+          (error?.message || String(error)),
+        );
+      }
+    }
+  }
+
+  let created = null;
   try {
     created = await deps.newTab({
       as_chart: true,
-      force_new_tab: true,
+      force_new_tab: owned?.persistent_layout !== true,
       ...newTabOptions,
     });
   } catch (error) {
@@ -507,24 +1037,89 @@ async function openOrCreateWorkerTab({
     );
   }
 
-  const target = await findTargetForOwned(
+  const directTarget = await findTargetForOwned(
     { target_id: created.target_id, chart_id: created.chart_id },
     null,
     deps.listTargets,
   );
-  if (!target) throw new Error('New worker chart target was not discoverable after direct navigation');
+  if (!directTarget) throw new Error('New worker chart target was not discoverable after direct navigation');
 
-  return {
-    target,
-    layoutName: desiredName,
-    reused: false,
-    openedThisCall: true,
-    directChart: true,
-  };
+  try {
+    const cloned = await deps.cloneTargetAsLayout(directTarget, desiredName);
+    return {
+      target: cloned,
+      layoutName: desiredName,
+      reused: false,
+      openedThisCall: true,
+      directChart: false,
+      persistentLayout: true,
+    };
+  } catch (error) {
+    try {
+      await deps.closeTabByOwned({
+        target_id: directTarget.id,
+        chart_id: chartIdFromTarget(directTarget),
+      });
+    } catch { /* best effort: close only the DTV-created direct chart */ }
+    throw new Error(
+      'Worker chart persistence failed for "' + desiredName + '": ' +
+      (error?.message || String(error)),
+    );
+  }
+}
+
+export async function closeWorkerTargetGracefully(targetId, {
+  connect = id => CDP({ host: CDP_HOST, port: CDP_PORT, target: id }),
+  listTargets = listTradingViewChartTargets,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  timeoutMs = 900,
+} = {}) {
+  const id = String(targetId || '').trim();
+  if (!id) return false;
+
+  let client = null;
+  try {
+    client = await connect(id);
+
+    // Prefer renderer/page-level close semantics so TradingView Desktop's
+    // Electron shell receives a normal tab-close lifecycle and can remove the
+    // visual tab instead of retaining an orphaned spinner shell.
+    try {
+      await client.Runtime.enable();
+      await client.Runtime.evaluate({
+        expression: 'window.close(); true',
+        returnByValue: true,
+      });
+    } catch {
+      // Some restored tabs reject window.close(); Page.close is the next
+      // graceful option before falling back to Target.closeTarget.
+      try {
+        if (client.Page?.enable) await client.Page.enable();
+        if (client.Page?.close) await client.Page.close();
+      } catch {
+        // Caller will use hard target close if this target remains live.
+      }
+    }
+  } catch {
+    return false;
+  } finally {
+    try { if (client) await client.close(); } catch { /* target may already be gone */ }
+  }
+
+  const deadline = Date.now() + Number(timeoutMs);
+  do {
+    const remaining = await listTargets();
+    if (!remaining.some(target => String(target.id) === id)) return true;
+    if (Date.now() >= deadline) break;
+    await wait(75);
+  } while (true);
+
+  return false;
 }
 
 export async function closeTabByOwned(owned, {
   listTargets = listTradingViewChartTargets,
+  gracefulCloseTarget = targetId => closeWorkerTargetGracefully(targetId, { listTargets }),
   closeTarget = targetId => CDP.Close({ host: CDP_HOST, port: CDP_PORT, id: targetId }),
   listTabs = tabCore.list,
   switchTab = tabCore.switchTab,
@@ -540,13 +1135,23 @@ export async function closeTabByOwned(owned, {
       return { success: true, closed: false, reason: 'already_absent', target_id: targetId };
     }
 
+    const gracefullyClosed = await gracefulCloseTarget(targetId);
+    if (gracefullyClosed) {
+      return {
+        success: true,
+        closed: true,
+        via: 'renderer_close',
+        target_id: targetId,
+      };
+    }
+
     await closeTarget(targetId);
 
     const deadline = Date.now() + Number(timeoutMs);
     do {
       const remaining = await listTargets();
       if (!remaining.some(target => String(target.id) === targetId)) {
-        return { success: true, closed: true, via: 'target_id', target_id: targetId };
+        return { success: true, closed: true, via: 'target_id_fallback', target_id: targetId };
       }
       if (Date.now() >= deadline) break;
       await wait(100);
@@ -578,6 +1183,51 @@ export async function closeTabByOwned(owned, {
   return closeTab();
 }
 
+export async function settlePersistentWorkerRestore(state, initialTargets, {
+  listTargets,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  now = () => Date.now(),
+  timeoutMs = 6000,
+  pollMs = 250,
+} = {}) {
+  const persistent = (state?.worker_tabs || []).filter(tab =>
+    tab?.persistent_layout === true && tab?.chart_id
+  );
+  if (!persistent.length || typeof listTargets !== 'function') return initialTargets || [];
+
+  const initial = initialTargets || [];
+  const liveTargetIds = new Set(initial.map(target => String(target.id || '')));
+  const recordedTargetIds = persistent
+    .map(tab => String(tab.target_id || ''))
+    .filter(Boolean);
+
+  // If at least one recorded target is still alive, this is an ordinary
+  // reconciliation inside the same Desktop session, not a restart restore.
+  if (recordedTargetIds.some(id => liveTargetIds.has(id))) return initial;
+
+  const wantedChartIds = new Set(persistent.map(tab => String(tab.chart_id)));
+  const presentCount = targets => {
+    const seen = new Set(
+      (targets || [])
+        .map(chartIdFromTarget)
+        .filter(chartId => chartId && wantedChartIds.has(String(chartId)))
+        .map(String)
+    );
+    return seen.size;
+  };
+
+  let latest = initial;
+  if (presentCount(latest) >= wantedChartIds.size) return latest;
+
+  const deadline = now() + Number(timeoutMs);
+  while (now() < deadline) {
+    await wait(Math.min(Number(pollMs), Math.max(1, deadline - now())));
+    latest = await listTargets();
+    if (presentCount(latest) >= wantedChartIds.size) break;
+  }
+  return latest;
+}
+
 export async function provisionWorker({
   max_tabs = 1,
   max_panes = 1,
@@ -600,18 +1250,46 @@ export async function provisionWorker({
   let state = deps.status();
   const topology = state.topology_plan;
   const byHandle = entryMap(state);
-  const liveTargets = await deps.listTargets();
+  let liveTargets = await deps.listTargets();
+  liveTargets = await settlePersistentWorkerRestore(state, liveTargets, {
+    listTargets: deps.listTargets,
+    wait: deps.wait,
+    now: deps.now,
+  });
   const inspectedTargets = await deps.inspectTargets(liveTargets);
-  const ownedRuntimeKeys = new Set(
-    (state.worker_tabs || []).map(ownedRuntimeKey).filter(Boolean),
+  const liveChartCounts = countChartIds(inspectedTargets);
+  const ownedRuntimeKeys = stableOwnedRuntimeKeys(state.worker_tabs || []);
+  const legacyRecovery = legacyDirectWorkerRecovery(state, inspectedTargets);
+  const persistentRecovery = persistentWorkerRecovery(
+    state,
+    topology,
+    byHandle,
+    inspectedTargets,
   );
+  let partialSavedRecovery = { bySlot: new Map(), targetIds: new Set() };
+
+  if (legacyRecovery.bySlot.size > 0) {
+    const savedLayouts = await deps.listSavedLayouts(liveTargets);
+    partialSavedRecovery = partialSavedLayoutRecovery(
+      state,
+      inspectedTargets,
+      savedLayouts,
+    );
+  }
 
   let externalTargets = inspectedTargets.filter(item => {
     const targetKey = item.target_id ? 'target:' + String(item.target_id) : null;
     const chartKey = item.chart_id ? 'chart:' + String(item.chart_id) : null;
     return !(
       (targetKey && ownedRuntimeKeys.has(targetKey))
-      || (chartKey && ownedRuntimeKeys.has(chartKey))
+      || (
+        chartKey
+        && ownedRuntimeKeys.has(chartKey)
+        && liveChartCounts.get(String(item.chart_id)) === 1
+      )
+      || (item.target_id && persistentRecovery.targetIds.has(String(item.target_id)))
+      || (item.target_id && legacyRecovery.targetIds.has(String(item.target_id)))
+      || (item.target_id && partialSavedRecovery.targetIds.has(String(item.target_id)))
     );
   });
   let adoptionCandidate = null;
@@ -658,16 +1336,27 @@ export async function provisionWorker({
       liveRuntimeKeys.add(key);
       liveByRuntimeKey.set(key, item);
     }
-    if (item.chart_id) {
+    if (item.chart_id && liveChartCounts.get(String(item.chart_id)) === 1) {
       const key = 'chart:' + String(item.chart_id);
       liveRuntimeKeys.add(key);
-      if (!liveByRuntimeKey.has(key)) liveByRuntimeKey.set(key, item);
+      liveByRuntimeKey.set(key, item);
     }
   }
+
+  for (const [slot, item] of persistentRecovery.bySlot) {
+    const owned = (state.worker_tabs || []).find(tab => Number(tab.slot) === Number(slot));
+    if (!owned?.chart_id) continue;
+    const key = 'chart:' + String(owned.chart_id);
+    liveRuntimeKeys.add(key);
+    liveByRuntimeKey.set(key, item);
+  }
+
   const ownedBySlot = workerTabMap(state);
 
   const pending = topology.tabs.filter(plan =>
-    force || !recordedTabComplete(plan, state, liveRuntimeKeys, liveByRuntimeKey)
+    force
+    || persistentRecovery.pendingSlots.has(Number(plan.tab_index))
+    || !recordedTabComplete(plan, state, liveRuntimeKeys, liveByRuntimeKey)
   );
 
   const staleOwned = (state.worker_tabs || []).filter(tab =>
@@ -690,6 +1379,22 @@ export async function provisionWorker({
         projected_connections: projectedConnections,
       },
       adoption_candidate: adoptionCandidate,
+      legacy_direct_recovery: {
+        groups: legacyRecovery.groups,
+        slots: [...legacyRecovery.bySlot.keys()].sort((a, b) => a - b),
+      },
+      partial_saved_layout_recovery: {
+        slots: [...partialSavedRecovery.bySlot.keys()].sort((a, b) => a - b),
+        target_ids: [...partialSavedRecovery.targetIds],
+      },
+      persistent_layout_recovery: {
+        slots: [...persistentRecovery.bySlot.keys()].sort((a, b) => a - b),
+        pending_slots: [...persistentRecovery.pendingSlots].sort((a, b) => a - b),
+        duplicate_target_ids: [...persistentRecovery.duplicatesBySlot.values()]
+          .flat()
+          .map(item => item.target_id),
+        conflicts: persistentRecovery.conflicts,
+      },
     };
   }
 
@@ -710,8 +1415,8 @@ export async function provisionWorker({
       const layoutPrefix = layout_prefix || process.env.TV_WORKER_LAYOUT_PREFIX || 'DTV Worker';
       let owned = ownedBySlot.get(slot) || null;
       // Journal deterministic worker ownership intent before opening
-      // TradingView. The technical name is metadata only; worker creation no
-      // longer depends on a saved TradingView layout.
+      // TradingView. The technical name is also the saved-layout identity for
+      // restart-stable worker tabs.
       if (!owned) {
         owned = {
           slot,
@@ -729,13 +1434,39 @@ export async function provisionWorker({
         state = deps.record({ worker_tabs: intentTabs });
       }
 
+      const legacyTarget = legacyRecovery.bySlot.get(slot) || null;
+      if (legacyTarget) stage = 'clone_legacy_layout';
+
       const opened = await openOrCreateWorkerTab({
         plan,
         owned,
         layoutPrefix,
         deps,
         liveTargets: await deps.listTargets(),
+        legacyTarget,
+        preferredTarget: persistentRecovery.bySlot.get(slot) || null,
       });
+
+      const duplicateTargets = persistentRecovery.duplicatesBySlot.get(slot) || [];
+      for (const duplicate of duplicateTargets) {
+        if (String(duplicate.target_id) === String(opened.target.id)) continue;
+        stage = 'dedupe_persistent_targets';
+        await deps.closeTabByOwned({
+          target_id: duplicate.target_id,
+          chart_id: duplicate.chart_id,
+        });
+      }
+
+      if (
+        legacyTarget?.target_id
+        && String(opened.target.id) !== String(legacyTarget.target_id)
+      ) {
+        stage = 'retire_legacy_direct_tab';
+        await deps.closeTabByOwned({
+          target_id: legacyTarget.target_id,
+          chart_id: legacyTarget.chart_id,
+        });
+      }
 
       const openDurationMs = Date.now() - started;
       const chartId = chartIdFromTarget(opened.target);
@@ -748,6 +1479,7 @@ export async function provisionWorker({
           chart_id: chartId,
           layout_name: opened.layoutName,
           pane_count: plan.pane_count,
+          persistent_layout: opened.persistentLayout === true,
         },
       ].sort((a, b) => Number(a.slot) - Number(b.slot));
 
@@ -773,6 +1505,8 @@ export async function provisionWorker({
           pane_count: plan.pane_count,
           reused: opened.reused,
           direct_chart: !!opened.directChart,
+          persistent_layout: opened.persistentLayout === true,
+          legacy_replaced: !!legacyTarget,
           pending_panes: entries.map((_, index) => index),
           open_duration_ms: openDurationMs,
           duration_ms: Date.now() - started,
@@ -861,16 +1595,17 @@ export async function provisionWorker({
   const afterInspected = await deps.inspectTargets(afterTargets);
   const afterRuntimeKeys = new Set();
   const afterByRuntimeKey = new Map();
+  const afterChartCounts = countChartIds(afterInspected);
   for (const item of afterInspected) {
     if (item.target_id) {
       const key = 'target:' + String(item.target_id);
       afterRuntimeKeys.add(key);
       afterByRuntimeKey.set(key, item);
     }
-    if (item.chart_id) {
+    if (item.chart_id && afterChartCounts.get(String(item.chart_id)) === 1) {
       const key = 'chart:' + String(item.chart_id);
       afterRuntimeKeys.add(key);
-      if (!afterByRuntimeKey.has(key)) afterByRuntimeKey.set(key, item);
+      afterByRuntimeKey.set(key, item);
     }
   }
   const recordedRemaining = state.topology_plan.tabs.filter(plan =>
@@ -909,7 +1644,30 @@ export async function provisionWorker({
     }
   }
 
-  const cleanupComplete = cleanup.every(item => item.success);
+  let shell_cleanup = null;
+  if (
+    force
+    && remaining.length === 0
+    && cleanup.every(item => item.success)
+    && externalConnections === 0
+  ) {
+    try {
+      shell_cleanup = await deps.cleanupOrphanShellTabs({
+        keep_target_ids: (state.worker_tabs || [])
+          .filter(tab => Number(tab.slot) < Number(state.topology_plan.tab_count))
+          .map(tab => tab.target_id)
+          .filter(Boolean),
+      });
+    } catch (error) {
+      shell_cleanup = {
+        success: false,
+        error: error?.message || String(error),
+      };
+    }
+  }
+
+  const cleanupComplete = cleanup.every(item => item.success)
+    && (shell_cleanup == null || shell_cleanup.success === true);
 
   return {
     success: results.every(result => result.success) && cleanupComplete,
@@ -918,6 +1676,7 @@ export async function provisionWorker({
     remaining_tabs: remaining.map(plan => plan.tab_index),
     results,
     cleanup,
+    shell_cleanup,
     capacity_projection: {
       capacity: state.capacity,
       reserve_slots: state.reserve_slots,

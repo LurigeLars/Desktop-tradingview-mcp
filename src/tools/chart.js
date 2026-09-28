@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/chart.js';
+import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerChartTools(server) {
   server.tool('chart_get_state', 'Get current chart state (symbol, timeframe, chart type, indicators)', {}, async () => {
@@ -11,21 +12,21 @@ export function registerChartTools(server) {
   server.tool('chart_set_symbol', 'Change the chart symbol', {
     symbol: z.string().describe('Symbol to set (e.g., BTCUSD, AAPL, ES1!, NYMEX:CL1!)'),
   }, async ({ symbol }) => {
-    try { return jsonResult(await core.setSymbol({ symbol })); }
+    try { return jsonResult(await withTopologyMutationLock('chart_set_symbol', () => core.setSymbol({ symbol }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
   server.tool('chart_set_timeframe', 'Change the chart timeframe/resolution', {
     timeframe: z.string().describe('Timeframe (e.g., 1, 5, 15, 60, D, W, M)'),
   }, async ({ timeframe }) => {
-    try { return jsonResult(await core.setTimeframe({ timeframe })); }
+    try { return jsonResult(await withTopologyMutationLock('chart_set_timeframe', () => core.setTimeframe({ timeframe }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
   server.tool('chart_set_type', 'Change chart type', {
     chart_type: z.string().describe('Chart type: Bars(0), Candles(1), Line(2), Area(3), Renko(4), Kagi(5), PointAndFigure(6), LineBreak(7), HeikinAshi(8), HollowCandles(9) — pass name or number'),
   }, async ({ chart_type }) => {
-    try { return jsonResult(await core.setType({ chart_type })); }
+    try { return jsonResult(await withTopologyMutationLock('chart_set_type', () => core.setType({ chart_type }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -37,7 +38,10 @@ export function registerChartTools(server) {
   }, async ({ action, indicator, entity_id, inputs }) => {
     try {
       if (action === 'add' && !indicator) throw new Error('indicator name is required for add action.');
-      return jsonResult(await core.manageIndicator({ action, indicator, entity_id, inputs }));
+      return jsonResult(await withTopologyMutationLock(
+        'chart_manage_indicator',
+        () => core.manageIndicator({ action, indicator, entity_id, inputs }),
+      ));
     } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -50,14 +54,14 @@ export function registerChartTools(server) {
     from: z.coerce.number().describe('Start of range (unix timestamp in seconds)'),
     to: z.coerce.number().describe('End of range (unix timestamp in seconds)'),
   }, async ({ from, to }) => {
-    try { return jsonResult(await core.setVisibleRange({ from, to })); }
+    try { return jsonResult(await withTopologyMutationLock('chart_set_visible_range', () => core.setVisibleRange({ from, to }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
   server.tool('chart_scroll_to_date', 'Jump the chart view to center on a specific date', {
     date: z.string().describe('ISO date string (e.g., "2024-01-15") or unix timestamp as a string'),
   }, async ({ date }) => {
-    try { return jsonResult(await core.scrollToDate({ date })); }
+    try { return jsonResult(await withTopologyMutationLock('chart_scroll_to_date', () => core.scrollToDate({ date }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

@@ -4,6 +4,7 @@ import * as core from '../core/health.js';
 import { boundedHealthCheck } from '../core/bounded-health.js';
 import { update } from '../core/update.js';
 import { launchManaged, closeManaged } from '../core/managed-lifecycle.js';
+import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerHealthTools(server) {
   server.registerTool('tv_health_check', {
@@ -41,7 +42,7 @@ export function registerHealthTools(server) {
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
   }, async ({ port, kill_existing }) => {
-    try { return jsonResult(await launchManaged({ port, kill_existing })); }
+    try { return jsonResult(await withTopologyMutationLock('tv_launch', () => launchManaged({ port, kill_existing }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -52,7 +53,7 @@ export function registerHealthTools(server) {
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, async ({ force }) => {
-    try { return jsonResult(await closeManaged({ force })); }
+    try { return jsonResult(await withTopologyMutationLock('tv_close', () => closeManaged({ force }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
