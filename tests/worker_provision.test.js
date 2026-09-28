@@ -540,8 +540,8 @@ test('force provisioning remains resumable and does not report complete early', 
   recordWorkerProvision({
     assignments: initialAssignments,
     worker_tabs: [
-      { slot: 0, chart_id: 'chart-1', layout_name: 'Worker 01', pane_count: 8 },
-      { slot: 1, chart_id: 'chart-2', layout_name: 'Worker 02', pane_count: 2 },
+      { slot: 0, chart_id: 'chart-1', layout_name: 'Worker 01', pane_count: 8, persistent_layout: true },
+      { slot: 1, chart_id: 'chart-2', layout_name: 'Worker 02', pane_count: 2, persistent_layout: true },
     ],
     _deps: store.deps,
   });
