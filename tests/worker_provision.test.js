@@ -4,6 +4,7 @@ import {
   activePaneStates,
   buildWorkerLayoutName,
   closeTabByOwned,
+  closeWorkerTargetGracefully,
   cloneTargetAsLayout,
   layoutCodeForPaneCount,
   legacyDirectWorkerRecovery,
@@ -118,21 +119,24 @@ test('Save As recovery reuses an already-created saved-layout target', async () 
   assert.equal(dialogEvaluated, false);
 });
 
-test('worker cleanup closes the exact owned target without shell switching', async () => {
+test('worker cleanup prefers graceful renderer close for an exact duplicate target', async () => {
   const targets = [
     { id: 'worker-a', url: 'https://www.tradingview.com/chart/shared/' },
     { id: 'worker-b', url: 'https://www.tradingview.com/chart/shared/' },
   ];
+  let hardCloseCalled = false;
   let shellTouched = false;
 
   const result = await closeTabByOwned(
     { target_id: 'worker-a', chart_id: 'shared' },
     {
       listTargets: async () => targets.slice(),
-      closeTarget: async targetId => {
+      gracefulCloseTarget: async targetId => {
         const index = targets.findIndex(target => target.id === targetId);
         if (index >= 0) targets.splice(index, 1);
+        return true;
       },
+      closeTarget: async () => { hardCloseCalled = true; },
       listTabs: async () => { shellTouched = true; throw new Error('shell list must not run'); },
       switchTab: async () => { shellTouched = true; throw new Error('shell switch must not run'); },
       closeTab: async () => { shellTouched = true; throw new Error('shell close must not run'); },
@@ -142,9 +146,64 @@ test('worker cleanup closes the exact owned target without shell switching', asy
 
   assert.equal(result.success, true);
   assert.equal(result.closed, true);
-  assert.equal(result.via, 'target_id');
+  assert.equal(result.via, 'renderer_close');
+  assert.equal(hardCloseCalled, false);
   assert.equal(shellTouched, false);
   assert.deepEqual(targets.map(target => target.id), ['worker-b']);
+});
+
+test('worker cleanup falls back to hard target close when graceful close cannot remove it', async () => {
+  const targets = [
+    { id: 'worker-a', url: 'https://www.tradingview.com/chart/shared/' },
+    { id: 'worker-b', url: 'https://www.tradingview.com/chart/shared/' },
+  ];
+
+  const result = await closeTabByOwned(
+    { target_id: 'worker-a', chart_id: 'shared' },
+    {
+      listTargets: async () => targets.slice(),
+      gracefulCloseTarget: async () => false,
+      closeTarget: async targetId => {
+        const index = targets.findIndex(target => target.id === targetId);
+        if (index >= 0) targets.splice(index, 1);
+      },
+      wait: async () => {},
+    },
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.closed, true);
+  assert.equal(result.via, 'target_id_fallback');
+  assert.deepEqual(targets.map(target => target.id), ['worker-b']);
+});
+
+test('graceful worker close reports success when renderer lifecycle removes the target', async () => {
+  const targets = [{ id: 'worker-a', url: 'https://www.tradingview.com/chart/shared/' }];
+  const evaluated = [];
+  const fakeClient = {
+    Runtime: {
+      enable: async () => {},
+      evaluate: async args => {
+        evaluated.push(args.expression);
+        targets.splice(0, targets.length);
+      },
+    },
+    Page: {
+      enable: async () => {},
+      close: async () => {},
+    },
+    close: async () => {},
+  };
+
+  const result = await closeWorkerTargetGracefully('worker-a', {
+    connect: async () => fakeClient,
+    listTargets: async () => targets.slice(),
+    wait: async () => {},
+    timeoutMs: 100,
+  });
+
+  assert.equal(result, true);
+  assert.match(evaluated[0], /window\.close/);
 });
 
 test('legacy chart-id cleanup fails closed when multiple tabs share the chart id', async () => {
