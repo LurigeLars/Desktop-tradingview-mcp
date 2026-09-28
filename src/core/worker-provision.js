@@ -51,6 +51,7 @@ function resolveDeps(overrides) {
     newTab: overrides?.newTab || tabCore.newTab,
     cloneTargetAsLayout: overrides?.cloneTargetAsLayout || cloneTargetAsLayout,
     closeTabByOwned: overrides?.closeTabByOwned || closeTabByOwned,
+    cleanupOrphanShellTabs: overrides?.cleanupOrphanShellTabs || tabCore.cleanupOrphanShellTabs,
     configureTarget: overrides?.configureTarget || configureTarget,
     inspectTargets: overrides?.inspectTargets || inspectTargetPaneCounts,
     listSavedLayouts: overrides?.listSavedLayouts || listSavedWorkerLayouts,
@@ -1528,7 +1529,30 @@ export async function provisionWorker({
     }
   }
 
-  const cleanupComplete = cleanup.every(item => item.success);
+  let shell_cleanup = null;
+  if (
+    force
+    && remaining.length === 0
+    && cleanup.every(item => item.success)
+    && externalConnections === 0
+  ) {
+    try {
+      shell_cleanup = await deps.cleanupOrphanShellTabs({
+        keep_target_ids: (state.worker_tabs || [])
+          .filter(tab => Number(tab.slot) < Number(state.topology_plan.tab_count))
+          .map(tab => tab.target_id)
+          .filter(Boolean),
+      });
+    } catch (error) {
+      shell_cleanup = {
+        success: false,
+        error: error?.message || String(error),
+      };
+    }
+  }
+
+  const cleanupComplete = cleanup.every(item => item.success)
+    && (shell_cleanup == null || shell_cleanup.success === true);
 
   return {
     success: results.every(result => result.success) && cleanupComplete,
@@ -1537,6 +1561,7 @@ export async function provisionWorker({
     remaining_tabs: remaining.map(plan => plan.tab_index),
     results,
     cleanup,
+    shell_cleanup,
     capacity_projection: {
       capacity: state.capacity,
       reserve_slots: state.reserve_slots,
