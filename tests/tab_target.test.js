@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, withDeadline } from '../src/core/tab.js';
+import { cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, withDeadline } from '../src/core/tab.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
   assert.equal(isChartPageTarget({
@@ -178,6 +178,80 @@ test('worker bootstrap reuses a TradingView startup tab before creating a new ta
   assert.equal(result.target_id, 'home');
   assert.equal(calls[0].navigate, 'home');
   assert.equal(calls[0].url, 'https://www.tradingview.com/chart/abc123/');
+});
+
+test('renderer fallback opens an exact chart target when CDP.New is unavailable', async () => {
+  const target = {
+    id: 'renderer-target',
+    type: 'page',
+    url: 'https://www.tradingview.com/chart/abc123/',
+  };
+  let polls = 0;
+  const evaluations = [];
+  const fakeClient = {
+    Runtime: {
+      enable: async () => {},
+      evaluate: async args => evaluations.push(args.expression),
+    },
+  };
+
+  const result = await openChartViaRenderer('https://www.tradingview.com/chart/abc123/', {
+    getActiveClient: async () => fakeClient,
+    listTargets: async () => {
+      polls += 1;
+      return polls === 1 ? [] : [target];
+    },
+    isReady: async id => id === 'renderer-target',
+    wait: async () => {},
+    timeoutMs: 1000,
+  });
+
+  assert.equal(result.id, 'renderer-target');
+  assert.equal(evaluations.length, 1);
+  assert.match(evaluations[0], /window\.open/);
+  assert.match(evaluations[0], /abc123/);
+});
+
+test('persistent worker falls back to renderer window.open when CDP.New fails', async () => {
+  const calls = [];
+  const nonReusable = [{
+    id: 'internal',
+    type: 'page',
+    title: 'Other',
+    url: 'file:///app/other.html',
+  }];
+
+  const result = await newTab({
+    as_chart: true,
+    chart_id: 'abc123',
+    force_new_tab: true,
+    _deps: {
+      listTargets: async () => nonReusable,
+      wait: async () => {},
+      createDirectChartTarget: async () => {
+        calls.push('cdp_new');
+        throw new Error('Could not create new page');
+      },
+      openChartViaRenderer: async url => {
+        calls.push({ renderer: url });
+        return {
+          id: 'renderer-target',
+          type: 'page',
+          url: 'https://www.tradingview.com/chart/abc123/',
+        };
+      },
+      reconnectTo: async id => calls.push({ reconnect: id }),
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.creation_via, 'renderer_window_open');
+  assert.equal(result.target_id, 'renderer-target');
+  assert.deepEqual(calls, [
+    'cdp_new',
+    { renderer: 'https://www.tradingview.com/chart/abc123/' },
+    { reconnect: 'renderer-target' },
+  ]);
 });
 
 test('persistent exact-token newTab falls back to direct CDP creation when no startup tab is reusable', async () => {
