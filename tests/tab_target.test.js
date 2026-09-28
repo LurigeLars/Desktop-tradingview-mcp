@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, newTab, rankLandingCandidates, rankShellCandidates, withDeadline } from '../src/core/tab.js';
+import { cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, withDeadline } from '../src/core/tab.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
   assert.equal(isChartPageTarget({
@@ -105,13 +105,96 @@ test('direct CDP chart target bootstrap creates and waits for exact target', asy
   assert.equal(seen[0].url, 'https://www.tradingview.com/chart/abc123/');
 });
 
-test('persistent exact-token newTab bypasses the Electron shell on cold start', async () => {
+test('worker bootstrap reuses an asynchronously restored exact chart before creating anything', async () => {
   const calls = [];
+  let polls = 0;
   const result = await newTab({
     as_chart: true,
     chart_id: 'abc123',
     force_new_tab: true,
     _deps: {
+      listTargets: async () => {
+        polls += 1;
+        if (polls < 2) {
+          return [{ id: 'home', type: 'page', url: 'https://www.tradingview.com/' }];
+        }
+        return [{
+          id: 'restored',
+          type: 'page',
+          url: 'https://www.tradingview.com/chart/abc123/',
+        }];
+      },
+      wait: async () => {},
+      createDirectChartTarget: async () => {
+        throw new Error('must not create when TradingView restores the worker');
+      },
+      reconnectTo: async id => calls.push({ reconnect: id }),
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.reused_existing_target, true);
+  assert.equal(result.target_id, 'restored');
+  assert.deepEqual(calls, [{ reconnect: 'restored' }]);
+});
+
+test('worker bootstrap reuses a TradingView startup tab before creating a new target', async () => {
+  const calls = [];
+  const homepage = {
+    id: 'home',
+    type: 'page',
+    title: 'TradingView — Track All Markets',
+    url: 'https://www.tradingview.com/',
+  };
+  const chart = {
+    id: 'home',
+    type: 'page',
+    title: 'Chart',
+    url: 'https://www.tradingview.com/chart/abc123/',
+  };
+
+  const result = await newTab({
+    as_chart: true,
+    chart_id: 'abc123',
+    force_new_tab: true,
+    _deps: {
+      listTargets: async () => [homepage],
+      wait: async () => {},
+      navigateTarget: async (id, url) => calls.push({ navigate: id, url }),
+      waitForChartTarget: async args => {
+        calls.push({ waitForChartTarget: args.landingId });
+        return chart;
+      },
+      createDirectChartTarget: async () => {
+        throw new Error('must reuse the startup tab before CDP.New');
+      },
+      reconnectTo: async id => calls.push({ reconnect: id }),
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.reused_existing_tab, true);
+  assert.equal(result.direct_target_creation, undefined);
+  assert.equal(result.target_id, 'home');
+  assert.equal(calls[0].navigate, 'home');
+  assert.equal(calls[0].url, 'https://www.tradingview.com/chart/abc123/');
+});
+
+test('persistent exact-token newTab falls back to direct CDP creation when no startup tab is reusable', async () => {
+  const calls = [];
+  const nonReusable = [{
+    id: 'internal',
+    type: 'page',
+    title: 'Other',
+    url: 'file:///app/other.html',
+  }];
+  const result = await newTab({
+    as_chart: true,
+    chart_id: 'abc123',
+    force_new_tab: true,
+    _deps: {
+      listTargets: async () => nonReusable,
+      wait: async () => {},
       createDirectChartTarget: async (url, options) => {
         calls.push({ url, options });
         return {
@@ -130,6 +213,26 @@ test('persistent exact-token newTab bypasses the Electron shell on cold start', 
   assert.equal(result.chart_id, 'abc123');
   assert.deepEqual(calls[0].url, 'https://www.tradingview.com/chart/abc123/');
   assert.deepEqual(calls[1], { reconnect: 'cold-target' });
+});
+
+test('only safe TradingView startup pages are eligible for worker bootstrap reuse', () => {
+  const targets = [
+    { id: 'home', type: 'page', url: 'https://www.tradingview.com/' },
+    { id: 'chart', type: 'page', url: 'https://www.tradingview.com/chart/abc/' },
+    { id: 'markets', type: 'page', url: 'https://www.tradingview.com/markets/stocks-usa/' },
+    { id: 'external', type: 'page', url: 'https://example.com/' },
+    { id: 'newtab', type: 'page', url: 'file:///C:/TradingView/resources/app.asar/app/new-tab/index.html' },
+  ];
+
+  assert.equal(isReusableWorkerBootstrapTarget(targets[0]), true);
+  assert.equal(isReusableWorkerBootstrapTarget(targets[1]), false);
+  assert.equal(isReusableWorkerBootstrapTarget(targets[2]), false);
+  assert.equal(isReusableWorkerBootstrapTarget(targets[3]), false);
+  assert.equal(isReusableWorkerBootstrapTarget(targets[4]), true);
+  assert.deepEqual(
+    rankReusableWorkerBootstrapCandidates(targets).map(target => target.id),
+    ['newtab', 'home'],
+  );
 });
 
 test('new CDP targets are preferred over stale title hints', () => {
