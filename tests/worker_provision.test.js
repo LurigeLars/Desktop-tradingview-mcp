@@ -384,6 +384,7 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
 
   let liveTargets = [];
   let chartCounter = 0;
+  let cloneCounter = 0;
   const runtime = {
     status: () => status({ _deps: store.deps }),
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
@@ -395,11 +396,10 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
     })),
     newTab: async args => {
       chartCounter += 1;
-      assert.equal(args.layout, 'new');
-      assert.equal(args.name, 'Worker ' + String(chartCounter).padStart(2, '0'));
+      assert.equal(args.as_chart, true);
       assert.equal(args.force_new_tab, true);
       const targetId = 'target-' + chartCounter;
-      const chartId = 'chart-' + chartCounter;
+      const chartId = 'direct-' + chartCounter;
       liveTargets.push({
         id: targetId,
         type: 'page',
@@ -407,6 +407,14 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
         url: 'https://www.tradingview.com/chart/' + chartId + '/',
       });
       return { success: true, target_id: targetId, chart_id: chartId };
+    },
+    cloneTargetAsLayout: async (target, name) => {
+      cloneCounter += 1;
+      assert.equal(name, 'Worker ' + String(cloneCounter).padStart(2, '0'));
+      const live = liveTargets.find(item => item.id === target.id);
+      assert.ok(live);
+      live.url = 'https://www.tradingview.com/chart/persistent-' + cloneCounter + '/';
+      return live;
     },
     configureTarget: async ({ target, paneCount, entries, maxPanes }) => {
       assert.equal(maxPanes, 1);
@@ -752,37 +760,28 @@ test('legacy shared direct tabs are replaced one at a time with saved layouts', 
     panes: [{ resolved_symbol: 'EX:BBB', resolution: '5', studies: [] }],
   }));
 
-  let created = 0;
+  let cloned = 0;
   const runtime = {
     status: () => status({ _deps: store.deps }),
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
     listTargets: async () => liveTargets,
     inspectTargets,
-    closeTabByOwned: async owned => {
-      const index = liveTargets.findIndex(target => target.id === owned.target_id);
-      assert.notEqual(index, -1);
-      liveTargets.splice(index, 1);
-      return { success: true, closed: true };
+    newTab: async () => {
+      throw new Error('legacy migration must clone the existing tab in place');
     },
-    newTab: async args => {
-      created += 1;
-      assert.equal(args.layout, 'new');
-      assert.equal(args.name, 'Worker 01');
-      assert.equal(args.force_new_tab, true);
-      const target = {
-        id: 'saved-' + created,
-        type: 'page',
-        url: 'https://www.tradingview.com/chart/persistent-' + created + '/',
-      };
-      liveTargets.push(target);
-      return {
-        success: true,
-        target_id: target.id,
-        chart_id: 'persistent-' + created,
-      };
+    cloneTargetAsLayout: async (target, name) => {
+      cloned += 1;
+      assert.equal(name, 'Worker 01');
+      const live = liveTargets.find(item => item.id === target.id);
+      assert.ok(live);
+      live.url = 'https://www.tradingview.com/chart/persistent-' + cloned + '/';
+      return live;
+    },
+    closeTabByOwned: async () => {
+      throw new Error('legacy migration must not close the existing tab before cloning');
     },
     configureTarget: async () => {
-      throw new Error('configureTarget must not run in the replacement tab-open phase');
+      throw new Error('configureTarget must not run in the clone phase');
     },
     now: () => Date.parse('2026-09-28T08:00:00Z'),
   };
@@ -842,8 +841,7 @@ test('persisted worker intent creates a restart-stable saved layout', async () =
     })),
     newTab: async args => {
       newTabCalls += 1;
-      assert.equal(args.layout, 'new');
-      assert.equal(args.name, 'DTV Worker 01');
+      assert.equal(args.as_chart, true);
       assert.equal(args.force_new_tab, true);
       const created = {
         id: 'worker-target',
@@ -852,6 +850,13 @@ test('persisted worker intent creates a restart-stable saved layout', async () =
       };
       liveTargets.push(created);
       return { success: true, target_id: created.id, chart_id: 'worker-chart' };
+    },
+    cloneTargetAsLayout: async (target, name) => {
+      assert.equal(name, 'DTV Worker 01');
+      const live = liveTargets.find(item => item.id === target.id);
+      assert.ok(live);
+      live.url = 'https://www.tradingview.com/chart/persistent-worker/';
+      return live;
     },
     configureTarget: async () => {
       throw new Error('configureTarget must not run in a tab-open phase');
@@ -869,7 +874,7 @@ test('persisted worker intent creates a restart-stable saved layout', async () =
 
   const owned = status({ _deps: store.deps }).worker_tabs[0];
   assert.equal(owned.target_id, 'worker-target');
-  assert.equal(owned.chart_id, 'worker-chart');
+  assert.equal(owned.chart_id, 'persistent-worker');
   assert.equal(owned.layout_name, 'DTV Worker 01');
   assert.equal(owned.persistent_layout, true);
 });
