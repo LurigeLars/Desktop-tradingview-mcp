@@ -16,6 +16,8 @@ const LANDING_PROBE_TIMEOUT_MS = 500;
 const SHELL_OPERATION_TIMEOUT_MS = 6000;
 const CHART_PROBE_TIMEOUT_MS = 750;
 const NEW_TAB_URL_RE = /app\.asar\/app\/new-tab\/index\.html/i;
+const SHELL_TITLE_RE = /tabbed-window/i;
+const SHELL_URL_RE = /\/window\/index\.html/i;
 
 export async function withDeadline(promise, timeoutMs, label = 'Operation') {
   const ms = Number(timeoutMs);
@@ -53,7 +55,27 @@ export function isNewTabPageTarget(target) {
 }
 
 function isShellTarget(target) {
-  return target?.type === 'page' && /\/window\/index\.html/i.test(target.url || '');
+  return target?.type === 'page' && (
+    SHELL_TITLE_RE.test(String(target.title || ''))
+    || SHELL_TITLE_RE.test(String(target.url || ''))
+    || SHELL_URL_RE.test(String(target.url || ''))
+  );
+}
+
+export function rankShellCandidates(targets) {
+  return (targets || [])
+    .filter(isShellTarget)
+    .map((target, index) => {
+      const title = String(target.title || '');
+      const url = String(target.url || '');
+      const score =
+        (SHELL_TITLE_RE.test(title) ? 100 : 0)
+        + (SHELL_TITLE_RE.test(url) ? 50 : 0)
+        + (SHELL_URL_RE.test(url) ? 10 : 0);
+      return { target, index, score };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(item => item.target);
 }
 
 export function rankLandingCandidates(targets, beforeIds = []) {
@@ -127,7 +149,7 @@ export async function list() {
  */
 async function withShell(fn) {
   const targets = await listCdpTargets();
-  const candidates = targets.filter(t => t.type === 'page' && /\/window\/index\.html/i.test(t.url || ''));
+  const candidates = rankShellCandidates(targets);
 
   const failures = [];
   for (const cand of candidates) {
@@ -151,7 +173,7 @@ async function withShell(fn) {
     ? ' Probe failures: ' + JSON.stringify(failures)
     : '';
   throw new Error(
-    'TradingView shell window (tab bar) not found within bounded probes. Is this TradingView Desktop with tabs?' +
+    'TradingView tabbed-window shell target not found within bounded probes. Is this TradingView Desktop with tabs?' +
     detail,
   );
 }
@@ -602,10 +624,23 @@ export async function cleanupOrphanShellTabs({
       (function() {
         var tab = document.querySelectorAll('.tabs-container .tab')[${Number(index)}];
         if (!tab) return false;
-        var close = tab.querySelector('[class*="close"] button')
+        var close = tab.querySelector('.tab-close-button-container button')
+          || tab.querySelector('[class*="close"] button')
           || tab.querySelector('button[class*="close"]')
           || tab.querySelector('[class*="close"]');
         if (!close) return false;
+
+        var key = Object.keys(close).find(function(k){ return k.indexOf('__reactProps') === 0; });
+        if (key && close[key] && typeof close[key].onClick === 'function') {
+          close[key].onClick({
+            preventDefault: function(){},
+            stopPropagation: function(){},
+            currentTarget: close,
+            target: close
+          });
+          return true;
+        }
+
         close.click();
         return true;
       })()
