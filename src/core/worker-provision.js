@@ -53,6 +53,7 @@ function resolveDeps(overrides) {
     closeTabByOwned: overrides?.closeTabByOwned || closeTabByOwned,
     configureTarget: overrides?.configureTarget || configureTarget,
     inspectTargets: overrides?.inspectTargets || inspectTargetPaneCounts,
+    listSavedLayouts: overrides?.listSavedLayouts || listSavedWorkerLayouts,
     now: overrides?.now || (() => Date.now()),
   };
 }
@@ -115,6 +116,101 @@ function sameNumberMultiset(left, right) {
     if (b.get(key) !== value) return false;
   }
   return true;
+}
+
+
+export async function listSavedWorkerLayouts(targets, {
+  connect = targetId => CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId }),
+} = {}) {
+  const target = (targets || [])[0];
+  if (!target?.id) return [];
+
+  let client = null;
+  try {
+    client = await connect(target.id);
+    await client.Runtime.enable();
+    const layouts = await evaluateValue(client, `
+      new Promise(function(resolve) {
+        var settled = false;
+        function finish(value) {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        }
+        try {
+          var api = window.TradingViewApi;
+          if (!api || typeof api.getSavedCharts !== 'function') {
+            finish({ error: 'getSavedCharts unavailable' });
+            return;
+          }
+          api.getSavedCharts(function(charts) {
+            finish((charts || []).map(function(item) {
+              return {
+                id: item.id || item.chartId || null,
+                name: String(item.name || item.title || ''),
+                url: item.url || item.image_url || null
+              };
+            }));
+          });
+          setTimeout(function() { finish({ error: 'getSavedCharts timed out' }); }, 3000);
+        } catch(e) {
+          finish({ error: e.message });
+        }
+      })
+    `, { awaitPromise: true });
+
+    if (Array.isArray(layouts)) return layouts;
+    throw new Error('Saved-layout lookup failed: ' + (layouts?.error || 'unknown response'));
+  } finally {
+    try { if (client) await client.close(); } catch { /* best effort */ }
+  }
+}
+
+export function partialSavedLayoutRecovery(state, inspectedTargets, savedLayouts) {
+  const liveByChart = new Map();
+  const chartCounts = countChartIds(inspectedTargets || []);
+  for (const item of inspectedTargets || []) {
+    if (
+      item?.chart_id
+      && item?.target_id
+      && chartCounts.get(String(item.chart_id)) === 1
+    ) {
+      liveByChart.set(String(item.chart_id), item);
+    }
+  }
+
+  const savedByName = new Map();
+  for (const layout of savedLayouts || []) {
+    const name = String(layout?.name || '').trim().toLowerCase();
+    const url = String(layout?.url || '').trim();
+    if (!name || !url) continue;
+    savedByName.set(name, { ...layout, url });
+  }
+
+  const bySlot = new Map();
+  const targetIds = new Set();
+
+  for (const tab of state?.worker_tabs || []) {
+    if (tab?.persistent_layout === true) continue;
+    const name = String(tab?.layout_name || '').trim().toLowerCase();
+    if (!name) continue;
+
+    const saved = savedByName.get(name);
+    if (!saved) continue;
+
+    const live = liveByChart.get(String(saved.url));
+    if (!live) continue;
+    if (
+      Number(tab?.pane_count || 0) > 0
+      && Number(live?.pane_count || 0) !== Number(tab.pane_count)
+    ) continue;
+
+    const slot = Number(tab.slot);
+    bySlot.set(slot, live);
+    targetIds.add(String(live.target_id));
+  }
+
+  return { bySlot, targetIds };
 }
 
 export function legacyDirectWorkerRecovery(state, inspectedTargets) {
@@ -957,6 +1053,16 @@ export async function provisionWorker({
   const inspectedTargets = await deps.inspectTargets(liveTargets);
   const ownedRuntimeKeys = stableOwnedRuntimeKeys(state.worker_tabs || []);
   const legacyRecovery = legacyDirectWorkerRecovery(state, inspectedTargets);
+  let partialSavedRecovery = { bySlot: new Map(), targetIds: new Set() };
+
+  if (legacyRecovery.bySlot.size > 0) {
+    const savedLayouts = await deps.listSavedLayouts(liveTargets);
+    partialSavedRecovery = partialSavedLayoutRecovery(
+      state,
+      inspectedTargets,
+      savedLayouts,
+    );
+  }
 
   let externalTargets = inspectedTargets.filter(item => {
     const targetKey = item.target_id ? 'target:' + String(item.target_id) : null;
@@ -965,6 +1071,7 @@ export async function provisionWorker({
       (targetKey && ownedRuntimeKeys.has(targetKey))
       || (chartKey && ownedRuntimeKeys.has(chartKey))
       || (item.target_id && legacyRecovery.targetIds.has(String(item.target_id)))
+      || (item.target_id && partialSavedRecovery.targetIds.has(String(item.target_id)))
     );
   });
   let adoptionCandidate = null;
@@ -1047,6 +1154,10 @@ export async function provisionWorker({
       legacy_direct_recovery: {
         groups: legacyRecovery.groups,
         slots: [...legacyRecovery.bySlot.keys()].sort((a, b) => a - b),
+      },
+      partial_saved_layout_recovery: {
+        slots: [...partialSavedRecovery.bySlot.keys()].sort((a, b) => a - b),
+        target_ids: [...partialSavedRecovery.targetIds],
       },
     };
   }
