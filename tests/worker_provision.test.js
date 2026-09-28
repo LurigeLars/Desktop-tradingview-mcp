@@ -326,7 +326,7 @@ test('recorded tab completeness survives target-id rotation when chart id is uni
   assert.equal(recordedTabComplete(plan, state, liveKeys, live), true);
 });
 
-test('legacy direct worker recovery requires an exact duplicated chart-id group', () => {
+test('legacy direct worker recovery requires an exact chart-id group and supports singleton tail migration', () => {
   const state = {
     worker_tabs: [
       { slot: 0, target_id: 'old-a', chart_id: 'shared', pane_count: 8 },
@@ -345,6 +345,16 @@ test('legacy direct worker recovery requires an exact duplicated chart-id group'
   ]);
   assert.equal(incomplete.bySlot.size, 0);
   assert.equal(incomplete.targetIds.size, 0);
+
+  const singleton = legacyDirectWorkerRecovery({
+    worker_tabs: [
+      { slot: 4, target_id: 'old-tail', chart_id: 'shared-tail', pane_count: 8 },
+    ],
+  }, [
+    { target_id: 'live-tail', chart_id: 'shared-tail', pane_count: 8 },
+  ]);
+  assert.deepEqual([...singleton.bySlot.keys()], [4]);
+  assert.deepEqual([...singleton.targetIds], ['live-tail']);
 });
 
 test('recorded tab completeness rejects stale live pane content', () => {
