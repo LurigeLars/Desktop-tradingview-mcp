@@ -395,6 +395,40 @@ export async function createDirectChartTarget(url, {
   throw new Error('Direct CDP chart target was created but did not become ready in time');
 }
 
+export async function openChartViaRenderer(url, {
+  getActiveClient = getClient,
+  listTargets = listCdpTargets,
+  isReady = chartTargetReady,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  timeoutMs = 15000,
+} = {}) {
+  const beforeIds = new Set((await listTargets()).map(target => String(target.id)));
+  const wantedChartId = String(url).match(/\/chart\/([^/?]+)/)?.[1] || null;
+  if (!wantedChartId) throw new Error('Renderer chart open requires an exact TradingView chart URL token');
+
+  const client = await getActiveClient();
+  await client.Runtime.enable();
+  await client.Runtime.evaluate({
+    expression: `(function(){ try { window.open(${JSON.stringify(url)}, '_blank'); return true; } catch(e) { return false; } })()`,
+    returnByValue: true,
+  });
+
+  const deadline = Date.now() + Number(timeoutMs);
+  do {
+    const targets = await listTargets();
+    const target = targets.find(item =>
+      !beforeIds.has(String(item.id))
+      && isChartPageTarget(item)
+      && String(item.url.match(/\/chart\/([^/?]+)/)?.[1] || '') === wantedChartId
+    );
+    if (target && await isReady(target.id)) return target;
+    if (Date.now() >= deadline) break;
+    await wait(250);
+  } while (true);
+
+  throw new Error('Renderer window.open did not produce a ready TradingView chart target in time');
+}
+
 async function navigateTarget(targetId, url, timeoutMs = 2500) {
   const task = (async () => {
     let client = null;
@@ -524,15 +558,28 @@ export async function newTab({
     }
 
     const createPersistentTarget = _deps?.createDirectChartTarget || createDirectChartTarget;
-    const chartTarget = await createPersistentTarget(chartUrl, {
-      timeoutMs: chartTimeoutMs,
-    });
+    const openPersistentViaRenderer = _deps?.openChartViaRenderer || openChartViaRenderer;
+    let chartTarget = null;
+    let creationVia = 'cdp_new';
+
+    try {
+      chartTarget = await createPersistentTarget(chartUrl, {
+        timeoutMs: chartTimeoutMs,
+      });
+    } catch (error) {
+      creationVia = 'renderer_window_open';
+      chartTarget = await openPersistentViaRenderer(chartUrl, {
+        timeoutMs: chartTimeoutMs,
+      });
+    }
+
     await reconnect(chartTarget.id);
     return {
       success: true,
       action: 'new_chart_target_opened',
       direct_navigation: true,
       direct_target_creation: true,
+      creation_via: creationVia,
       target_id: chartTarget.id,
       chart_id: chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
       symbol: null,
