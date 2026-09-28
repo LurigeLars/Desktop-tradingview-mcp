@@ -237,7 +237,6 @@ export function legacyDirectWorkerRecovery(state, inspectedTargets) {
   const groups = [];
 
   for (const [chartId, recorded] of tabGroups) {
-    if (recorded.length < 2) continue;
     const live = liveGroups.get(chartId) || [];
     if (live.length !== recorded.length) continue;
     if (!sameNumberMultiset(
