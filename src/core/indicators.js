@@ -4,6 +4,10 @@
 import { evaluate, safeString } from '../connection.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
+
+function _resolve(deps) {
+  return { evaluate: deps?.evaluate || evaluate };
+}
 const DIALOG = '[data-name="indicators-dialog"]';
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -159,7 +163,8 @@ export async function addStudyFromSearch({ query, match, section } = {}) {
   };
 }
 
-export async function setInputs({ entity_id, inputs: inputsRaw }) {
+export async function setInputs({ entity_id, inputs: inputsRaw, _deps }) {
+  const { evaluate: run } = _resolve(_deps);
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
   if (!entity_id) throw new Error('entity_id is required. Use chart_get_state to find study IDs.');
   if (!inputs || typeof inputs !== 'object' || Object.keys(inputs).length === 0) {
@@ -167,28 +172,81 @@ export async function setInputs({ entity_id, inputs: inputsRaw }) {
   }
 
   const inputsJson = JSON.stringify(inputs);
-
-  const result = await evaluate(`
+  const result = await run(`
     (function() {
       var chart = ${CHART_API};
       var study = chart.getStudyById(${safeString(entity_id)});
       if (!study) return { error: 'Study not found: ' + ${safeString(entity_id)} };
-      var currentInputs = study.getInputValues();
+
       var overrides = ${inputsJson};
-      var updatedKeys = {};
-      for (var i = 0; i < currentInputs.length; i++) {
-        if (overrides.hasOwnProperty(currentInputs[i].id)) {
-          currentInputs[i].value = overrides[currentInputs[i].id];
-          updatedKeys[currentInputs[i].id] = overrides[currentInputs[i].id];
-        }
+      var before = study.getInputValues() || [];
+      if (before.length === 0) {
+        return { error: 'Study ' + ${safeString(entity_id)} + ' reports no readable inputs, so a write cannot be verified.' };
       }
-      study.setInputValues(currentInputs);
-      return { updated_inputs: updatedKeys };
+
+      var known = {};
+      for (var i = 0; i < before.length; i++) known[before[i].id] = true;
+      var unknown = Object.keys(overrides).filter(function(k) { return !known[k]; });
+      var snapshot = before.map(function(x) { return { id: x.id, value: x.value }; });
+      var fresh = before.map(function(x) {
+        return { id: x.id, value: overrides.hasOwnProperty(x.id) ? overrides[x.id] : x.value };
+      });
+
+      study.setInputValues(fresh);
+      var after = study.getInputValues() || [];
+
+      var restored = false;
+      if (after.length === 0) {
+        try {
+          study.setInputValues(snapshot);
+          restored = (study.getInputValues() || []).length === before.length;
+        } catch (e) { restored = false; }
+      }
+
+      var readback = study.getInputValues() || [];
+      var actual = {};
+      for (var j = 0; j < readback.length; j++) {
+        if (overrides.hasOwnProperty(readback[j].id)) actual[readback[j].id] = readback[j].value;
+      }
+      return {
+        before_count: before.length,
+        after_count: after.length,
+        actual: actual,
+        unknown_inputs: unknown,
+        restored: restored
+      };
     })()
   `);
 
-  if (result && result.error) throw new Error(result.error);
-  return { success: true, entity_id, updated_inputs: result.updated_inputs };
+  if (result?.error) throw new Error(result.error);
+
+  if (result.before_count > 0 && result.after_count === 0) {
+    throw new Error(
+      `TradingView rejected the write and cleared this study's input values (${result.before_count} inputs before, 0 after)`
+      + (result.restored ? ' — they were restored.' : ' — and the restore attempt also failed.')
+      + ' Protected / invite-only scripts cannot be configured programmatically; change the input in the study settings dialog instead.'
+    );
+  }
+
+  const unknown = new Set(result.unknown_inputs || []);
+  const mismatches = Object.keys(inputs)
+    .filter(k => !unknown.has(k))
+    .filter(k => String(result.actual[k]) !== String(inputs[k]))
+    .map(k => `${k} wanted ${JSON.stringify(inputs[k])}, reads back ${JSON.stringify(result.actual[k])}`);
+
+  if (mismatches.length) {
+    throw new Error(
+      'The write was accepted but did not take effect: ' + mismatches.join('; ')
+      + '. Protected / invite-only scripts may ignore programmatic input writes; change the input in the study settings dialog instead.'
+    );
+  }
+
+  const applied = {};
+  for (const k of Object.keys(inputs)) if (!unknown.has(k)) applied[k] = result.actual[k];
+
+  const out = { success: true, entity_id, updated_inputs: applied, verified: true };
+  if (unknown.size) out.unknown_inputs = [...unknown];
+  return out;
 }
 
 export async function toggleVisibility({ entity_id, visible }) {
