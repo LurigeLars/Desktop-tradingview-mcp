@@ -1,5 +1,16 @@
 # TradingView MCP Bridge
 
+## Current deployment and security posture
+
+This fork is designed to drive a user's own TradingView Desktop session rather than provide an independent market-data service.
+
+- TradingView Desktop stays local and is reached through the loopback CDP endpoint.
+- The optional public path terminates at a reviewed Cloudflare Access gateway before reaching the loopback MCP runtime.
+- The public gateway runs as non-root `node`, with a read-only filesystem, `cap_drop: ALL`, and `no-new-privileges`.
+- The gateway strips client credentials and applies bounded request/tool policy before forwarding.
+- Shared TradingView UI state is treated as mutable state: concurrent clients can affect the same chart and must coordinate mutations.
+- Machine-specific executable paths, account identity, Cloudflare values, and credentials belong only in ignored local configuration.
+
 ## About this fork
 
 This is a maintained fork of [tradesdontlie/tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp). It preserves the upstream TradingView Desktop/CDP approach while hardening it for long-running local and remote MCP use.
