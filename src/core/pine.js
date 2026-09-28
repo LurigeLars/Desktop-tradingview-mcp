@@ -8,8 +8,12 @@ import { evaluate, evaluateAsync, getClient } from '../connection.js';
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
   (function findMonacoEditor() {
-    var container = document.querySelector('.monaco-editor.pine-editor-monaco');
-    if (!container) return null;
+    var containers = Array.from(document.querySelectorAll('.monaco-editor.pine-editor-monaco'));
+    if (!containers.length) return null;
+
+    // Prefer the visible Pine container. TradingView leaves stale hidden
+    // editor containers mounted after tab/panel changes.
+    var container = containers.find(function(el) { return el.offsetParent !== null; }) || containers[containers.length - 1];
     var el = container;
     var fiberKey;
     for (var i = 0; i < 20; i++) {
@@ -19,6 +23,7 @@ const FIND_MONACO = `
       el = el.parentElement;
     }
     if (!fiberKey) return null;
+
     var current = el[fiberKey];
     for (var d = 0; d < 15; d++) {
       if (!current) break;
@@ -26,7 +31,20 @@ const FIND_MONACO = `
         var env = current.memoizedProps.value.monacoEnv;
         if (env.editor && typeof env.editor.getEditors === 'function') {
           var editors = env.editor.getEditors();
-          if (editors.length > 0) return { editor: editors[0], env: env };
+          if (editors.length > 0) {
+            var chosen = null;
+            for (var e = 0; e < editors.length; e++) {
+              try {
+                var dom = editors[e].getDomNode && editors[e].getDomNode();
+                if (dom && dom.offsetParent !== null) { chosen = editors[e]; break; }
+              } catch (err) {}
+            }
+            if (!chosen) {
+              try { chosen = env.editor.getFocusedEditor && env.editor.getFocusedEditor(); } catch (err) {}
+            }
+            if (!chosen) chosen = editors[editors.length - 1];
+            return { editor: chosen, env: env };
+          }
         }
       }
       current = current.return;
@@ -40,35 +58,28 @@ const FIND_MONACO = `
  * Returns true if editor is accessible, false on timeout.
  */
 export async function ensurePineEditorOpen() {
-  const already = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      return m !== null;
-    })()
-  `);
-  if (already) return true;
+  const isReady = `(function() { var m = ${FIND_MONACO}; return m !== null; })()`;
+  if (await evaluate(isReady)) return true;
 
-  await evaluate(`
+  const tryOpen = `
     (function() {
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-      if (!bwb) return;
-      if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-      else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
-    })()
-  `);
-
-  await evaluate(`
-    (function() {
+      if (bwb) {
+        try { if (typeof bwb.open === 'function') bwb.open('scripteditor'); } catch (e) {}
+        try { if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); } catch (e) {}
+        try { if (typeof bwb.show === 'function') bwb.show(); } catch (e) {}
+        try { if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor'); } catch (e) {}
+      }
       var btn = document.querySelector('[aria-label="Pine"]')
         || document.querySelector('[data-name="pine-dialog-button"]');
       if (btn) btn.click();
     })()
-  `);
+  `;
 
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 75; i++) {
+    if (i % 10 === 0) await evaluate(tryOpen);
     await new Promise(r => setTimeout(r, 200));
-    const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
-    if (ready) return true;
+    if (await evaluate(isReady)) return true;
   }
   return false;
 }
@@ -268,17 +279,25 @@ export async function setSource({ source }) {
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const escaped = JSON.stringify(source);
-  const set = await evaluate(`
+  const result = await evaluate(`
     (function() {
       var m = ${FIND_MONACO};
-      if (!m) return false;
-      m.editor.setValue(${escaped});
-      return true;
+      if (!m) return { ok: false, reason: 'monaco_not_found' };
+      var target = ${escaped};
+      m.editor.setValue(target);
+      var norm = function(s) { return (s || '').replace(/\\r\\n/g, '\\n'); };
+      var after = m.editor.getValue();
+      return { ok: norm(after) === norm(target), chars: after.length, reason: 'value_mismatch' };
     })()
   `);
 
-  if (!set) throw new Error('Monaco found but setValue() failed.');
-  return { success: true, lines_set: source.split('\n').length };
+  if (!result?.ok) {
+    const why = result?.reason === 'monaco_not_found'
+      ? 'Pine Editor / Monaco not found.'
+      : 'editor value did not match after write.';
+    throw new Error('setSource did not apply: ' + why);
+  }
+  return { success: true, lines_set: source.split('\n').length, verified: true, chars_written: result.chars };
 }
 
 export async function compile() {
@@ -515,23 +534,42 @@ export async function newScript({ type }) {
     strategy: '//@version=6\nstrategy("My strategy", overlay=true)\n',
     library: '//@version=6\n// @description TODO: add library description here\nlibrary("MyLibrary")\n',
   };
-
   const template = templates[type] || templates.indicator;
 
-  // Simply set the source to a new template — this is the most reliable approach
-  const escaped = JSON.stringify(template);
-  const set = await evaluate(`
+  const prev = await evaluate(`
     (function() {
       var m = ${FIND_MONACO};
-      if (!m) return false;
-      m.editor.setValue(${escaped});
-      return true;
+      if (!m) return null;
+      var src = m.editor.getValue() || '';
+      var t = src.match(/(?:indicator|strategy|library)\\s*\\(\\s*(?:title\\s*=\\s*)?["']([^"']+)["']/);
+      return { title: t ? t[1] : null, lines: src.split('\\n').length };
+    })()
+  `).catch(() => null);
+
+  const escaped = JSON.stringify(template);
+  const result = await evaluate(`
+    (function() {
+      var m = ${FIND_MONACO};
+      if (!m) return { ok: false, reason: 'monaco_not_found' };
+      var target = ${escaped};
+      m.editor.setValue(target);
+      var norm = function(s) { return (s || '').replace(/\\r\\n/g, '\\n'); };
+      return { ok: norm(m.editor.getValue()) === norm(target), reason: 'value_mismatch' };
     })()
   `);
 
-  if (!set) throw new Error('Monaco editor not found. Ensure Pine Editor is open.');
+  if (!result?.ok) throw new Error('pine_new failed: template did not apply to the visible editor.');
 
-  return { success: true, type, action: 'new_script_created', template: typeMap[type] };
+  return {
+    success: true,
+    type,
+    action: 'template_loaded_in_editor',
+    template: typeMap[type],
+    verified: true,
+    open_script_at_risk: prev?.title || null,
+    replaced_lines: prev?.lines || null,
+    warning: 'This loads a template into the current editor buffer; it does not allocate a new saved script id. Saving may overwrite the previously open script.'
+  };
 }
 
 export async function openScript({ name }) {
@@ -539,7 +577,6 @@ export async function openScript({ name }) {
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
   const escapedName = JSON.stringify(name.toLowerCase());
-
   const result = await evaluateAsync(`
     (function() {
       var target = ${escapedName};
@@ -570,22 +607,21 @@ export async function openScript({ name }) {
               var source = data.source || '';
               if (!source) return {error: 'Script source is empty', name: match.scriptName || match.scriptTitle};
               var m = ${FIND_MONACO};
-              if (m) {
-                m.editor.setValue(source);
-                return {success: true, name: match.scriptName || match.scriptTitle, id: id, lines: source.split('\\n').length};
+              if (!m) return {error: 'Monaco editor not found to inject source', name: match.scriptName || match.scriptTitle};
+              m.editor.setValue(source);
+              var norm = function(s) { return (s || '').replace(/\\r\\n/g, '\\n'); };
+              if (norm(m.editor.getValue()) !== norm(source)) {
+                return {error: 'Loaded script but editor value did not match after write', name: match.scriptName || match.scriptTitle};
               }
-              return {error: 'Monaco editor not found to inject source', name: match.scriptName || match.scriptTitle};
+              return {success: true, name: match.scriptName || match.scriptTitle, id: id, lines: source.split('\\n').length, verified: true};
             });
         })
         .catch(function(e) { return {error: e.message}; });
     })()
   `);
 
-  if (result?.error) {
-    throw new Error(result.error);
-  }
-
-  return { success: true, name: result.name, script_id: result.id, lines: result.lines, source: 'internal_api', opened: true };
+  if (result?.error) throw new Error(result.error);
+  return { success: true, name: result.name, script_id: result.id, lines: result.lines, source: 'internal_api', opened: true, verified: result.verified === true };
 }
 
 export async function listScripts() {

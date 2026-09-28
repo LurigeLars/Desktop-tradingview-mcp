@@ -4,11 +4,15 @@
 import { evaluate as _evaluate, getChartApi as _getChartApi, safeString, requireFinite } from '../connection.js';
 
 function _resolve(deps) {
-  return { evaluate: deps?.evaluate || _evaluate, getChartApi: deps?.getChartApi || _getChartApi };
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    getChartApi: deps?.getChartApi || _getChartApi,
+    delay: deps?.delay || ((ms) => new Promise(r => setTimeout(r, ms))),
+  };
 }
 
 export async function drawShape({ shape, point, point2, overrides: overridesRaw, text, _deps }) {
-  const { evaluate, getChartApi } = _resolve(_deps);
+  const { evaluate, getChartApi, delay } = _resolve(_deps);
   const overrides = overridesRaw ? (typeof overridesRaw === 'string' ? JSON.parse(overridesRaw) : overridesRaw) : {};
   const apiPath = await getChartApi();
   const overridesStr = JSON.stringify(overrides || {});
@@ -16,32 +20,39 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
 
   const p1time = requireFinite(point.time, 'point.time');
   const p1price = requireFinite(point.price, 'point.price');
-
   const before = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
 
   if (point2) {
     const p2time = requireFinite(point2.time, 'point2.time');
     const p2price = requireFinite(point2.price, 'point2.price');
     await evaluate(`
-      ${apiPath}.createMultipointShape(
+      Promise.resolve(${apiPath}.createMultipointShape(
         [{ time: ${p1time}, price: ${p1price} }, { time: ${p2time}, price: ${p2price} }],
         { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr} }
-      )
-    `);
+      ))
+    `, { awaitPromise: true });
   } else {
     await evaluate(`
-      ${apiPath}.createShape(
+      Promise.resolve(${apiPath}.createShape(
         { time: ${p1time}, price: ${p1price} },
         { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr} }
-      )
-    `);
+      ))
+    `, { awaitPromise: true });
   }
 
-  await new Promise(r => setTimeout(r, 200));
-  const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
-  const newId = (after || []).find(id => !(before || []).includes(id)) || null;
-  const result = { entity_id: newId };
-  return { success: true, shape, entity_id: result?.entity_id };
+  const beforeSet = new Set(before || []);
+  let newId = null;
+  for (let i = 0; i < 10; i++) {
+    const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
+    newId = (after || []).find(id => !beforeSet.has(id)) || null;
+    if (newId) break;
+    await delay(100);
+  }
+
+  if (!newId) {
+    return { success: false, shape, entity_id: null, error: 'shape_not_observed' };
+  }
+  return { success: true, shape, entity_id: newId };
 }
 
 export async function listDrawings() {

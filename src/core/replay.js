@@ -96,11 +96,19 @@ export async function stop({ _deps } = {}) {
   const { evaluate, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
-  if (!started) {
-    return { success: true, action: 'already_stopped' };
+  if (!started) return { success: true, action: 'already_stopped' };
+
+  // stopReplay() only closes the replay UI session on current Desktop builds
+  // and can leave the replay manager parked on historical data. goToRealtime()
+  // ends the session and returns the chart to the live edge.
+  await evaluate(`${rp}.goToRealtime()`);
+
+  for (let i = 0; i < 12; i++) {
+    await new Promise(r => setTimeout(r, 150));
+    const stillStarted = await evaluate(wv(`${rp}.isReplayStarted()`));
+    if (!stillStarted) return { success: true, action: 'replay_stopped', realtime_restored: true };
   }
-  await evaluate(`${rp}.stopReplay()`);
-  return { success: true, action: 'replay_stopped' };
+  throw new Error('Replay stop did not return the chart to realtime within the verification window.');
 }
 
 export async function trade({ action, _deps }) {

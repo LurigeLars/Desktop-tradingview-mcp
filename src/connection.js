@@ -11,8 +11,26 @@ export const CDP_HOST = '127.0.0.1';
 const requestedPort = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT || 9222);
 if (!Number.isInteger(requestedPort) || requestedPort < 1024 || requestedPort > 65535) throw new Error('TV_CDP_PORT must be an integer from 1024 to 65535');
 export const CDP_PORT = requestedPort;
-const MAX_RETRIES = 5;
+const MAX_RETRIES = 3;
 const BASE_DELAY = 500;
+const EVAL_TIMEOUT = 15000;
+const CONNECT_TIMEOUT = 5000;
+const PROBE_TIMEOUT = 2500;
+
+// Concurrent first-use calls share one attach instead of opening duplicate
+// CDP sessions and racing over the module-level client/targetInfo cache.
+const _connecting = new Map();
+
+export function withTimeout(promise, ms, label) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(
+      `${label} timed out after ${ms}ms — TradingView is not responding. `
+      + 'Its renderer may have crashed or stalled; restart TradingView Desktop and retry.'
+    )), ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
 
 const KNOWN_PATHS = {
   chartApi: 'window.TradingViewApi._activeChartWidgetWV.value()',
@@ -48,7 +66,11 @@ async function invalidateCachedClient() {
 export async function getClient() {
   if (client) {
     try {
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
+      await withTimeout(
+        client.Runtime.evaluate({ expression: '1', returnByValue: true }),
+        PROBE_TIMEOUT,
+        'CDP liveness check'
+      );
       return client;
     } catch {
       await invalidateCachedClient();
@@ -58,24 +80,65 @@ export async function getClient() {
 }
 
 export async function connect(targetId = null) {
+  const key = targetId || '';
+  if (_connecting.has(key)) return _connecting.get(key);
+
+  const promise = _doConnect(targetId).finally(() => _connecting.delete(key));
+  _connecting.set(key, promise);
+  return promise;
+}
+
+async function _doConnect(targetId) {
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const target = targetId ? await findTargetById(targetId) : await findChartTarget();
-      if (!target) {
+      const candidates = targetId
+        ? [await findTargetById(targetId)].filter(Boolean)
+        : await findChartTargets();
+
+      if (candidates.length === 0) {
         throw new Error(targetId
           ? `CDP target ${targetId} not found — is the tab still open?`
           : 'No TradingView chart target found. Is TradingView open with a chart?');
       }
-      targetInfo = target;
-      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
-      await client.Runtime.enable();
-      await client.Page.enable();
-      await client.DOM.enable();
-      return client;
+
+      for (const target of candidates) {
+        let newClient = null;
+        try {
+          newClient = await withTimeout(
+            CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id }),
+            CONNECT_TIMEOUT,
+            'CDP attach'
+          );
+          await withTimeout(
+            newClient.Runtime.evaluate({ expression: '1', returnByValue: true }),
+            PROBE_TIMEOUT,
+            'Renderer probe'
+          );
+          await withTimeout(
+            Promise.all([
+              newClient.Runtime.enable(),
+              newClient.Page.enable(),
+              newClient.DOM.enable(),
+            ]),
+            CONNECT_TIMEOUT,
+            'CDP domain enable'
+          );
+
+          targetInfo = target;
+          client = newClient;
+          return newClient;
+        } catch (err) {
+          lastError = err;
+          if (newClient) { try { await newClient.close(); } catch { /* already gone */ } }
+        }
+      }
+
+      throw new Error(
+        `Found ${candidates.length} TradingView target(s) but none responded: ${lastError?.message || 'unknown renderer failure'}`
+      );
     } catch (err) {
       lastError = err;
-      await invalidateCachedClient();
       const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
       await new Promise(r => setTimeout(r, delay));
     }
@@ -114,13 +177,15 @@ export async function listTradingViewChartTargets() {
   });
 }
 
-async function findChartTarget() {
+async function findChartTargets() {
   const targets = await listCdpTargets();
-  const tradingViewPages = targets.filter(t => t.type === 'page' && isTradingViewUrl(t.url));
-  return tradingViewPages.find(t => {
+  const pages = targets.filter(t => t.type === 'page' && isTradingViewUrl(t.url));
+  const chartPages = pages.filter(t => {
     try { return new URL(t.url).pathname.toLowerCase().startsWith('/chart'); }
     catch { return false; }
-  }) || tradingViewPages[0] || null;
+  });
+  const chartIds = new Set(chartPages.map(t => t.id));
+  return [...chartPages, ...pages.filter(t => !chartIds.has(t.id))];
 }
 
 async function findTargetById(id) {
@@ -135,14 +200,19 @@ export async function getTargetInfo() {
 
 export async function evaluate(expression, opts = {}) {
   const c = await getClient();
+  const { timeoutMs, ...cdpOpts } = opts;
   let result;
   try {
-    result = await c.Runtime.evaluate({
-      expression,
-      returnByValue: true,
-      awaitPromise: opts.awaitPromise ?? false,
-      ...opts,
-    });
+    result = await withTimeout(
+      c.Runtime.evaluate({
+        expression,
+        returnByValue: true,
+        awaitPromise: cdpOpts.awaitPromise ?? false,
+        ...cdpOpts,
+      }),
+      timeoutMs ?? EVAL_TIMEOUT,
+      'Runtime.evaluate'
+    );
   } catch (error) {
     await invalidateCachedClient();
     throw error;

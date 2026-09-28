@@ -238,11 +238,14 @@ function _spawnDetached(spawnFn, exe, args) {
   if (!['tradingview', 'tradingview.exe'].includes(executableName)) {
     throw new Error('Refusing to launch a non-TradingView executable');
   }
-  if (!Array.isArray(args) || args.length !== 1 || !/^--remote-debugging-port=\d{4,5}$/.test(String(args[0]))) {
-    throw new Error('Refusing unexpected TradingView launch arguments');
-  }
-  // spawn receives a validated executable name and fixed-shape argument array and never invokes a shell.
-  // lgtm[js/command-line-injection]
+  const safeBase = Array.isArray(args)
+    && /^--remote-debugging-port=\d{4,5}$/.test(String(args[0] || ''));
+  const safeArgs = safeBase && (
+    args.length === 1
+    || (args.length === 3 && args[1] === '--no-sandbox' && args[2] === '--disable-gpu')
+  );
+  if (!safeArgs) throw new Error('Refusing unexpected TradingView launch arguments');
+
   const child = spawnFn(exe, args, { detached: true, stdio: 'ignore', shell: false });
   child.unref();
   return child;
@@ -288,7 +291,7 @@ function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync
   if (!existsSync(dstExe)) {
     try {
       for (const entry of readdirSync(cacheRoot)) {
-        if (entry !== pkgName && /^TradingView\./i.test(entry)) {
+        if (entry !== pkgName && /TradingView/i.test(entry)) {
           rmSync(join(cacheRoot, entry), { recursive: true, force: true });
         }
       }
@@ -340,7 +343,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
       const installDir = deps.execFileSync(
         'powershell.exe',
         ['-NoProfile', '-NonInteractive', '-Command',
-          "(Get-AppxPackage -Name 'TradingView.Desktop' -ErrorAction SilentlyContinue).InstallLocation"],
+          "(Get-AppxPackage -Name '*TradingView*' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty InstallLocation)"],
         { timeout: 5000 },
       ).toString().trim();
       if (installDir) {
@@ -370,21 +373,31 @@ export async function launch({ port, kill_existing, _deps } = {}) {
   }
 
   const cdpArgs = [`--remote-debugging-port=${cdpPort}`];
-  let child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  const isMsixPath = platform === 'win32' && WINDOWS_APPS_RE.test(tvPath);
+  let child;
+  let syncSpawnError = null;
+  try {
+    child = _spawnDetached(deps.spawn, tvPath, cdpArgs);
+  } catch (error) {
+    if (!isMsixPath) throw error;
+    syncSpawnError = error.code || error.message || 'spawn error';
+  }
+
   let info = null;
   let usedLocalCopy = false;
 
-  if (platform === 'win32' && WINDOWS_APPS_RE.test(tvPath)) {
-    const earlyFailure = await _spawnFailedEarly(child);
+  if (isMsixPath) {
+    const earlyFailure = syncSpawnError || (child ? await _spawnFailedEarly(child) : 'spawn failed');
     if (!earlyFailure) {
       info = await _waitForCdp({ cdpPort, attempts: 15, delay: deps.delay, probeCdp: deps.probeCdp });
     }
     if (!info) {
-      // Direct WindowsApps launch was blocked or CDP never bound — fall back to
-      // a local copy of the package (see _copyMsixPackageLocal).
+      // A copied-out MSIX executable no longer has its AppContainer package
+      // identity. TradingView 3.4.x may crash its GPU process in that state
+      // unless Chromium sandbox/GPU are disabled for this fallback copy.
       const localExe = _copyMsixPackageLocal(tvPath, deps);
       await killExisting();
-      child = _spawnDetached(deps.spawn, localExe, cdpArgs);
+      child = _spawnDetached(deps.spawn, localExe, [...cdpArgs, '--no-sandbox', '--disable-gpu']);
       tvPath = localExe;
       usedLocalCopy = true;
     }
@@ -407,7 +420,7 @@ export async function launch({ port, kill_existing, _deps } = {}) {
       success: true, platform, binary: tvPath, pid: child.pid, managed_by_mcp: true,
       cdp_port: cdpPort, cdp_url: `http://${CDP_HOST}:${cdpPort}`,
       browser: info.Browser, user_agent: info['User-Agent'],
-      ...(usedLocalCopy && { msix_local_copy: true }),
+      ...(usedLocalCopy && { msix_local_copy: true, sandbox_disabled: true }),
     };
   }
 
