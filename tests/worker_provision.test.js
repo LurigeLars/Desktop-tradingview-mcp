@@ -4,6 +4,7 @@ import {
   activePaneStates,
   buildWorkerLayoutName,
   closeTabByOwned,
+  cloneTargetAsLayout,
   layoutCodeForPaneCount,
   legacyDirectWorkerRecovery,
   pendingPaneIndexes,
@@ -29,6 +30,44 @@ test('worker pane counts map only to supported TradingView layouts', () => {
 test('worker layout names are technical and deterministic', () => {
   assert.equal(buildWorkerLayoutName('Worker', 0), 'Worker 01');
   assert.equal(buildWorkerLayoutName('Worker', 6), 'Worker 07');
+});
+
+
+test('Save As recovery reuses an already-created saved-layout target', async () => {
+  const source = {
+    id: 'legacy-target',
+    type: 'page',
+    url: 'https://www.tradingview.com/chart/shared-layout/',
+  };
+  const saved = {
+    id: 'saved-target',
+    type: 'page',
+    url: 'https://www.tradingview.com/chart/persistent-layout/',
+  };
+  let dialogEvaluated = false;
+  const fakeClient = {
+    Runtime: {
+      enable: async () => {},
+      evaluate: async () => {
+        dialogEvaluated = true;
+        throw new Error('Save As dialog should not be reopened on resume');
+      },
+    },
+    close: async () => {},
+  };
+
+  const result = await cloneTargetAsLayout(source, 'Worker 01', {
+    connect: async () => fakeClient,
+    listTargets: async () => [source, saved],
+    findSavedLayout: async () => ({
+      id: 123,
+      name: 'Worker 01',
+      url: 'persistent-layout',
+    }),
+  });
+
+  assert.equal(result.id, 'saved-target');
+  assert.equal(dialogEvaluated, false);
 });
 
 test('worker cleanup closes the exact owned target without shell switching', async () => {
@@ -761,24 +800,33 @@ test('legacy shared direct tabs are replaced one at a time with saved layouts', 
   }));
 
   let cloned = 0;
+  const closed = [];
   const runtime = {
     status: () => status({ _deps: store.deps }),
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
     listTargets: async () => liveTargets,
     inspectTargets,
     newTab: async () => {
-      throw new Error('legacy migration must clone the existing tab in place');
+      throw new Error('legacy migration must use Save As from the existing tab');
     },
     cloneTargetAsLayout: async (target, name) => {
       cloned += 1;
       assert.equal(name, 'Worker 01');
-      const live = liveTargets.find(item => item.id === target.id);
-      assert.ok(live);
-      live.url = 'https://www.tradingview.com/chart/persistent-' + cloned + '/';
-      return live;
+      assert.ok(liveTargets.some(item => item.id === target.id));
+      const saved = {
+        id: 'saved-' + cloned,
+        type: 'page',
+        url: 'https://www.tradingview.com/chart/persistent-' + cloned + '/',
+      };
+      liveTargets.push(saved);
+      return saved;
     },
-    closeTabByOwned: async () => {
-      throw new Error('legacy migration must not close the existing tab before cloning');
+    closeTabByOwned: async owned => {
+      closed.push(owned.target_id);
+      const index = liveTargets.findIndex(item => item.id === owned.target_id);
+      assert.notEqual(index, -1);
+      liveTargets.splice(index, 1);
+      return { success: true, closed: true };
     },
     configureTarget: async () => {
       throw new Error('configureTarget must not run in the clone phase');
@@ -795,6 +843,9 @@ test('legacy shared direct tabs are replaced one at a time with saved layouts', 
   assert.equal(result.results[0].stage, 'tab_ready');
   assert.equal(result.results[0].legacy_replaced, true);
   assert.equal(result.results[0].persistent_layout, true);
+  assert.equal(closed.length, 1);
+  assert.ok(['live-a', 'live-b'].includes(closed[0]));
+  assert.equal(liveTargets.length, 2);
 
   const after = status({ _deps: store.deps });
   assert.equal(after.worker_tabs[0].chart_id, 'persistent-1');
