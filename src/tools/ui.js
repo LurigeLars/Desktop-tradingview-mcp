@@ -1,13 +1,14 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/ui.js';
+import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerUiTools(server) {
   server.tool('ui_click', 'Click a UI element by aria-label, data-name, text content, or class substring', {
     by: z.enum(['aria-label', 'data-name', 'text', 'class-contains']).describe('Selector strategy'),
     value: z.string().describe('Value to match against the chosen selector strategy'),
   }, async ({ by, value }) => {
-    try { return jsonResult(await core.click({ by, value })); }
+    try { return jsonResult(await withTopologyMutationLock('ui_click', () => core.click({ by, value }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -15,12 +16,12 @@ export function registerUiTools(server) {
     panel: z.enum(['pine-editor', 'strategy-tester', 'watchlist', 'alerts', 'trading']).describe('Panel name'),
     action: z.enum(['open', 'close', 'toggle']).describe('Action to perform'),
   }, async ({ panel, action }) => {
-    try { return jsonResult(await core.openPanel({ panel, action })); }
+    try { return jsonResult(await withTopologyMutationLock('ui_open_panel', () => core.openPanel({ panel, action }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
   server.tool('ui_fullscreen', 'Toggle TradingView fullscreen mode', {}, async () => {
-    try { return jsonResult(await core.fullscreen()); }
+    try { return jsonResult(await withTopologyMutationLock('ui_fullscreen', () => core.fullscreen())); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -32,7 +33,7 @@ export function registerUiTools(server) {
   server.tool('layout_switch', 'Switch to a saved chart layout by name or ID', {
     name: z.string().describe('Name or ID of the layout to switch to'),
   }, async ({ name }) => {
-    try { return jsonResult(await core.layoutSwitch({ name })); }
+    try { return jsonResult(await withTopologyMutationLock('layout_switch', () => core.layoutSwitch({ name }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -40,14 +41,14 @@ export function registerUiTools(server) {
     key: z.string().describe('Key to press (e.g., "Enter", "Escape", "Tab", "a", "ArrowUp")'),
     modifiers: z.array(z.enum(['ctrl', 'alt', 'shift', 'meta'])).optional().describe('Modifier keys to hold (e.g., ["ctrl", "shift"])'),
   }, async ({ key, modifiers }) => {
-    try { return jsonResult(await core.keyboard({ key, modifiers })); }
+    try { return jsonResult(await withTopologyMutationLock('ui_keyboard', () => core.keyboard({ key, modifiers }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
   server.tool('ui_type_text', 'Type text into the currently focused input/textarea element', {
     text: z.string().describe('Text to type into the focused element'),
   }, async ({ text }) => {
-    try { return jsonResult(await core.typeText({ text })); }
+    try { return jsonResult(await withTopologyMutationLock('ui_type_text', () => core.typeText({ text }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -63,7 +64,7 @@ export function registerUiTools(server) {
     direction: z.enum(['up', 'down', 'left', 'right']).describe('Scroll direction'),
     amount: z.coerce.number().optional().describe('Scroll amount in pixels (default 300)'),
   }, async ({ direction, amount }) => {
-    try { return jsonResult(await core.scroll({ direction, amount })); }
+    try { return jsonResult(await withTopologyMutationLock('ui_scroll', () => core.scroll({ direction, amount }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -73,7 +74,7 @@ export function registerUiTools(server) {
     button: z.enum(['left', 'right', 'middle']).optional().describe('Mouse button (default left)'),
     double_click: z.coerce.boolean().optional().describe('Double click (default false)'),
   }, async ({ x, y, button, double_click }) => {
-    try { return jsonResult(await core.mouseClick({ x, y, button, double_click })); }
+    try { return jsonResult(await withTopologyMutationLock('ui_mouse_click', () => core.mouseClick({ x, y, button, double_click }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -88,7 +89,7 @@ export function registerUiTools(server) {
   server.tool('ui_evaluate', 'Execute JavaScript code in the TradingView page context for advanced automation', {
     expression: z.string().describe('JavaScript expression to evaluate in the page context. Wrap in IIFE for complex logic.'),
   }, async ({ expression }) => {
-    try { return jsonResult(await core.uiEvaluate({ expression })); }
+    try { return jsonResult(await withTopologyMutationLock('ui_evaluate', () => core.uiEvaluate({ expression }))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
