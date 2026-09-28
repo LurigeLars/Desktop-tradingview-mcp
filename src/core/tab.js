@@ -554,6 +554,148 @@ export async function newTab({
 }
 
 /**
+ * Remove stale TradingView Desktop shell tabs while preserving exact live
+ * worker renderer targets. This is intentionally separate from CDP target
+ * cleanup because Desktop can retain shell-tab UI state after renderer targets
+ * have disappeared.
+ *
+ * Safety:
+ * - discovers one shell-tab index for every keep target before deleting;
+ * - closes from highest index to lowest so saved indexes do not shift forward;
+ * - rechecks target visibility immediately before each close;
+ * - skips rather than closes if any keep target is visible after clicking the
+ *   candidate shell tab.
+ */
+export async function cleanupOrphanShellTabs({
+  keep_target_ids = [],
+  _deps,
+} = {}) {
+  const keepIds = [...new Set(
+    (keep_target_ids || []).map(value => String(value || '').trim()).filter(Boolean)
+  )];
+  if (!keepIds.length) {
+    throw new Error('cleanupOrphanShellTabs requires at least one keep target id');
+  }
+
+  const runWithShell = _deps?.withShell || withShell;
+  const targetVisible = _deps?.isTargetVisible || isTargetVisible;
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+
+  return runWithShell(async evalIn => {
+    const countTabs = () => evalIn(`document.querySelectorAll('.tabs-container .tab').length`);
+    const activeIndex = () => evalIn(`
+      (function() {
+        var tabs = Array.from(document.querySelectorAll('.tabs-container .tab'));
+        var active = document.querySelector('.tabs-container .tab.active');
+        return active ? tabs.indexOf(active) : -1;
+      })()
+    `);
+    const clickTab = index => evalIn(`
+      (function() {
+        var tab = document.querySelectorAll('.tabs-container .tab')[${Number(index)}];
+        if (!tab) return false;
+        tab.click();
+        return true;
+      })()
+    `);
+    const closeTabAt = index => evalIn(`
+      (function() {
+        var tab = document.querySelectorAll('.tabs-container .tab')[${Number(index)}];
+        if (!tab) return false;
+        var close = tab.querySelector('[class*="close"] button')
+          || tab.querySelector('button[class*="close"]')
+          || tab.querySelector('[class*="close"]');
+        if (!close) return false;
+        close.click();
+        return true;
+      })()
+    `);
+
+    const before = Number(await countTabs());
+    const protectedIndexes = new Set();
+    const missingKeepTargets = [];
+
+    for (const targetId of keepIds) {
+      let found = false;
+      if (await targetVisible(targetId)) {
+        const index = Number(await activeIndex());
+        if (index >= 0) {
+          protectedIndexes.add(index);
+          found = true;
+        }
+      }
+
+      if (!found) {
+        const count = Number(await countTabs());
+        for (let index = 0; index < count; index++) {
+          if (!(await clickTab(index))) continue;
+          await wait(180);
+          if (!(await targetVisible(targetId))) continue;
+
+          const resolved = Number(await activeIndex());
+          if (resolved >= 0) protectedIndexes.add(resolved);
+          found = resolved >= 0;
+          break;
+        }
+      }
+
+      if (!found) missingKeepTargets.push(targetId);
+    }
+
+    if (missingKeepTargets.length) {
+      throw new Error(
+        'Refusing shell cleanup because worker targets could not be mapped to shell tabs: ' +
+        missingKeepTargets.join(', ')
+      );
+    }
+
+    const closed = [];
+    const skipped = [];
+    const startCount = Number(await countTabs());
+
+    for (let index = startCount - 1; index >= 0; index--) {
+      if (protectedIndexes.has(index)) continue;
+
+      if (!(await clickTab(index))) {
+        skipped.push({ index, reason: 'shell_tab_not_found' });
+        continue;
+      }
+      await wait(180);
+
+      let visibleKeep = null;
+      for (const targetId of keepIds) {
+        if (await targetVisible(targetId)) {
+          visibleKeep = targetId;
+          break;
+        }
+      }
+      if (visibleKeep) {
+        skipped.push({ index, reason: 'worker_target_visible', target_id: visibleKeep });
+        continue;
+      }
+
+      const clicked = await closeTabAt(index);
+      if (!clicked) {
+        skipped.push({ index, reason: 'close_control_not_found' });
+        continue;
+      }
+      await wait(220);
+      closed.push(index);
+    }
+
+    const after = Number(await countTabs());
+    return {
+      success: true,
+      tabs_before: before,
+      tabs_after: after,
+      protected_indexes: [...protectedIndexes].sort((a, b) => a - b),
+      closed_indexes: closed,
+      skipped,
+    };
+  });
+}
+
+/**
  * Close the currently active tab by clicking its close button in the shell.
  */
 export async function closeTabByTargetId({ target_id, _deps } = {}) {
