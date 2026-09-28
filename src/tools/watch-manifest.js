@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import { applyWatchManifest } from '../core/watch-manifest.js';
+import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 const studySchema = z.union([
   z.string(),
@@ -28,7 +29,10 @@ export function registerWatchManifestTools(server) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {
-    try { return jsonResult(applyWatchManifest(args)); }
+    try {
+      if (args?.dry_run) return jsonResult(applyWatchManifest(args));
+      return jsonResult(await withTopologyMutationLock('watch_manifest_apply', () => applyWatchManifest(args)));
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
