@@ -11,12 +11,59 @@ import {
   persistentWorkerRecovery,
   provisionWorker,
   recordedTabComplete,
+  settlePersistentWorkerRestore,
 } from '../src/core/worker-provision.js';
 import {
   recordWorkerProvision,
   setUniverse,
   status,
 } from '../src/core/worker.js';
+
+test('restart restore settle waits for persistent chart tokens when all recorded target ids are stale', async () => {
+  const state = {
+    worker_tabs: [
+      { target_id: 'old-a', chart_id: 'chart-a', persistent_layout: true },
+      { target_id: 'old-b', chart_id: 'chart-b', persistent_layout: true },
+    ],
+  };
+  let now = 0;
+  let polls = 0;
+  const snapshots = [
+    [{ id: 'new-a', url: 'https://www.tradingview.com/chart/chart-a/' }],
+    [
+      { id: 'new-a', url: 'https://www.tradingview.com/chart/chart-a/' },
+      { id: 'new-b', url: 'https://www.tradingview.com/chart/chart-b/' },
+    ],
+  ];
+
+  const result = await settlePersistentWorkerRestore(state, snapshots[0], {
+    listTargets: async () => snapshots[Math.min(polls++, snapshots.length - 1)],
+    wait: async ms => { now += ms; },
+    now: () => now,
+    timeoutMs: 6000,
+    pollMs: 250,
+  });
+
+  assert.deepEqual(result.map(target => target.id), ['new-a', 'new-b']);
+  assert.ok(now < 6000);
+});
+
+test('restart restore settle does not delay ordinary same-session reconciliation', async () => {
+  const initial = [{ id: 'live-a', url: 'https://www.tradingview.com/chart/chart-a/' }];
+  let waited = false;
+  const result = await settlePersistentWorkerRestore({
+    worker_tabs: [
+      { target_id: 'live-a', chart_id: 'chart-a', persistent_layout: true },
+      { target_id: 'live-b', chart_id: 'chart-b', persistent_layout: true },
+    ],
+  }, initial, {
+    listTargets: async () => { throw new Error('must not poll same-session state'); },
+    wait: async () => { waited = true; },
+  });
+
+  assert.equal(waited, false);
+  assert.equal(result, initial);
+});
 
 test('worker pane counts map only to supported TradingView layouts', () => {
   assert.equal(layoutCodeForPaneCount(1), 's');

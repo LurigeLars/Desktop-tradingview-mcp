@@ -55,6 +55,7 @@ function resolveDeps(overrides) {
     configureTarget: overrides?.configureTarget || configureTarget,
     inspectTargets: overrides?.inspectTargets || inspectTargetPaneCounts,
     listSavedLayouts: overrides?.listSavedLayouts || listSavedWorkerLayouts,
+    wait: overrides?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms))),
     now: overrides?.now || (() => Date.now()),
   };
 }
@@ -1122,6 +1123,51 @@ export async function closeTabByOwned(owned, {
   return closeTab();
 }
 
+export async function settlePersistentWorkerRestore(state, initialTargets, {
+  listTargets,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  now = () => Date.now(),
+  timeoutMs = 6000,
+  pollMs = 250,
+} = {}) {
+  const persistent = (state?.worker_tabs || []).filter(tab =>
+    tab?.persistent_layout === true && tab?.chart_id
+  );
+  if (!persistent.length || typeof listTargets !== 'function') return initialTargets || [];
+
+  const initial = initialTargets || [];
+  const liveTargetIds = new Set(initial.map(target => String(target.id || '')));
+  const recordedTargetIds = persistent
+    .map(tab => String(tab.target_id || ''))
+    .filter(Boolean);
+
+  // If at least one recorded target is still alive, this is an ordinary
+  // reconciliation inside the same Desktop session, not a restart restore.
+  if (recordedTargetIds.some(id => liveTargetIds.has(id))) return initial;
+
+  const wantedChartIds = new Set(persistent.map(tab => String(tab.chart_id)));
+  const presentCount = targets => {
+    const seen = new Set(
+      (targets || [])
+        .map(chartIdFromTarget)
+        .filter(chartId => chartId && wantedChartIds.has(String(chartId)))
+        .map(String)
+    );
+    return seen.size;
+  };
+
+  let latest = initial;
+  if (presentCount(latest) >= wantedChartIds.size) return latest;
+
+  const deadline = now() + Number(timeoutMs);
+  while (now() < deadline) {
+    await wait(Math.min(Number(pollMs), Math.max(1, deadline - now())));
+    latest = await listTargets();
+    if (presentCount(latest) >= wantedChartIds.size) break;
+  }
+  return latest;
+}
+
 export async function provisionWorker({
   max_tabs = 1,
   max_panes = 1,
@@ -1144,7 +1190,12 @@ export async function provisionWorker({
   let state = deps.status();
   const topology = state.topology_plan;
   const byHandle = entryMap(state);
-  const liveTargets = await deps.listTargets();
+  let liveTargets = await deps.listTargets();
+  liveTargets = await settlePersistentWorkerRestore(state, liveTargets, {
+    listTargets: deps.listTargets,
+    wait: deps.wait,
+    now: deps.now,
+  });
   const inspectedTargets = await deps.inspectTargets(liveTargets);
   const liveChartCounts = countChartIds(inspectedTargets);
   const ownedRuntimeKeys = stableOwnedRuntimeKeys(state.worker_tabs || []);
