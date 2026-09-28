@@ -325,8 +325,11 @@ async function withTarget(targetId, fn, timeoutMs = 2000) {
   return withDeadline(task, timeoutMs, 'CDP target ' + targetId);
 }
 
-async function createDirectChartTarget(url, {
+export async function createDirectChartTarget(url, {
   createTarget = options => CDP.New(options),
+  listTargets = listCdpTargets,
+  isReady = chartTargetReady,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
   timeoutMs = 15000,
 } = {}) {
   const created = await withDeadline(
@@ -341,13 +344,13 @@ async function createDirectChartTarget(url, {
 
   const deadline = Date.now() + Number(timeoutMs);
   do {
-    const targets = await listCdpTargets();
+    const targets = await listTargets();
     const target = targets.find(item => String(item.id) === String(targetId));
-    if (target && isChartPageTarget(target) && await chartTargetReady(targetId)) {
+    if (target && isChartPageTarget(target) && await isReady(targetId)) {
       return target;
     }
     if (Date.now() >= deadline) break;
-    await new Promise(resolve => setTimeout(resolve, 250));
+    await wait(250);
   } while (true);
 
   throw new Error('Direct CDP chart target was created but did not become ready in time');
@@ -389,6 +392,7 @@ export async function newTab({
   landing_timeout_ms = 8000,
   chart_timeout_ms = 15000,
   exact_layout = false,
+  _deps,
 } = {}) {
   const landingTimeoutMs = Number(landing_timeout_ms);
   const chartTimeoutMs = Number(chart_timeout_ms);
@@ -408,7 +412,8 @@ export async function newTab({
 
   if (wantsDirectChart && forceNewTab && requestedChartId) {
     const chartUrl = 'https://www.tradingview.com/chart/' + encodeURIComponent(requestedChartId) + '/';
-    const chartTarget = await createDirectChartTarget(chartUrl, {
+    const createPersistentTarget = _deps?.createDirectChartTarget || createDirectChartTarget;
+    const chartTarget = await createPersistentTarget(chartUrl, {
       timeoutMs: chartTimeoutMs,
     });
     await reconnectTo(chartTarget.id);
