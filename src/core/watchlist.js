@@ -131,6 +131,7 @@ export function matchTradingViewResolvedSymbol(requestedSymbol, resolvedSymbol, 
 // aria-label "Watchlist, details, and news"; older builds used
 // data-name="base-watchlist-widget-button" / aria-label "Watchlist".
 const WL_BUTTON_JS = `(document.querySelector('[data-name="base-watchlist-widget-button"]')
+  || document.querySelector('[class*="widgetbar"] [data-name="base"]')
   || document.querySelector('[aria-label="Watchlist, details, and news"]')
   || document.querySelector('[aria-label^="Watchlist"]'))`;
 
