@@ -78,6 +78,45 @@ export function rankShellCandidates(targets) {
     .map(item => item.target);
 }
 
+export function isReusableWorkerBootstrapTarget(target) {
+  if (!target || target.type !== 'page' || isChartPageTarget(target) || isShellTarget(target)) {
+    return false;
+  }
+  if (isNewTabPageTarget(target)) return true;
+  try {
+    const url = new URL(String(target.url || ''));
+    const hostname = url.hostname.toLowerCase();
+    const isTradingView = hostname === 'tradingview.com' || hostname.endsWith('.tradingview.com');
+    return isTradingView && url.pathname === '/';
+  } catch {
+    return false;
+  }
+}
+
+export function rankReusableWorkerBootstrapCandidates(targets) {
+  return (targets || [])
+    .filter(isReusableWorkerBootstrapTarget)
+    .map((target, index) => ({
+      target,
+      index,
+      knownNewTab: isNewTabPageTarget(target),
+      homepage: (() => {
+        try {
+          const url = new URL(String(target.url || ''));
+          return url.pathname === '/';
+        } catch {
+          return false;
+        }
+      })(),
+    }))
+    .sort((a, b) =>
+      Number(b.knownNewTab) - Number(a.knownNewTab)
+      || Number(b.homepage) - Number(a.homepage)
+      || a.index - b.index
+    )
+    .map(item => item.target);
+}
+
 export function rankLandingCandidates(targets, beforeIds = []) {
   const before = beforeIds instanceof Set ? beforeIds : new Set(beforeIds);
   return (targets || [])
@@ -412,11 +451,82 @@ export async function newTab({
 
   if (wantsDirectChart && forceNewTab && requestedChartId) {
     const chartUrl = 'https://www.tradingview.com/chart/' + encodeURIComponent(requestedChartId) + '/';
+    const listTargets = _deps?.listTargets || listCdpTargets;
+    const reconnect = _deps?.reconnectTo || reconnectTo;
+    const navigate = _deps?.navigateTarget || navigateTarget;
+    const waitForReadyChart = _deps?.waitForChartTarget || waitForChartTarget;
+    const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+
+    let currentTargets = await listTargets();
+    let existing = currentTargets.find(target =>
+      isChartPageTarget(target)
+      && String(target.url.match(/\/chart\/([^/?]+)/)?.[1] || '') === requestedChartId
+    );
+
+    // TradingView Desktop restores its own tabs asynchronously. When no chart
+    // targets are present yet, give that restore a bounded head start before
+    // creating or repurposing anything.
+    if (!existing && currentTargets.filter(isChartPageTarget).length === 0) {
+      const restoreDeadline = Date.now() + 2500;
+      do {
+        await wait(250);
+        currentTargets = await listTargets();
+        existing = currentTargets.find(target =>
+          isChartPageTarget(target)
+          && String(target.url.match(/\/chart\/([^/?]+)/)?.[1] || '') === requestedChartId
+        );
+        if (existing || Date.now() >= restoreDeadline) break;
+      } while (true);
+    }
+
+    if (existing) {
+      await reconnect(existing.id);
+      return {
+        success: true,
+        action: 'existing_chart_target_reused',
+        direct_navigation: true,
+        reused_existing_target: true,
+        target_id: existing.id,
+        chart_id: requestedChartId,
+        symbol: null,
+        requested_chart_id: requestedChartId,
+      };
+    }
+
+    // Desktop normally starts with one or more ordinary TradingView tabs.
+    // Reuse those visual tabs first so worker bootstrap converges toward five
+    // total tabs instead of adding five tabs on every start.
+    const reusable = rankReusableWorkerBootstrapCandidates(currentTargets)[0] || null;
+    if (reusable) {
+      const chartIdsBefore = new Set(
+        currentTargets.filter(isChartPageTarget).map(target => target.id)
+      );
+      await navigate(reusable.id, chartUrl, Math.min(chartTimeoutMs, 2500));
+      const chartTarget = await waitForReadyChart({
+        chartIdsBefore,
+        landingId: reusable.id,
+        timeoutMs: chartTimeoutMs,
+      });
+      if (!chartTarget) {
+        throw new Error('Existing TradingView startup tab was navigated but no ready worker chart target became discoverable.');
+      }
+      await reconnect(chartTarget.id);
+      return {
+        success: true,
+        action: 'startup_tab_reused_for_worker',
+        direct_navigation: true,
+        reused_existing_tab: true,
+        target_id: chartTarget.id,
+        chart_id: chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
+        symbol: null,
+        requested_chart_id: requestedChartId,
+      };
+    }
+
     const createPersistentTarget = _deps?.createDirectChartTarget || createDirectChartTarget;
     const chartTarget = await createPersistentTarget(chartUrl, {
       timeoutMs: chartTimeoutMs,
     });
-    const reconnect = _deps?.reconnectTo || reconnectTo;
     await reconnect(chartTarget.id);
     return {
       success: true,
