@@ -7,6 +7,16 @@ import { matchWatchlistSymbol } from './watchlist.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
+const OHLCV_PAGE_SIZE = 1000;
+const OHLCV_MAX_PAGES = 8;
+const OHLCV_PAGE_WAIT_MS = 1000;
+
+function _resolveOhlcv(deps) {
+  return {
+    evaluate: deps?.evaluate || evaluate,
+    delay: deps?.delay || ((ms) => new Promise(r => setTimeout(r, ms))),
+  };
+}
 
 // Round to 8 dp — enough to kill float noise (29899.999999997 → 29900) without
 // destroying precision on forex/crypto prices. The old 2-dp rounding flattened
@@ -135,12 +145,56 @@ function buildGraphicsJS(collectionName, mapKey, filter) {
   `;
 }
 
-export async function getOhlcv({ count, summary } = {}) {
-  const limit = Math.min(count || 100, MAX_OHLCV_BARS);
+export async function getOhlcv({ count, summary, _deps } = {}) {
+  const { evaluate: run, delay } = _resolveOhlcv(_deps);
+  const requested = Math.max(1, Math.floor(Number(count) || 100));
+  const limit = Math.min(requested, MAX_OHLCV_BARS);
+
+  let pagesLoaded = 0;
+  for (let page = 0; page < OHLCV_MAX_PAGES; page++) {
+    const state = await run(`
+      (function() {
+        try {
+          var series = ${CHART_API}._chartWidget.model().mainSeries();
+          var bars = series.bars();
+          var more = true;
+          try { more = series.requestMoreDataAvailable(); } catch (e) {}
+          return { size: bars.size(), more: more !== false };
+        } catch (e) { return { error: e.message }; }
+      })()
+    `);
+    if (!state || state.error || state.size >= limit || !state.more) break;
+
+    const before = state.size;
+    await run(`
+      (function() {
+        var series = ${CHART_API}._chartWidget.model().mainSeries();
+        var result = series.requestMoreData(${OHLCV_PAGE_SIZE});
+        return result && typeof result.then === 'function' ? result.then(function(){ return true; }) : true;
+      })()
+    `, { awaitPromise: true });
+
+    pagesLoaded++;
+    let grew = false;
+    const deadline = Date.now() + OHLCV_PAGE_WAIT_MS;
+    while (Date.now() < deadline) {
+      await delay(100);
+      const size = await run(`
+        (function() {
+          try { return ${CHART_API}._chartWidget.model().mainSeries().bars().size(); }
+          catch (e) { return -1; }
+        })()
+      `);
+      if (size > before) { grew = true; break; }
+    }
+    if (!grew) break;
+  }
+
   let data;
   try {
-    data = await evaluate(`
+    data = await run(`
       (function() {
+        var chart = ${CHART_API};
         var bars = ${BARS_PATH};
         if (!bars || typeof bars.lastIndex !== 'function') return null;
         var result = [];
@@ -150,14 +204,25 @@ export async function getOhlcv({ count, summary } = {}) {
           var v = bars.valueAt(i);
           if (v) result.push({time: v[0], open: v[1], high: v[2], low: v[3], close: v[4], volume: v[5] || 0});
         }
-        return {bars: result, total_bars: bars.size(), source: 'direct_bars'};
+        var symbol = null, resolution = null;
+        try { symbol = chart.symbol(); resolution = chart.resolution(); } catch (e) {}
+        return {bars: result, total_bars: bars.size(), symbol: symbol, resolution: resolution, source: 'direct_bars'};
       })()
     `);
   } catch { data = null; }
 
-  if (!data || !data.bars || data.bars.length === 0) {
-    throw new Error('Could not extract OHLCV data. The chart may still be loading.');
-  }
+  if (!data?.bars?.length) throw new Error('Could not extract OHLCV data. The chart may still be loading.');
+
+  const meta = {
+    symbol: data.symbol ?? null,
+    resolution: data.resolution ?? null,
+    requested,
+    bar_count: data.bars.length,
+    total_available: data.total_bars,
+    truncated: data.bars.length < requested,
+    pages_loaded: pagesLoaded,
+    ...(requested > MAX_OHLCV_BARS && { note: `count capped at ${MAX_OHLCV_BARS} bars per call` }),
+  };
 
   if (summary) {
     const bars = data.bars;
@@ -167,7 +232,7 @@ export async function getOhlcv({ count, summary } = {}) {
     const first = bars[0];
     const last = bars[bars.length - 1];
     return {
-      success: true, bar_count: bars.length,
+      success: true, ...meta,
       period: { from: first.time, to: last.time },
       open: first.open, close: last.close,
       high: Math.max(...highs), low: Math.min(...lows),
@@ -179,7 +244,7 @@ export async function getOhlcv({ count, summary } = {}) {
     };
   }
 
-  return { success: true, bar_count: data.bars.length, total_available: data.total_bars, source: data.source, bars: data.bars };
+  return { success: true, ...meta, source: data.source, bars: data.bars };
 }
 
 export async function getIndicator({ entity_id }) {
