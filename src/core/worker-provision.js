@@ -963,36 +963,40 @@ async function openOrCreateWorkerTab({
   }
 
   if (owned?.persistent_layout === true && desiredName) {
-    const savedLayouts = await deps.listSavedLayouts(liveTargets);
-    const exact = (savedLayouts || []).filter(layout =>
-      String(layout?.name || '').trim().toLowerCase() === desiredName.toLowerCase()
-      && String(layout?.url || '').trim()
-    );
+    // Registry chart_id is the canonical persistent worker identity. Prefer it
+    // directly so cold-start recovery does not depend on getSavedCharts being
+    // available from an already-open chart target.
+    let savedChartId = owned?.chart_id ? String(owned.chart_id).trim() : '';
 
-    let saved = null;
-    if (owned?.chart_id) {
-      saved = exact.find(layout => String(layout.url) === String(owned.chart_id)) || null;
-    }
-    if (!saved && exact.length === 1) saved = exact[0];
-    if (!saved && exact.length > 1) {
-      throw new Error(
-        'Worker saved-layout reopen is ambiguous for "' + desiredName + '": ' +
-        exact.map(layout => String(layout.url)).join(', ')
+    if (!savedChartId) {
+      const savedLayouts = await deps.listSavedLayouts(liveTargets);
+      const exact = (savedLayouts || []).filter(layout =>
+        String(layout?.name || '').trim().toLowerCase() === desiredName.toLowerCase()
+        && String(layout?.url || '').trim()
       );
+
+      if (exact.length === 1) {
+        savedChartId = String(exact[0].url);
+      } else if (exact.length > 1) {
+        throw new Error(
+          'Worker saved-layout reopen is ambiguous for "' + desiredName + '": ' +
+          exact.map(layout => String(layout.url)).join(', ')
+        );
+      }
     }
 
-    if (saved) {
+    if (savedChartId) {
       try {
         const reopened = await deps.newTab({
           as_chart: true,
-          chart_id: String(saved.url),
+          chart_id: savedChartId,
           force_new_tab: true,
           ...newTabOptions,
         });
-        if (String(reopened.chart_id || '') !== String(saved.url)) {
+        if (String(reopened.chart_id || '') !== savedChartId) {
           throw new Error(
             'Exact saved-layout navigation returned chart ' + String(reopened.chart_id || '') +
-            ' instead of ' + String(saved.url)
+            ' instead of ' + savedChartId
           );
         }
         const target = await findTargetForOwned(
@@ -1004,8 +1008,8 @@ async function openOrCreateWorkerTab({
         return {
           target,
           layoutName: desiredName,
-          reused: false,
-          openedThisCall: true,
+          reused: reopened.reused_existing_target === true || reopened.reused_existing_tab === true,
+          openedThisCall: reopened.reused_existing_target !== true,
           directChart: false,
           persistentLayout: true,
         };
