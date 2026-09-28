@@ -325,6 +325,34 @@ async function withTarget(targetId, fn, timeoutMs = 2000) {
   return withDeadline(task, timeoutMs, 'CDP target ' + targetId);
 }
 
+async function createDirectChartTarget(url, {
+  createTarget = options => CDP.New(options),
+  timeoutMs = 15000,
+} = {}) {
+  const created = await withDeadline(
+    createTarget({ host: CDP_HOST, port: CDP_PORT, url }),
+    Math.min(Number(timeoutMs) || 15000, 5000),
+    'CDP.New chart target',
+  );
+  const targetId = created?.id || created?.targetId;
+  if (!targetId) {
+    throw new Error('CDP.New returned no target id');
+  }
+
+  const deadline = Date.now() + Number(timeoutMs);
+  do {
+    const targets = await listCdpTargets();
+    const target = targets.find(item => String(item.id) === String(targetId));
+    if (target && isChartPageTarget(target) && await chartTargetReady(targetId)) {
+      return target;
+    }
+    if (Date.now() >= deadline) break;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  } while (true);
+
+  throw new Error('Direct CDP chart target was created but did not become ready in time');
+}
+
 async function navigateTarget(targetId, url, timeoutMs = 2500) {
   const task = (async () => {
     let client = null;
@@ -376,6 +404,24 @@ export async function newTab({
   }
   if (!Number.isFinite(chartTimeoutMs) || chartTimeoutMs < 0) {
     throw new Error('chart_timeout_ms must be a non-negative number');
+  }
+
+  if (wantsDirectChart && forceNewTab && requestedChartId) {
+    const chartUrl = 'https://www.tradingview.com/chart/' + encodeURIComponent(requestedChartId) + '/';
+    const chartTarget = await createDirectChartTarget(chartUrl, {
+      timeoutMs: chartTimeoutMs,
+    });
+    await reconnectTo(chartTarget.id);
+    return {
+      success: true,
+      action: 'new_chart_target_opened',
+      direct_navigation: true,
+      direct_target_creation: true,
+      target_id: chartTarget.id,
+      chart_id: chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
+      symbol: null,
+      requested_chart_id: requestedChartId,
+    };
   }
 
   let landing = forceNewTab
