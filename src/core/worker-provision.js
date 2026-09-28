@@ -183,14 +183,13 @@ export function recordedTabComplete(
   if (!ownedKey) return false;
 
   const live = liveByRuntimeKey?.get?.(ownedKey) || null;
-  const liveKeys = new Set(runtimeKeys(live || owned));
 
   return plan.handles.every((handle, paneIndex) => {
     const entry = entries.get(handle);
     const assignment = entry?.assignment;
     const assignmentMatches = assignment
       && Number(assignment.worker_slot) === Number(plan.tab_index)
-      && runtimeKeys(assignment).some(key => liveKeys.has(key))
+      && runtimeKeys(assignment).includes(ownedKey)
       && Number(assignment.pane_index) === paneIndex;
 
     if (!assignmentMatches) return false;
