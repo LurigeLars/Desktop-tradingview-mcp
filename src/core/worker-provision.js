@@ -1068,8 +1068,58 @@ async function openOrCreateWorkerTab({
   }
 }
 
+export async function closeWorkerTargetGracefully(targetId, {
+  connect = id => CDP({ host: CDP_HOST, port: CDP_PORT, target: id }),
+  listTargets = listTradingViewChartTargets,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  timeoutMs = 900,
+} = {}) {
+  const id = String(targetId || '').trim();
+  if (!id) return false;
+
+  let client = null;
+  try {
+    client = await connect(id);
+
+    // Prefer renderer/page-level close semantics so TradingView Desktop's
+    // Electron shell receives a normal tab-close lifecycle and can remove the
+    // visual tab instead of retaining an orphaned spinner shell.
+    try {
+      await client.Runtime.enable();
+      await client.Runtime.evaluate({
+        expression: 'window.close(); true',
+        returnByValue: true,
+      });
+    } catch {
+      // Some restored tabs reject window.close(); Page.close is the next
+      // graceful option before falling back to Target.closeTarget.
+      try {
+        if (client.Page?.enable) await client.Page.enable();
+        if (client.Page?.close) await client.Page.close();
+      } catch {
+        // Caller will use hard target close if this target remains live.
+      }
+    }
+  } catch {
+    return false;
+  } finally {
+    try { if (client) await client.close(); } catch { /* target may already be gone */ }
+  }
+
+  const deadline = Date.now() + Number(timeoutMs);
+  do {
+    const remaining = await listTargets();
+    if (!remaining.some(target => String(target.id) === id)) return true;
+    if (Date.now() >= deadline) break;
+    await wait(75);
+  } while (true);
+
+  return false;
+}
+
 export async function closeTabByOwned(owned, {
   listTargets = listTradingViewChartTargets,
+  gracefulCloseTarget = targetId => closeWorkerTargetGracefully(targetId, { listTargets }),
   closeTarget = targetId => CDP.Close({ host: CDP_HOST, port: CDP_PORT, id: targetId }),
   listTabs = tabCore.list,
   switchTab = tabCore.switchTab,
@@ -1085,13 +1135,23 @@ export async function closeTabByOwned(owned, {
       return { success: true, closed: false, reason: 'already_absent', target_id: targetId };
     }
 
+    const gracefullyClosed = await gracefulCloseTarget(targetId);
+    if (gracefullyClosed) {
+      return {
+        success: true,
+        closed: true,
+        via: 'renderer_close',
+        target_id: targetId,
+      };
+    }
+
     await closeTarget(targetId);
 
     const deadline = Date.now() + Number(timeoutMs);
     do {
       const remaining = await listTargets();
       if (!remaining.some(target => String(target.id) === targetId)) {
-        return { success: true, closed: true, via: 'target_id', target_id: targetId };
+        return { success: true, closed: true, via: 'target_id_fallback', target_id: targetId };
       }
       if (Date.now() >= deadline) break;
       await wait(100);
