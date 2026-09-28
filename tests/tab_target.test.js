@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanupOrphanShellTabs, closeTabByTargetId, isChartPageTarget, isNewTabPageTarget, rankLandingCandidates, withDeadline } from '../src/core/tab.js';
+import { cleanupOrphanShellTabs, closeTabByTargetId, isChartPageTarget, isNewTabPageTarget, rankLandingCandidates, rankShellCandidates, withDeadline } from '../src/core/tab.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
   assert.equal(isChartPageTarget({
@@ -19,6 +19,50 @@ test('chart target detection validates TradingView hostname and /chart path', ()
     type: 'page',
     url: 'https://www.tradingview.com/markets/stocks-usa/',
   }), false);
+});
+
+test('tabbed-window shell target is preferred over generic window targets', () => {
+  const targets = [
+    {
+      id: 'generic-window',
+      type: 'page',
+      title: 'TradingView',
+      url: 'file:///C:/TradingView/resources/app.asar/app/window/index.html?window=1',
+    },
+    {
+      id: 'tabbed-shell',
+      type: 'page',
+      title: 'tabbed-window',
+      url: 'file:///C:/TradingView/resources/app.asar/app/window/index.html?window=2',
+    },
+  ];
+
+  assert.deepEqual(
+    rankShellCandidates(targets).map(target => target.id),
+    ['tabbed-shell', 'generic-window'],
+  );
+});
+
+test('tabbed-window hint in URL outranks generic window/index target', () => {
+  const targets = [
+    {
+      id: 'generic-window',
+      type: 'page',
+      title: 'TradingView',
+      url: 'file:///app/window/index.html?window=1',
+    },
+    {
+      id: 'url-hinted-shell',
+      type: 'page',
+      title: 'TradingView',
+      url: 'file:///app/window/index.html?type=tabbed-window',
+    },
+  ];
+
+  assert.deepEqual(
+    rankShellCandidates(targets).map(target => target.id),
+    ['url-hinted-shell', 'generic-window'],
+  );
 });
 
 test('landing candidates exclude chart and shell targets', () => {
