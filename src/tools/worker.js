@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/worker.js';
+import { topologyMutationLockStatus, withTopologyMutationLock } from '../core/topology-lock.js';
 
 const studySchema = z.union([
   z.string(),
@@ -30,7 +31,7 @@ export function registerWorkerTools(server) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {
-    try { return jsonResult(core.setUniverse(args)); }
+    try { return jsonResult(await withTopologyMutationLock('worker_set_universe', () => core.setUniverse(args))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -39,7 +40,7 @@ export function registerWorkerTools(server) {
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
-    try { return jsonResult(core.status()); }
+    try { return jsonResult({ ...core.status(), mutation_lock: topologyMutationLockStatus() }); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
