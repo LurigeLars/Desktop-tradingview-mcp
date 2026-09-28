@@ -944,10 +944,9 @@ test('persistent worker reopens exact saved chart token when layout names are du
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
     listTargets: async () => liveTargets,
     inspectTargets: async () => [],
-    listSavedLayouts: async () => [
-      { id: 1, name: 'DTV Worker 01', url: 'wrong-token' },
-      { id: 2, name: 'DTV Worker 01', url: 'good-token' },
-    ],
+    listSavedLayouts: async () => {
+      throw new Error('registry chart_id must avoid saved-layout lookup');
+    },
     newTab: async args => {
       assert.equal(args.as_chart, true);
       assert.equal(args.chart_id, 'good-token');
