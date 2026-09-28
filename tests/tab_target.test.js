@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isChartPageTarget, isNewTabPageTarget, rankLandingCandidates, withDeadline } from '../src/core/tab.js';
+import { closeTabByTargetId, isChartPageTarget, isNewTabPageTarget, rankLandingCandidates, withDeadline } from '../src/core/tab.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
   assert.equal(isChartPageTarget({
@@ -93,5 +93,53 @@ test('known Desktop new-tab target is preferred over generic landing candidates'
   assert.deepEqual(
     rankLandingCandidates(targets, before).map(target => target.id),
     ['desktop-new', 'generic'],
+  );
+});
+
+
+test('exact tab close targets one CDP tab without relying on active shell state', async () => {
+  const targets = [
+    { id: 'a', type: 'page', url: 'https://www.tradingview.com/chart/a/' },
+    { id: 'b', type: 'page', url: 'https://www.tradingview.com/chart/b/' },
+  ];
+
+  const result = await closeTabByTargetId({
+    target_id: 'b',
+    _deps: {
+      listTabs: async () => ({
+        tab_count: targets.length,
+        tabs: targets.map((target, index) => ({
+          index,
+          id: target.id,
+          chart_id: target.id,
+          is_chart: true,
+        })),
+      }),
+      listTargets: async () => targets.slice(),
+      closeTarget: async targetId => {
+        const index = targets.findIndex(target => target.id === targetId);
+        if (index >= 0) targets.splice(index, 1);
+      },
+      wait: async () => {},
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.target_id, 'b');
+  assert.deepEqual(targets.map(target => target.id), ['a']);
+});
+
+test('exact tab close refuses the last Desktop tab', async () => {
+  await assert.rejects(
+    () => closeTabByTargetId({
+      target_id: 'only',
+      _deps: {
+        listTabs: async () => ({
+          tab_count: 1,
+          tabs: [{ index: 0, id: 'only', chart_id: 'only', is_chart: true }],
+        }),
+      },
+    }),
+    /Cannot close the last tab/,
   );
 });
