@@ -724,7 +724,16 @@ async function openOrCreateWorkerTab({
   const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
 
   if (legacyTarget) {
-    const cloned = await deps.cloneTargetAsLayout(legacyTarget, desiredName);
+    const liveLegacy = (liveTargets || []).find(
+      target => String(target.id) === String(legacyTarget.target_id)
+    );
+    if (!liveLegacy) {
+      throw new Error(
+        'Legacy worker target ' + String(legacyTarget.target_id || '') +
+        ' was not discoverable for in-place layout cloning'
+      );
+    }
+    const cloned = await deps.cloneTargetAsLayout(liveLegacy, desiredName);
     return {
       target: cloned,
       layoutName: desiredName,
