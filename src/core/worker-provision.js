@@ -558,7 +558,7 @@ export async function cloneTargetAsLayout(target, name, {
     client = await connect(target.id);
     await client.Runtime.enable();
 
-    const before = await evaluateValue(client, \`
+    const before = await evaluateValue(client, `
       (function() {
         var api = window.TradingViewApi;
         return {
@@ -567,9 +567,9 @@ export async function cloneTargetAsLayout(target, name, {
           layout_name: api && typeof api.layoutName === 'function' ? api.layoutName() : null
         };
       })()
-    \`);
+    `);
 
-    const opened = await evaluateValue(client, \`
+    const opened = await evaluateValue(client, `
       (function() {
         var api = window.TradingViewApi;
         if (!api || typeof api.showSaveAsChartDialog !== 'function') {
@@ -578,16 +578,16 @@ export async function cloneTargetAsLayout(target, name, {
         api.showSaveAsChartDialog();
         return { success: true };
       })()
-    \`);
+    `);
     if (!opened?.success) throw new Error(opened?.error || 'Could not open Save As dialog');
     dialogOpened = true;
 
     const deadline = Date.now() + Number(timeoutMs);
     let filled = false;
     do {
-      filled = await evaluateValue(client, \`
+      filled = await evaluateValue(client, `
         (function() {
-          var desired = \${desiredLiteral};
+          var desired = ${desiredLiteral};
           var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [class*="dialog"], [class*="popupDialog"]'));
           for (var di = dialogs.length - 1; di >= 0; di--) {
             var dialog = dialogs[di];
@@ -606,14 +606,14 @@ export async function cloneTargetAsLayout(target, name, {
           }
           return false;
         })()
-      \`);
+      `);
       if (filled) break;
       if (Date.now() >= deadline) break;
       await wait(100);
     } while (true);
     if (!filled) throw new Error('TradingView Save As dialog did not expose its layout-name input');
 
-    const clicked = await evaluateValue(client, \`
+    const clicked = await evaluateValue(client, `
       (function() {
         var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [class*="dialog"], [class*="popupDialog"]'));
         for (var di = dialogs.length - 1; di >= 0; di--) {
@@ -628,13 +628,13 @@ export async function cloneTargetAsLayout(target, name, {
         }
         return false;
       })()
-    \`);
+    `);
     if (!clicked) throw new Error('TradingView Make copy button was not available');
 
     let observed = null;
     do {
       await wait(150);
-      observed = await evaluateValue(client, \`
+      observed = await evaluateValue(client, `
         (function() {
           var api = window.TradingViewApi;
           return {
@@ -643,7 +643,7 @@ export async function cloneTargetAsLayout(target, name, {
             layout_name: api && typeof api.layoutName === 'function' ? api.layoutName() : null
           };
         })()
-      \`);
+      `);
       const newId = observed?.layout_id != null
         && String(observed.layout_id) !== String(before?.layout_id ?? '');
       if (newId && String(observed?.layout_name || '') === desiredName) break;
@@ -662,7 +662,7 @@ export async function cloneTargetAsLayout(target, name, {
   } catch (error) {
     if (client && dialogOpened) {
       try {
-        await evaluateValue(client, \`
+        await evaluateValue(client, `
           (function() {
             var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [class*="dialog"], [class*="popupDialog"]'));
             for (var di = dialogs.length - 1; di >= 0; di--) {
@@ -675,7 +675,7 @@ export async function cloneTargetAsLayout(target, name, {
             }
             return false;
           })()
-        \`);
+        `);
       } catch { /* best effort */ }
     }
     throw error;
