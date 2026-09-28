@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import { provisionWorker } from '../core/worker-provision.js';
+import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerWorkerProvisionTools(server) {
   server.registerTool('worker_provision', {
@@ -15,7 +16,10 @@ export function registerWorkerProvisionTools(server) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {
-    try { return jsonResult(await provisionWorker(args)); }
+    try {
+      if (args?.dry_run) return jsonResult(await provisionWorker(args));
+      return jsonResult(await withTopologyMutationLock('worker_provision', () => provisionWorker(args)));
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
