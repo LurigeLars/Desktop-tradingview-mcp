@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { closeTabByTargetId, isChartPageTarget, isNewTabPageTarget, rankLandingCandidates, withDeadline } from '../src/core/tab.js';
+import { cleanupOrphanShellTabs, closeTabByTargetId, isChartPageTarget, isNewTabPageTarget, rankLandingCandidates, withDeadline } from '../src/core/tab.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
   assert.equal(isChartPageTarget({
@@ -142,4 +142,59 @@ test('exact tab close refuses the last Desktop tab', async () => {
     }),
     /Cannot close the last tab/,
   );
+});
+
+
+test('orphan shell cleanup preserves mapped worker tabs and closes only stale shell tabs', async () => {
+  const shellTabs = [
+    { owner: 'worker-a' },
+    { owner: null },
+    { owner: 'worker-b' },
+    { owner: null },
+  ];
+  let activeIndex = 0;
+
+  const evalIn = async expression => {
+    if (expression.includes("document.querySelectorAll('.tabs-container .tab').length")) {
+      return shellTabs.length;
+    }
+    if (expression.includes("tabs.indexOf(active)")) {
+      return activeIndex;
+    }
+
+    const indexMatch = expression.match(/tab'\)\[(\d+)\]/);
+    const index = indexMatch ? Number(indexMatch[1]) : null;
+    if (index == null) throw new Error('Unhandled shell expression: ' + expression);
+
+    if (expression.includes('close.click()')) {
+      if (!shellTabs[index]) return false;
+      shellTabs.splice(index, 1);
+      if (activeIndex >= shellTabs.length) activeIndex = Math.max(0, shellTabs.length - 1);
+      return true;
+    }
+
+    if (expression.includes('tab.click()')) {
+      if (!shellTabs[index]) return false;
+      activeIndex = index;
+      return true;
+    }
+
+    throw new Error('Unhandled shell expression: ' + expression);
+  };
+
+  const result = await cleanupOrphanShellTabs({
+    keep_target_ids: ['worker-a', 'worker-b'],
+    _deps: {
+      withShell: async fn => fn(evalIn),
+      isTargetVisible: async targetId => shellTabs[activeIndex]?.owner === targetId,
+      wait: async () => {},
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.tabs_before, 4);
+  assert.equal(result.tabs_after, 2);
+  assert.deepEqual(result.protected_indexes, [0, 2]);
+  assert.deepEqual(result.closed_indexes, [3, 1]);
+  assert.deepEqual(shellTabs.map(tab => tab.owner), ['worker-a', 'worker-b']);
 });
