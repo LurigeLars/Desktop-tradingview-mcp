@@ -64,10 +64,110 @@ function workerTabMap(state) {
   return new Map((state.worker_tabs || []).map(tab => [Number(tab.slot), tab]));
 }
 
+function runtimeKeys(value) {
+  const keys = [];
+  if (value?.target_id) keys.push('target:' + String(value.target_id));
+  if (value?.chart_id) keys.push('chart:' + String(value.chart_id));
+  return keys;
+}
+
 function ownedRuntimeKey(value) {
-  if (value?.target_id) return 'target:' + String(value.target_id);
-  if (value?.chart_id) return 'chart:' + String(value.chart_id);
-  return null;
+  return runtimeKeys(value)[0] || null;
+}
+
+function countChartIds(items) {
+  const counts = new Map();
+  for (const item of items || []) {
+    if (!item?.chart_id) continue;
+    const key = String(item.chart_id);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+function stableOwnedRuntimeKeys(workerTabs) {
+  const tabs = workerTabs || [];
+  const chartCounts = countChartIds(tabs);
+  const keys = new Set();
+  for (const tab of tabs) {
+    if (tab?.target_id) keys.add('target:' + String(tab.target_id));
+    if (tab?.chart_id && chartCounts.get(String(tab.chart_id)) === 1) {
+      keys.add('chart:' + String(tab.chart_id));
+    }
+  }
+  return keys;
+}
+
+function sameNumberMultiset(left, right) {
+  const count = values => {
+    const out = new Map();
+    for (const value of values) {
+      const key = Number(value);
+      out.set(key, (out.get(key) || 0) + 1);
+    }
+    return out;
+  };
+  const a = count(left);
+  const b = count(right);
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
+  }
+  return true;
+}
+
+export function legacyDirectWorkerRecovery(state, inspectedTargets) {
+  const tabs = (state?.worker_tabs || []).filter(tab =>
+    tab?.chart_id && tab?.persistent_layout !== true
+  );
+  const tabGroups = new Map();
+  for (const tab of tabs) {
+    const chartId = String(tab.chart_id);
+    if (!tabGroups.has(chartId)) tabGroups.set(chartId, []);
+    tabGroups.get(chartId).push(tab);
+  }
+
+  const liveGroups = new Map();
+  for (const target of inspectedTargets || []) {
+    if (!target?.chart_id || !target?.target_id) continue;
+    const chartId = String(target.chart_id);
+    if (!liveGroups.has(chartId)) liveGroups.set(chartId, []);
+    liveGroups.get(chartId).push(target);
+  }
+
+  const bySlot = new Map();
+  const targetIds = new Set();
+  const groups = [];
+
+  for (const [chartId, recorded] of tabGroups) {
+    if (recorded.length < 2) continue;
+    const live = liveGroups.get(chartId) || [];
+    if (live.length !== recorded.length) continue;
+    if (!sameNumberMultiset(
+      recorded.map(tab => tab.pane_count),
+      live.map(target => target.pane_count),
+    )) continue;
+
+    const sortedRecorded = [...recorded].sort((a, b) => Number(a.slot) - Number(b.slot));
+    const sortedLive = [...live].sort((a, b) =>
+      String(a.target_id).localeCompare(String(b.target_id))
+    );
+
+    for (let index = 0; index < sortedRecorded.length; index++) {
+      const slot = Number(sortedRecorded[index].slot);
+      const target = sortedLive[index];
+      bySlot.set(slot, target);
+      targetIds.add(String(target.target_id));
+    }
+
+    groups.push({
+      chart_id: chartId,
+      slots: sortedRecorded.map(tab => Number(tab.slot)),
+      target_count: sortedLive.length,
+    });
+  }
+
+  return { bySlot, targetIds, groups };
 }
 
 export function recordedTabComplete(
@@ -79,18 +179,18 @@ export function recordedTabComplete(
   const tabs = workerTabMap(state);
   const entries = entryMap(state);
   const owned = tabs.get(Number(plan.tab_index));
-  const ownedKey = ownedRuntimeKey(owned);
-  if (!ownedKey || !liveRuntimeKeys.has(ownedKey)) return false;
+  const ownedKey = runtimeKeys(owned).find(key => liveRuntimeKeys.has(key)) || null;
+  if (!ownedKey) return false;
 
   const live = liveByRuntimeKey?.get?.(ownedKey) || null;
+  const liveKeys = new Set(runtimeKeys(live || owned));
 
   return plan.handles.every((handle, paneIndex) => {
     const entry = entries.get(handle);
     const assignment = entry?.assignment;
-    const assignmentKey = ownedRuntimeKey(assignment);
     const assignmentMatches = assignment
       && Number(assignment.worker_slot) === Number(plan.tab_index)
-      && assignmentKey === ownedKey
+      && runtimeKeys(assignment).some(key => liveKeys.has(key))
       && Number(assignment.pane_index) === paneIndex;
 
     if (!assignmentMatches) return false;
@@ -433,7 +533,10 @@ async function findTargetForOwned(owned, targets = null, listTargets = listTradi
     if (byTarget) return byTarget;
   }
   if (owned?.chart_id) {
-    return available.find(target => String(chartIdFromTarget(target)) === String(owned.chart_id)) || null;
+    const byChart = available.filter(
+      target => String(chartIdFromTarget(target)) === String(owned.chart_id)
+    );
+    if (byChart.length === 1) return byChart[0];
   }
   return null;
 }
@@ -469,42 +572,71 @@ async function openOrCreateWorkerTab({
   layoutPrefix,
   deps,
   liveTargets,
+  replaceLegacy = false,
 }) {
   const newTabOptions = {
     landing_timeout_ms: 4000,
     chart_timeout_ms: 8000,
   };
+  const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
 
-  if (owned?.target_id || owned?.chart_id) {
+  if (!replaceLegacy && (owned?.target_id || owned?.chart_id)) {
     const live = await findTargetForOwned(owned, liveTargets);
     if (live) {
       return {
         target: live,
-        layoutName: owned.layout_name,
+        layoutName: desiredName,
         reused: true,
         openedThisCall: false,
-        directChart: true,
+        directChart: owned?.persistent_layout !== true,
+        persistentLayout: owned?.persistent_layout === true,
       };
     }
   }
 
-  const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
+  let created = null;
 
-  // Worker provisioning only needs a dedicated chart target. Do not depend on
-  // TradingView's saved-layout picker UI; open a new Desktop tab and navigate
-  // its known new-tab target directly to /chart/.
-  let created;
-  try {
-    created = await deps.newTab({
-      as_chart: true,
-      force_new_tab: true,
-      ...newTabOptions,
-    });
-  } catch (error) {
-    throw new Error(
-      'Worker direct chart-tab create failed for "' + desiredName + '": ' +
-      (error?.message || String(error)),
-    );
+  // Restart-stable workers need distinct saved TradingView layouts. Direct
+  // /chart/ tabs can share one chart_id and collapse onto the same layout
+  // after Desktop restarts.
+  if (!replaceLegacy && owned?.persistent_layout === true && desiredName) {
+    try {
+      created = await deps.newTab({
+        layout: desiredName,
+        exact_layout: true,
+        force_new_tab: true,
+        ...newTabOptions,
+      });
+    } catch (error) {
+      const message = error?.message || String(error);
+      if (!/Layout matching .* not found/i.test(message)) {
+        throw new Error(
+          'Worker saved-layout reopen failed for "' + desiredName + '": ' + message,
+        );
+      }
+      // The failed exact lookup leaves a landing tab available. Reuse it when
+      // recreating the missing saved layout so we do not leak an extra tab.
+      created = await deps.newTab({
+        layout: 'new',
+        name: desiredName,
+        force_new_tab: false,
+        ...newTabOptions,
+      });
+    }
+  } else {
+    try {
+      created = await deps.newTab({
+        layout: 'new',
+        name: desiredName,
+        force_new_tab: true,
+        ...newTabOptions,
+      });
+    } catch (error) {
+      throw new Error(
+        'Worker saved-layout create failed for "' + desiredName + '": ' +
+        (error?.message || String(error)),
+      );
+    }
   }
 
   const target = await findTargetForOwned(
@@ -512,14 +644,15 @@ async function openOrCreateWorkerTab({
     null,
     deps.listTargets,
   );
-  if (!target) throw new Error('New worker chart target was not discoverable after direct navigation');
+  if (!target) throw new Error('New worker saved-layout target was not discoverable');
 
   return {
     target,
     layoutName: desiredName,
     reused: false,
     openedThisCall: true,
-    directChart: true,
+    directChart: false,
+    persistentLayout: true,
   };
 }
 
@@ -602,9 +735,8 @@ export async function provisionWorker({
   const byHandle = entryMap(state);
   const liveTargets = await deps.listTargets();
   const inspectedTargets = await deps.inspectTargets(liveTargets);
-  const ownedRuntimeKeys = new Set(
-    (state.worker_tabs || []).map(ownedRuntimeKey).filter(Boolean),
-  );
+  const ownedRuntimeKeys = stableOwnedRuntimeKeys(state.worker_tabs || []);
+  const legacyRecovery = legacyDirectWorkerRecovery(state, inspectedTargets);
 
   let externalTargets = inspectedTargets.filter(item => {
     const targetKey = item.target_id ? 'target:' + String(item.target_id) : null;
@@ -612,6 +744,7 @@ export async function provisionWorker({
     return !(
       (targetKey && ownedRuntimeKeys.has(targetKey))
       || (chartKey && ownedRuntimeKeys.has(chartKey))
+      || (item.target_id && legacyRecovery.targetIds.has(String(item.target_id)))
     );
   });
   let adoptionCandidate = null;
@@ -652,16 +785,17 @@ export async function provisionWorker({
 
   const liveRuntimeKeys = new Set();
   const liveByRuntimeKey = new Map();
+  const liveChartCounts = countChartIds(inspectedTargets);
   for (const item of inspectedTargets) {
     if (item.target_id) {
       const key = 'target:' + String(item.target_id);
       liveRuntimeKeys.add(key);
       liveByRuntimeKey.set(key, item);
     }
-    if (item.chart_id) {
+    if (item.chart_id && liveChartCounts.get(String(item.chart_id)) === 1) {
       const key = 'chart:' + String(item.chart_id);
       liveRuntimeKeys.add(key);
-      if (!liveByRuntimeKey.has(key)) liveByRuntimeKey.set(key, item);
+      liveByRuntimeKey.set(key, item);
     }
   }
   const ownedBySlot = workerTabMap(state);
@@ -690,6 +824,10 @@ export async function provisionWorker({
         projected_connections: projectedConnections,
       },
       adoption_candidate: adoptionCandidate,
+      legacy_direct_recovery: {
+        groups: legacyRecovery.groups,
+        slots: [...legacyRecovery.bySlot.keys()].sort((a, b) => a - b),
+      },
     };
   }
 
@@ -710,8 +848,8 @@ export async function provisionWorker({
       const layoutPrefix = layout_prefix || process.env.TV_WORKER_LAYOUT_PREFIX || 'DTV Worker';
       let owned = ownedBySlot.get(slot) || null;
       // Journal deterministic worker ownership intent before opening
-      // TradingView. The technical name is metadata only; worker creation no
-      // longer depends on a saved TradingView layout.
+      // TradingView. The technical name is also the saved-layout identity for
+      // restart-stable worker tabs.
       if (!owned) {
         owned = {
           slot,
@@ -729,12 +867,22 @@ export async function provisionWorker({
         state = deps.record({ worker_tabs: intentTabs });
       }
 
+      const legacyTarget = legacyRecovery.bySlot.get(slot) || null;
+      if (legacyTarget) {
+        stage = 'replace_legacy_direct_tab';
+        await deps.closeTabByOwned({
+          target_id: legacyTarget.target_id,
+          chart_id: legacyTarget.chart_id,
+        });
+      }
+
       const opened = await openOrCreateWorkerTab({
         plan,
         owned,
         layoutPrefix,
         deps,
         liveTargets: await deps.listTargets(),
+        replaceLegacy: !!legacyTarget,
       });
 
       const openDurationMs = Date.now() - started;
@@ -748,6 +896,7 @@ export async function provisionWorker({
           chart_id: chartId,
           layout_name: opened.layoutName,
           pane_count: plan.pane_count,
+          persistent_layout: opened.persistentLayout === true,
         },
       ].sort((a, b) => Number(a.slot) - Number(b.slot));
 
@@ -773,6 +922,8 @@ export async function provisionWorker({
           pane_count: plan.pane_count,
           reused: opened.reused,
           direct_chart: !!opened.directChart,
+          persistent_layout: opened.persistentLayout === true,
+          legacy_replaced: !!legacyTarget,
           pending_panes: entries.map((_, index) => index),
           open_duration_ms: openDurationMs,
           duration_ms: Date.now() - started,
