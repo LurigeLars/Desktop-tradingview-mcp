@@ -49,6 +49,7 @@ function resolveDeps(overrides) {
     record: overrides?.record || recordWorkerProvision,
     listTargets: overrides?.listTargets || listTradingViewChartTargets,
     newTab: overrides?.newTab || tabCore.newTab,
+    cloneTargetAsLayout: overrides?.cloneTargetAsLayout || cloneTargetAsLayout,
     closeTabByOwned: overrides?.closeTabByOwned || closeTabByOwned,
     configureTarget: overrides?.configureTarget || configureTarget,
     inspectTargets: overrides?.inspectTargets || inspectTargetPaneCounts,
@@ -540,6 +541,149 @@ async function findTargetForOwned(owned, targets = null, listTargets = listTradi
   return null;
 }
 
+export async function cloneTargetAsLayout(target, name, {
+  connect = targetId => CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId }),
+  listTargets = listTradingViewChartTargets,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  timeoutMs = 8000,
+} = {}) {
+  if (!target?.id) throw new Error('CDP target id is required to clone a worker layout');
+  const desiredName = String(name || '').trim();
+  if (!desiredName) throw new Error('Worker layout name is required');
+  const desiredLiteral = JSON.stringify(desiredName);
+
+  let client = null;
+  let dialogOpened = false;
+  try {
+    client = await connect(target.id);
+    await client.Runtime.enable();
+
+    const before = await evaluateValue(client, `
+      (function() {
+        var api = window.TradingViewApi;
+        return {
+          href: location.href,
+          layout_id: api && typeof api.layoutId === 'function' ? api.layoutId() : null,
+          layout_name: api && typeof api.layoutName === 'function' ? api.layoutName() : null
+        };
+      })()
+    `);
+
+    const opened = await evaluateValue(client, `
+      (function() {
+        var api = window.TradingViewApi;
+        if (!api || typeof api.showSaveAsChartDialog !== 'function') {
+          return { success: false, error: 'showSaveAsChartDialog unavailable' };
+        }
+        api.showSaveAsChartDialog();
+        return { success: true };
+      })()
+    `);
+    if (!opened?.success) throw new Error(opened?.error || 'Could not open Save As dialog');
+    dialogOpened = true;
+
+    const deadline = Date.now() + Number(timeoutMs);
+    let filled = false;
+    do {
+      filled = await evaluateValue(client, `
+        (function() {
+          var desired = ${desiredLiteral};
+          var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [class*="dialog"], [class*="popupDialog"]'));
+          for (var di = dialogs.length - 1; di >= 0; di--) {
+            var dialog = dialogs[di];
+            var buttons = Array.from(dialog.querySelectorAll('button'));
+            var copy = buttons.find(function(button) {
+              return (button.textContent || '').trim().toLowerCase() === 'make copy';
+            });
+            var input = dialog.querySelector('input[type="text"], input:not([type])');
+            if (!copy || !input) continue;
+
+            var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+            setter.call(input, desired);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }
+          return false;
+        })()
+      `);
+      if (filled) break;
+      if (Date.now() >= deadline) break;
+      await wait(100);
+    } while (true);
+    if (!filled) throw new Error('TradingView Save As dialog did not expose its layout-name input');
+
+    const clicked = await evaluateValue(client, `
+      (function() {
+        var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [class*="dialog"], [class*="popupDialog"]'));
+        for (var di = dialogs.length - 1; di >= 0; di--) {
+          var dialog = dialogs[di];
+          var copy = Array.from(dialog.querySelectorAll('button')).find(function(button) {
+            return (button.textContent || '').trim().toLowerCase() === 'make copy';
+          });
+          if (copy && !copy.disabled) {
+            copy.click();
+            return true;
+          }
+        }
+        return false;
+      })()
+    `);
+    if (!clicked) throw new Error('TradingView Make copy button was not available');
+
+    let observed = null;
+    do {
+      await wait(150);
+      observed = await evaluateValue(client, `
+        (function() {
+          var api = window.TradingViewApi;
+          return {
+            href: location.href,
+            layout_id: api && typeof api.layoutId === 'function' ? api.layoutId() : null,
+            layout_name: api && typeof api.layoutName === 'function' ? api.layoutName() : null
+          };
+        })()
+      `);
+      const newId = observed?.layout_id != null
+        && String(observed.layout_id) !== String(before?.layout_id ?? '');
+      if (newId && String(observed?.layout_name || '') === desiredName) break;
+      if (Date.now() >= deadline) {
+        throw new Error(
+          'TradingView layout copy did not become persistent: ' +
+          JSON.stringify({ desired_name: desiredName, before, observed }),
+        );
+      }
+    } while (true);
+
+    dialogOpened = false;
+    const freshTargets = await listTargets();
+    const fresh = freshTargets.find(item => String(item.id) === String(target.id));
+    return fresh || { ...target, url: observed.href };
+  } catch (error) {
+    if (client && dialogOpened) {
+      try {
+        await evaluateValue(client, `
+          (function() {
+            var dialogs = Array.from(document.querySelectorAll('[role="dialog"], [class*="dialog"], [class*="popupDialog"]'));
+            for (var di = dialogs.length - 1; di >= 0; di--) {
+              var dialog = dialogs[di];
+              var cancel = Array.from(dialog.querySelectorAll('button')).find(function(button) {
+                var text = (button.textContent || '').trim().toLowerCase();
+                return text === 'cancel' || text === 'close';
+              });
+              if (cancel) { cancel.click(); return true; }
+            }
+            return false;
+          })()
+        `);
+      } catch { /* best effort */ }
+    }
+    throw error;
+  } finally {
+    try { if (client) await client.close(); } catch { /* best effort */ }
+  }
+}
+
 export async function inspectTargetPaneCounts(targets) {
   const results = [];
   for (const target of targets || []) {
@@ -571,7 +715,7 @@ async function openOrCreateWorkerTab({
   layoutPrefix,
   deps,
   liveTargets,
-  replaceLegacy = false,
+  legacyTarget = null,
 }) {
   const newTabOptions = {
     landing_timeout_ms: 4000,
@@ -579,7 +723,28 @@ async function openOrCreateWorkerTab({
   };
   const desiredName = owned?.layout_name || buildWorkerLayoutName(layoutPrefix, plan.tab_index);
 
-  if (!replaceLegacy && (owned?.target_id || owned?.chart_id)) {
+  if (legacyTarget) {
+    const liveLegacy = (liveTargets || []).find(
+      target => String(target.id) === String(legacyTarget.target_id)
+    );
+    if (!liveLegacy) {
+      throw new Error(
+        'Legacy worker target ' + String(legacyTarget.target_id || '') +
+        ' was not discoverable for in-place layout cloning'
+      );
+    }
+    const cloned = await deps.cloneTargetAsLayout(liveLegacy, desiredName);
+    return {
+      target: cloned,
+      layoutName: desiredName,
+      reused: false,
+      openedThisCall: true,
+      directChart: false,
+      persistentLayout: true,
+    };
+  }
+
+  if (owned?.target_id || owned?.chart_id) {
     const live = await findTargetForOwned(owned, liveTargets);
     if (live) {
       return {
@@ -593,19 +758,28 @@ async function openOrCreateWorkerTab({
     }
   }
 
-  let created = null;
-
-  // Restart-stable workers need distinct saved TradingView layouts. Direct
-  // /chart/ tabs can share one chart_id and collapse onto the same layout
-  // after Desktop restarts.
-  if (!replaceLegacy && owned?.persistent_layout === true && desiredName) {
+  if (owned?.persistent_layout === true && desiredName) {
     try {
-      created = await deps.newTab({
+      const reopened = await deps.newTab({
         layout: desiredName,
         exact_layout: true,
         force_new_tab: true,
         ...newTabOptions,
       });
+      const target = await findTargetForOwned(
+        { target_id: reopened.target_id, chart_id: reopened.chart_id },
+        null,
+        deps.listTargets,
+      );
+      if (!target) throw new Error('Reopened worker saved-layout target was not discoverable');
+      return {
+        target,
+        layoutName: desiredName,
+        reused: false,
+        openedThisCall: true,
+        directChart: false,
+        persistentLayout: true,
+      };
     } catch (error) {
       const message = error?.message || String(error);
       if (!/Layout matching .* not found/i.test(message)) {
@@ -613,46 +787,54 @@ async function openOrCreateWorkerTab({
           'Worker saved-layout reopen failed for "' + desiredName + '": ' + message,
         );
       }
-      // The failed exact lookup leaves a landing tab available. Reuse it when
-      // recreating the missing saved layout so we do not leak an extra tab.
-      created = await deps.newTab({
-        layout: 'new',
-        name: desiredName,
-        force_new_tab: false,
-        ...newTabOptions,
-      });
-    }
-  } else {
-    try {
-      created = await deps.newTab({
-        layout: 'new',
-        name: desiredName,
-        force_new_tab: true,
-        ...newTabOptions,
-      });
-    } catch (error) {
-      throw new Error(
-        'Worker saved-layout create failed for "' + desiredName + '": ' +
-        (error?.message || String(error)),
-      );
+      // Exact lookup leaves a landing tab open. Reuse it as a direct chart,
+      // then persist that chart through TradingView's chart-page Save As flow.
     }
   }
 
-  const target = await findTargetForOwned(
+  let created = null;
+  try {
+    created = await deps.newTab({
+      as_chart: true,
+      force_new_tab: owned?.persistent_layout !== true,
+      ...newTabOptions,
+    });
+  } catch (error) {
+    throw new Error(
+      'Worker direct chart-tab create failed for "' + desiredName + '": ' +
+      (error?.message || String(error)),
+    );
+  }
+
+  const directTarget = await findTargetForOwned(
     { target_id: created.target_id, chart_id: created.chart_id },
     null,
     deps.listTargets,
   );
-  if (!target) throw new Error('New worker saved-layout target was not discoverable');
+  if (!directTarget) throw new Error('New worker chart target was not discoverable after direct navigation');
 
-  return {
-    target,
-    layoutName: desiredName,
-    reused: false,
-    openedThisCall: true,
-    directChart: false,
-    persistentLayout: true,
-  };
+  try {
+    const cloned = await deps.cloneTargetAsLayout(directTarget, desiredName);
+    return {
+      target: cloned,
+      layoutName: desiredName,
+      reused: false,
+      openedThisCall: true,
+      directChart: false,
+      persistentLayout: true,
+    };
+  } catch (error) {
+    try {
+      await deps.closeTabByOwned({
+        target_id: directTarget.id,
+        chart_id: chartIdFromTarget(directTarget),
+      });
+    } catch { /* best effort: close only the DTV-created direct chart */ }
+    throw new Error(
+      'Worker chart persistence failed for "' + desiredName + '": ' +
+      (error?.message || String(error)),
+    );
+  }
 }
 
 export async function closeTabByOwned(owned, {
@@ -867,13 +1049,7 @@ export async function provisionWorker({
       }
 
       const legacyTarget = legacyRecovery.bySlot.get(slot) || null;
-      if (legacyTarget) {
-        stage = 'replace_legacy_direct_tab';
-        await deps.closeTabByOwned({
-          target_id: legacyTarget.target_id,
-          chart_id: legacyTarget.chart_id,
-        });
-      }
+      if (legacyTarget) stage = 'clone_legacy_layout';
 
       const opened = await openOrCreateWorkerTab({
         plan,
@@ -881,7 +1057,7 @@ export async function provisionWorker({
         layoutPrefix,
         deps,
         liveTargets: await deps.listTargets(),
-        replaceLegacy: !!legacyTarget,
+        legacyTarget,
       });
 
       const openDurationMs = Date.now() - started;
@@ -1011,16 +1187,17 @@ export async function provisionWorker({
   const afterInspected = await deps.inspectTargets(afterTargets);
   const afterRuntimeKeys = new Set();
   const afterByRuntimeKey = new Map();
+  const afterChartCounts = countChartIds(afterInspected);
   for (const item of afterInspected) {
     if (item.target_id) {
       const key = 'target:' + String(item.target_id);
       afterRuntimeKeys.add(key);
       afterByRuntimeKey.set(key, item);
     }
-    if (item.chart_id) {
+    if (item.chart_id && afterChartCounts.get(String(item.chart_id)) === 1) {
       const key = 'chart:' + String(item.chart_id);
       afterRuntimeKeys.add(key);
-      if (!afterByRuntimeKey.has(key)) afterByRuntimeKey.set(key, item);
+      afterByRuntimeKey.set(key, item);
     }
   }
   const recordedRemaining = state.topology_plan.tabs.filter(plan =>
