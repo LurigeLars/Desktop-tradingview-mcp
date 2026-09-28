@@ -257,24 +257,27 @@ describe('autoplay() — delay validation', () => {
 // ── stop() ───────────────────────────────────────────────────────────────
 
 describe('stop()', () => {
-  it('calls stopReplay when started', async () => {
-    const { _deps, evaluate } = mockDeps({
-      'isReplayStarted': true,
-      'stopReplay': undefined,
-    });
-    const result = await stop({ _deps });
+  it('uses goToRealtime and verifies replay ended', async () => {
+    let realtimeCalled = false;
+    const evaluate = async (expr) => {
+      if (expr.includes('goToRealtime')) { realtimeCalled = true; return undefined; }
+      if (expr.includes('isReplayStarted')) return !realtimeCalled;
+      return undefined;
+    };
+    evaluate.calls = [];
+    const result = await stop({ _deps: { evaluate, getReplayApi: mockGetReplayApi() } });
     assert.equal(result.success, true);
     assert.equal(result.action, 'replay_stopped');
-    const stopCall = evaluate.calls.find(c => c.includes('stopReplay'));
-    assert.ok(stopCall, 'stopReplay was called');
+    assert.equal(result.realtime_restored, true);
+    assert.equal(realtimeCalled, true);
   });
 
   it('returns already_stopped when not started', async () => {
     const { _deps, evaluate } = mockDeps({ 'isReplayStarted': false });
     const result = await stop({ _deps });
     assert.equal(result.action, 'already_stopped');
-    const stopCall = evaluate.calls.find(c => c.includes('stopReplay'));
-    assert.equal(stopCall, undefined, 'stopReplay not called');
+    const realtimeCall = evaluate.calls.find(c => c.includes('goToRealtime'));
+    assert.equal(realtimeCall, undefined, 'goToRealtime not called');
   });
 
   it('does not call hideReplayToolbar', () => {
