@@ -333,6 +333,7 @@ export async function newTab({
   layout,
   name,
   symbol,
+  chart_id,
   as_chart = false,
   force_new_tab = false,
   landing_timeout_ms = 8000,
@@ -342,7 +343,11 @@ export async function newTab({
   const landingTimeoutMs = Number(landing_timeout_ms);
   const chartTimeoutMs = Number(chart_timeout_ms);
   const exactLayout = Boolean(exact_layout);
-  const wantsDirectChart = Boolean(symbol) || Boolean(as_chart);
+  const requestedChartId = chart_id == null ? '' : String(chart_id).trim();
+  if (requestedChartId && !/^[A-Za-z0-9_-]+$/.test(requestedChartId)) {
+    throw new Error('chart_id must be a TradingView chart URL token');
+  }
+  const wantsDirectChart = Boolean(symbol) || Boolean(as_chart) || Boolean(requestedChartId);
   const forceNewTab = Boolean(force_new_tab);
   if (!Number.isFinite(landingTimeoutMs) || landingTimeoutMs < 0) {
     throw new Error('landing_timeout_ms must be a non-negative number');
@@ -408,9 +413,11 @@ export async function newTab({
         .filter(isChartPageTarget)
         .map(target => target.id)
     );
-    const chartUrl = symbol
-      ? 'https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(String(symbol))
-      : 'https://www.tradingview.com/chart/';
+    const chartUrl = requestedChartId
+      ? 'https://www.tradingview.com/chart/' + encodeURIComponent(requestedChartId) + '/'
+      : symbol
+        ? 'https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(String(symbol))
+        : 'https://www.tradingview.com/chart/';
 
     await navigateTarget(landing.id, chartUrl, Math.min(chartTimeoutMs, 2500));
     const chartTarget = await waitForChartTarget({
@@ -430,6 +437,7 @@ export async function newTab({
       target_id: chartTarget.id,
       chart_id: chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
       symbol: symbol || null,
+      requested_chart_id: requestedChartId || null,
     };
   }
 

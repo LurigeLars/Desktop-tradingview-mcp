@@ -213,6 +213,58 @@ export function partialSavedLayoutRecovery(state, inspectedTargets, savedLayouts
   return { bySlot, targetIds };
 }
 
+export function persistentWorkerRecovery(state, topology, byHandle, inspectedTargets) {
+  const ownedBySlot = workerTabMap(state);
+  const bySlot = new Map();
+  const duplicatesBySlot = new Map();
+  const targetIds = new Set();
+  const pendingSlots = new Set();
+  const conflicts = [];
+
+  for (const plan of topology?.tabs || []) {
+    const slot = Number(plan.tab_index);
+    const owned = ownedBySlot.get(slot);
+    if (!owned?.persistent_layout || !owned?.chart_id) continue;
+
+    const candidates = (inspectedTargets || []).filter(item =>
+      item?.chart_id && String(item.chart_id) === String(owned.chart_id)
+    );
+    if (!candidates.length) continue;
+
+    const entries = (plan.handles || []).map(handle => byHandle.get(handle));
+    const matching = candidates.filter(item =>
+      Number(item?.pane_count || 0) === Number(plan.pane_count)
+      && Array.isArray(item?.panes)
+      && entries.every((entry, index) => entry && paneMatchesEntry(entry, item.panes[index]))
+    ).sort((a, b) => String(a.target_id).localeCompare(String(b.target_id)));
+
+    if (!matching.length) {
+      conflicts.push({
+        slot,
+        chart_id: owned.chart_id,
+        candidate_target_ids: candidates.map(item => item.target_id),
+      });
+      continue;
+    }
+
+    const selected = matching[0];
+    const duplicates = matching.slice(1);
+    bySlot.set(slot, selected);
+    targetIds.add(String(selected.target_id));
+    for (const item of duplicates) targetIds.add(String(item.target_id));
+    if (duplicates.length) duplicatesBySlot.set(slot, duplicates);
+
+    if (
+      String(owned.target_id || '') !== String(selected.target_id || '')
+      || duplicates.length > 0
+    ) {
+      pendingSlots.add(slot);
+    }
+  }
+
+  return { bySlot, duplicatesBySlot, targetIds, pendingSlots, conflicts };
+}
+
 export function legacyDirectWorkerRecovery(state, inspectedTargets) {
   const tabs = (state?.worker_tabs || []).filter(tab =>
     tab?.chart_id && tab?.persistent_layout !== true
@@ -850,6 +902,7 @@ async function openOrCreateWorkerTab({
   deps,
   liveTargets,
   legacyTarget = null,
+  preferredTarget = null,
 }) {
   const newTabOptions = {
     landing_timeout_ms: 4000,
@@ -878,6 +931,22 @@ async function openOrCreateWorkerTab({
     };
   }
 
+  if (preferredTarget?.target_id) {
+    const livePreferred = (liveTargets || []).find(
+      target => String(target.id) === String(preferredTarget.target_id)
+    );
+    if (livePreferred) {
+      return {
+        target: livePreferred,
+        layoutName: desiredName,
+        reused: true,
+        openedThisCall: false,
+        directChart: false,
+        persistentLayout: true,
+      };
+    }
+  }
+
   if (owned?.target_id || owned?.chart_id) {
     const live = await findTargetForOwned(owned, liveTargets);
     if (live) {
@@ -893,36 +962,58 @@ async function openOrCreateWorkerTab({
   }
 
   if (owned?.persistent_layout === true && desiredName) {
-    try {
-      const reopened = await deps.newTab({
-        layout: desiredName,
-        exact_layout: true,
-        force_new_tab: true,
-        ...newTabOptions,
-      });
-      const target = await findTargetForOwned(
-        { target_id: reopened.target_id, chart_id: reopened.chart_id },
-        null,
-        deps.listTargets,
+    const savedLayouts = await deps.listSavedLayouts(liveTargets);
+    const exact = (savedLayouts || []).filter(layout =>
+      String(layout?.name || '').trim().toLowerCase() === desiredName.toLowerCase()
+      && String(layout?.url || '').trim()
+    );
+
+    let saved = null;
+    if (owned?.chart_id) {
+      saved = exact.find(layout => String(layout.url) === String(owned.chart_id)) || null;
+    }
+    if (!saved && exact.length === 1) saved = exact[0];
+    if (!saved && exact.length > 1) {
+      throw new Error(
+        'Worker saved-layout reopen is ambiguous for "' + desiredName + '": ' +
+        exact.map(layout => String(layout.url)).join(', ')
       );
-      if (!target) throw new Error('Reopened worker saved-layout target was not discoverable');
-      return {
-        target,
-        layoutName: desiredName,
-        reused: false,
-        openedThisCall: true,
-        directChart: false,
-        persistentLayout: true,
-      };
-    } catch (error) {
-      const message = error?.message || String(error);
-      if (!/Layout matching .* not found/i.test(message)) {
+    }
+
+    if (saved) {
+      try {
+        const reopened = await deps.newTab({
+          as_chart: true,
+          chart_id: String(saved.url),
+          force_new_tab: true,
+          ...newTabOptions,
+        });
+        if (String(reopened.chart_id || '') !== String(saved.url)) {
+          throw new Error(
+            'Exact saved-layout navigation returned chart ' + String(reopened.chart_id || '') +
+            ' instead of ' + String(saved.url)
+          );
+        }
+        const target = await findTargetForOwned(
+          { target_id: reopened.target_id, chart_id: reopened.chart_id },
+          null,
+          deps.listTargets,
+        );
+        if (!target) throw new Error('Reopened worker saved-layout target was not discoverable');
+        return {
+          target,
+          layoutName: desiredName,
+          reused: false,
+          openedThisCall: true,
+          directChart: false,
+          persistentLayout: true,
+        };
+      } catch (error) {
         throw new Error(
-          'Worker saved-layout reopen failed for "' + desiredName + '": ' + message,
+          'Worker saved-layout direct reopen failed for "' + desiredName + '": ' +
+          (error?.message || String(error)),
         );
       }
-      // Exact lookup leaves a landing tab open. Reuse it as a direct chart,
-      // then persist that chart through TradingView's chart-page Save As flow.
     }
   }
 
@@ -1050,8 +1141,15 @@ export async function provisionWorker({
   const byHandle = entryMap(state);
   const liveTargets = await deps.listTargets();
   const inspectedTargets = await deps.inspectTargets(liveTargets);
+  const liveChartCounts = countChartIds(inspectedTargets);
   const ownedRuntimeKeys = stableOwnedRuntimeKeys(state.worker_tabs || []);
   const legacyRecovery = legacyDirectWorkerRecovery(state, inspectedTargets);
+  const persistentRecovery = persistentWorkerRecovery(
+    state,
+    topology,
+    byHandle,
+    inspectedTargets,
+  );
   let partialSavedRecovery = { bySlot: new Map(), targetIds: new Set() };
 
   if (legacyRecovery.bySlot.size > 0) {
@@ -1068,7 +1166,12 @@ export async function provisionWorker({
     const chartKey = item.chart_id ? 'chart:' + String(item.chart_id) : null;
     return !(
       (targetKey && ownedRuntimeKeys.has(targetKey))
-      || (chartKey && ownedRuntimeKeys.has(chartKey))
+      || (
+        chartKey
+        && ownedRuntimeKeys.has(chartKey)
+        && liveChartCounts.get(String(item.chart_id)) === 1
+      )
+      || (item.target_id && persistentRecovery.targetIds.has(String(item.target_id)))
       || (item.target_id && legacyRecovery.targetIds.has(String(item.target_id)))
       || (item.target_id && partialSavedRecovery.targetIds.has(String(item.target_id)))
     );
@@ -1111,7 +1214,6 @@ export async function provisionWorker({
 
   const liveRuntimeKeys = new Set();
   const liveByRuntimeKey = new Map();
-  const liveChartCounts = countChartIds(inspectedTargets);
   for (const item of inspectedTargets) {
     if (item.target_id) {
       const key = 'target:' + String(item.target_id);
@@ -1124,10 +1226,21 @@ export async function provisionWorker({
       liveByRuntimeKey.set(key, item);
     }
   }
+
+  for (const [slot, item] of persistentRecovery.bySlot) {
+    const owned = (state.worker_tabs || []).find(tab => Number(tab.slot) === Number(slot));
+    if (!owned?.chart_id) continue;
+    const key = 'chart:' + String(owned.chart_id);
+    liveRuntimeKeys.add(key);
+    liveByRuntimeKey.set(key, item);
+  }
+
   const ownedBySlot = workerTabMap(state);
 
   const pending = topology.tabs.filter(plan =>
-    force || !recordedTabComplete(plan, state, liveRuntimeKeys, liveByRuntimeKey)
+    force
+    || persistentRecovery.pendingSlots.has(Number(plan.tab_index))
+    || !recordedTabComplete(plan, state, liveRuntimeKeys, liveByRuntimeKey)
   );
 
   const staleOwned = (state.worker_tabs || []).filter(tab =>
@@ -1157,6 +1270,14 @@ export async function provisionWorker({
       partial_saved_layout_recovery: {
         slots: [...partialSavedRecovery.bySlot.keys()].sort((a, b) => a - b),
         target_ids: [...partialSavedRecovery.targetIds],
+      },
+      persistent_layout_recovery: {
+        slots: [...persistentRecovery.bySlot.keys()].sort((a, b) => a - b),
+        pending_slots: [...persistentRecovery.pendingSlots].sort((a, b) => a - b),
+        duplicate_target_ids: [...persistentRecovery.duplicatesBySlot.values()]
+          .flat()
+          .map(item => item.target_id),
+        conflicts: persistentRecovery.conflicts,
       },
     };
   }
@@ -1207,7 +1328,18 @@ export async function provisionWorker({
         deps,
         liveTargets: await deps.listTargets(),
         legacyTarget,
+        preferredTarget: persistentRecovery.bySlot.get(slot) || null,
       });
+
+      const duplicateTargets = persistentRecovery.duplicatesBySlot.get(slot) || [];
+      for (const duplicate of duplicateTargets) {
+        if (String(duplicate.target_id) === String(opened.target.id)) continue;
+        stage = 'dedupe_persistent_targets';
+        await deps.closeTabByOwned({
+          target_id: duplicate.target_id,
+          chart_id: duplicate.chart_id,
+        });
+      }
 
       if (
         legacyTarget?.target_id

@@ -8,6 +8,7 @@ import {
   layoutCodeForPaneCount,
   legacyDirectWorkerRecovery,
   pendingPaneIndexes,
+  persistentWorkerRecovery,
   provisionWorker,
   recordedTabComplete,
 } from '../src/core/worker-provision.js';
@@ -914,6 +915,145 @@ test('legacy shared direct tabs are replaced one at a time with saved layouts', 
   assert.equal(after.worker_tabs[0].persistent_layout, true);
   assert.equal(after.worker_tabs[1].chart_id, 'shared-layout');
   assert.notEqual(after.worker_tabs[1].persistent_layout, true);
+});
+
+test('persistent worker reopens exact saved chart token when layout names are duplicated', async () => {
+  const store = makeStore();
+  setUniverse({
+    entries: [{ handle: 'a', symbol: 'EX:AAA', timeframe: '5' }],
+    _deps: store.deps,
+  });
+  recordWorkerProvision({
+    assignments: {
+      a: { worker_slot: 0, target_id: 'stale', chart_id: 'good-token', pane_index: 0 },
+    },
+    worker_tabs: [{
+      slot: 0,
+      target_id: 'stale',
+      chart_id: 'good-token',
+      layout_name: 'DTV Worker 01',
+      pane_count: 1,
+      persistent_layout: true,
+    }],
+    _deps: store.deps,
+  });
+
+  const liveTargets = [];
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => liveTargets,
+    inspectTargets: async () => [],
+    listSavedLayouts: async () => [
+      { id: 1, name: 'DTV Worker 01', url: 'wrong-token' },
+      { id: 2, name: 'DTV Worker 01', url: 'good-token' },
+    ],
+    newTab: async args => {
+      assert.equal(args.as_chart, true);
+      assert.equal(args.chart_id, 'good-token');
+      assert.equal(args.force_new_tab, true);
+      const target = {
+        id: 'new-target',
+        type: 'page',
+        url: 'https://www.tradingview.com/chart/good-token/',
+      };
+      liveTargets.push(target);
+      return { success: true, target_id: target.id, chart_id: 'good-token' };
+    },
+    configureTarget: async () => {
+      throw new Error('configureTarget must not run in a tab-open phase');
+    },
+    closeTabByOwned: async () => ({ success: true }),
+  };
+
+  const result = await provisionWorker({ max_tabs: 1, _deps: runtime });
+  assert.equal(result.success, true);
+  assert.equal(result.results[0].stage, 'tab_ready');
+  assert.equal(result.results[0].chart_id, 'good-token');
+
+  const owned = status({ _deps: store.deps }).worker_tabs[0];
+  assert.equal(owned.target_id, 'new-target');
+  assert.equal(owned.chart_id, 'good-token');
+  assert.equal(owned.persistent_layout, true);
+});
+
+test('persistent worker recovery dedupes identical live chart instances by pane signature', async () => {
+  const store = makeStore();
+  setUniverse({
+    entries: [{ handle: 'a', symbol: 'EX:AAA', timeframe: '5' }],
+    _deps: store.deps,
+  });
+  recordWorkerProvision({
+    assignments: {
+      a: { worker_slot: 0, target_id: 'stale-target', chart_id: 'stable-token', pane_index: 0 },
+    },
+    worker_tabs: [{
+      slot: 0,
+      target_id: 'stale-target',
+      chart_id: 'stable-token',
+      layout_name: 'DTV Worker 01',
+      pane_count: 1,
+      persistent_layout: true,
+    }],
+    _deps: store.deps,
+  });
+
+  const liveTargets = [
+    { id: 'live-b', type: 'page', url: 'https://www.tradingview.com/chart/stable-token/' },
+    { id: 'live-a', type: 'page', url: 'https://www.tradingview.com/chart/stable-token/' },
+  ];
+  const inspected = () => liveTargets.map(target => ({
+    target_id: target.id,
+    chart_id: 'stable-token',
+    pane_count: 1,
+    panes: [{ resolved_symbol: 'EX:AAA', resolution: '5', studies: [] }],
+  }));
+
+  const previewRecovery = persistentWorkerRecovery(
+    status({ _deps: store.deps }),
+    status({ _deps: store.deps }).topology_plan,
+    new Map(status({ _deps: store.deps }).entries.map(entry => [entry.handle, entry])),
+    inspected(),
+  );
+  assert.equal(previewRecovery.bySlot.get(0).target_id, 'live-a');
+  assert.deepEqual(
+    previewRecovery.duplicatesBySlot.get(0).map(item => item.target_id),
+    ['live-b'],
+  );
+
+  const closed = [];
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => liveTargets,
+    inspectTargets: async () => inspected(),
+    listSavedLayouts: async () => [{ id: 1, name: 'DTV Worker 01', url: 'stable-token' }],
+    newTab: async () => { throw new Error('must reuse a matching live target'); },
+    closeTabByOwned: async owned => {
+      closed.push(owned.target_id);
+      const index = liveTargets.findIndex(target => target.id === owned.target_id);
+      if (index >= 0) liveTargets.splice(index, 1);
+      return { success: true, closed: index >= 0 };
+    },
+    configureTarget: async ({ target }) => ({
+      success: true,
+      complete: true,
+      layout_code: 's',
+      configured_panes: [],
+      pending_panes: [],
+      verified: [{ resolved_symbol: 'EX:AAA', resolution: '5', studies: [] }],
+      target_id: target.id,
+    }),
+  };
+
+  const result = await provisionWorker({ max_tabs: 1, _deps: runtime });
+  assert.equal(result.success, true);
+  assert.equal(result.complete, true);
+  assert.deepEqual(closed, ['live-b']);
+
+  const after = status({ _deps: store.deps });
+  assert.equal(after.worker_tabs[0].target_id, 'live-a');
+  assert.equal(after.entries[0].assignment.target_id, 'live-a');
 });
 
 test('persisted worker intent creates a restart-stable saved layout', async () => {
