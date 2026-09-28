@@ -857,6 +857,7 @@ test('legacy shared direct tabs are replaced one at a time with saved layouts', 
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
     listTargets: async () => liveTargets,
     inspectTargets,
+    listSavedLayouts: async () => [],
     newTab: async () => {
       throw new Error('legacy migration must use Save As from the existing tab');
     },
