@@ -755,6 +755,57 @@ test('reserved slots reduce the total usable budget including external charts', 
 });
 
 
+test('partial Save As target is recovered as worker-owned before capacity projection', async () => {
+  const store = makeStore();
+  setUniverse({
+    capacity: 2,
+    max_charts_per_tab: 1,
+    entries: [
+      { handle: 'a', symbol: 'EX:AAA', timeframe: '5' },
+      { handle: 'b', symbol: 'EX:BBB', timeframe: '5' },
+    ],
+    _deps: store.deps,
+  });
+  recordWorkerProvision({
+    worker_tabs: [
+      { slot: 0, target_id: 'old-a', chart_id: 'shared-layout', layout_name: 'Worker 01', pane_count: 1 },
+      { slot: 1, target_id: 'old-b', chart_id: 'shared-layout', layout_name: 'Worker 02', pane_count: 1 },
+    ],
+    _deps: store.deps,
+  });
+
+  const liveTargets = [
+    { id: 'live-a', type: 'page', url: 'https://www.tradingview.com/chart/shared-layout/' },
+    { id: 'live-b', type: 'page', url: 'https://www.tradingview.com/chart/shared-layout/' },
+    { id: 'saved-target', type: 'page', url: 'https://www.tradingview.com/chart/persistent-1/' },
+  ];
+
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
+    listTargets: async () => liveTargets,
+    inspectTargets: async targets => targets.map(target => ({
+      target_id: target.id,
+      chart_id: target.url.match(/\/chart\/([^/]+)/)?.[1] || null,
+      pane_count: 1,
+    })),
+    listSavedLayouts: async () => [
+      { id: 123, name: 'Worker 01', url: 'persistent-1' },
+    ],
+  };
+
+  const preview = await provisionWorker({
+    dry_run: true,
+    layout_prefix: 'Worker',
+    _deps: runtime,
+  });
+
+  assert.equal(preview.capacity_projection.external_connections, 0);
+  assert.equal(preview.capacity_projection.projected_connections, 2);
+  assert.deepEqual(preview.partial_saved_layout_recovery.slots, [0]);
+  assert.deepEqual(preview.partial_saved_layout_recovery.target_ids, ['saved-target']);
+});
+
 test('legacy shared direct tabs are replaced one at a time with saved layouts', async () => {
   const store = makeStore();
   setUniverse({
