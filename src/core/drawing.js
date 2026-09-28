@@ -4,11 +4,15 @@
 import { evaluate as _evaluate, getChartApi as _getChartApi, safeString, requireFinite } from '../connection.js';
 
 function _resolve(deps) {
-  return { evaluate: deps?.evaluate || _evaluate, getChartApi: deps?.getChartApi || _getChartApi };
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    getChartApi: deps?.getChartApi || _getChartApi,
+    delay: deps?.delay || ((ms) => new Promise(r => setTimeout(r, ms))),
+  };
 }
 
 export async function drawShape({ shape, point, point2, overrides: overridesRaw, text, _deps }) {
-  const { evaluate, getChartApi } = _resolve(_deps);
+  const { evaluate, getChartApi, delay } = _resolve(_deps);
   const overrides = overridesRaw ? (typeof overridesRaw === 'string' ? JSON.parse(overridesRaw) : overridesRaw) : {};
   const apiPath = await getChartApi();
   const overridesStr = JSON.stringify(overrides || {});
@@ -42,7 +46,7 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
     const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
     newId = (after || []).find(id => !beforeSet.has(id)) || null;
     if (newId) break;
-    await new Promise(r => setTimeout(r, 100));
+    await delay(100);
   }
 
   if (!newId) {
