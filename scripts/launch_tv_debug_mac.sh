@@ -46,12 +46,12 @@ sleep 1
 
 echo "Found TradingView at: $APP"
 echo "Launching with --remote-debugging-port=$PORT ..."
-"$APP" --remote-debugging-port=$PORT &
+"$APP" --remote-debugging-port="$PORT" &
 TV_PID=$!
 echo "PID: $TV_PID"
 
 echo "Waiting for CDP..."
-for i in $(seq 1 15); do
+for _ in $(seq 1 15); do
   if curl -s "http://localhost:$PORT/json/version" > /dev/null 2>&1; then
     echo "CDP ready at http://localhost:$PORT"
     curl -s "http://localhost:$PORT/json/version" | python3 -m json.tool 2>/dev/null || curl -s "http://localhost:$PORT/json/version"
