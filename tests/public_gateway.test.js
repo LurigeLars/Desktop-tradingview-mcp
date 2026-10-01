@@ -72,9 +72,9 @@ describe('public gateway configuration', () => {
     assert.equal(headers['content-length'], '12');
   });
 
-  it('preserves the full 93-tool TradingView surface by default', () => {
+  it('preserves the full 94-tool TradingView surface by default', () => {
     const allowed = parseAllowedTools();
-    assert.equal(allowed.size, 93);
+    assert.equal(allowed.size, 94);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('pine_set_source'), true);
     assert.equal(allowed.has('replay_start'), true);
@@ -89,13 +89,15 @@ describe('public gateway configuration', () => {
     assert.equal(allowed.has('morning_brief'), true);
     assert.equal(allowed.has('session_save'), true);
     assert.equal(allowed.has('session_get'), true);
+    assert.equal(allowed.has('news_flow_get'), true);
   });
 
   it('supports an explicit operator-controlled core profile', () => {
     const allowed = parseAllowedTools('core');
-    assert.equal(allowed.size, 51);
+    assert.equal(allowed.size, 52);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('data_get_ohlcv'), true);
+    assert.equal(allowed.has('news_flow_get'), true);
     assert.equal(allowed.has('pine_set_source'), false);
     assert.equal(allowed.has('replay_start'), false);
     assert.match(
