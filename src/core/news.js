@@ -8,7 +8,7 @@
  */
 import { evaluateAsync } from '../connection.js';
 
-const NEWS_MEDIATOR_HOST = 'news-mediator.tradingview.com';
+export const NEWS_MEDIATOR_HOST = 'news-mediator.tradingview.com';
 const MAX_SOURCE_ITEMS = 200;
 
 export function normalizeWatchlistId(value) {
