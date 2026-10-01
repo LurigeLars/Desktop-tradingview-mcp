@@ -80,7 +80,7 @@ test('news flow page-context request is fixed to TradingView mediator and authen
     },
   });
 
-  assert.match(expression, /news-mediator\.tradingview\.com/);
+  assert.ok(expression.includes('news-mediator.tradingview.com'));
   assert.match(expression, /watchlist:/);
   assert.match(expression, /349099896/);
   assert.match(expression, /credentials: 'include'/);
