@@ -96,6 +96,7 @@ export const LEGACY_TOOL_ANNOTATIONS = Object.freeze({
   ui_evaluate: OPEN_DESTRUCTIVE,
 
   watchlist_get: CLOSED_READ,
+  news_flow_get: CLOSED_READ,
   watchlist_add: CLOSED_WRITE,
   watchlist_add_bulk: CLOSED_WRITE,
   watchlist_remove: CLOSED_DESTRUCTIVE_IDEMPOTENT,
