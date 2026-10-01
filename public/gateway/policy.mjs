@@ -48,7 +48,7 @@ export const CORE_ALLOWED_TOOLS = [
   'capture_screenshot',
   'alert_create', 'alert_list', 'alert_delete',
   'indicator_set_inputs', 'indicator_toggle_visibility', 'indicator_search', 'indicator_add',
-  'watchlist_get', 'watchlist_add', 'watchlist_add_bulk', 'watchlist_remove',
+  'watchlist_get', 'watchlist_add', 'watchlist_add_bulk', 'watchlist_remove', 'news_flow_get',
   'layout_list', 'layout_switch',
   'pane_list', 'pane_set_layout', 'pane_focus', 'pane_set_symbol',
   'tab_list', 'tab_new', 'tab_close', 'tab_switch',
