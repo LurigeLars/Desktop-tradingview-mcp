@@ -108,7 +108,7 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit full profile', () => {
     const allowed = parseAllowedTools('full');
-    assert.equal(allowed.size, 93);
+    assert.equal(allowed.size, 94);
     assert.equal(allowed.has('ui_evaluate'), true);
     assert.equal(allowed.has('tv_update'), true);
   });
