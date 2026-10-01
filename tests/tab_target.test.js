@@ -188,10 +188,18 @@ test('renderer fallback opens an exact chart target when CDP.New is unavailable'
   };
   let polls = 0;
   const evaluations = [];
+  const calls = [];
   const fakeClient = {
     Runtime: {
       enable: async () => {},
-      evaluate: async args => evaluations.push(args.expression),
+      evaluate: async args => {
+        evaluations.push(args.expression);
+        return { result: { objectId: 'window-1' } };
+      },
+      callFunctionOn: async args => {
+        calls.push(args);
+        return { result: { value: true } };
+      },
     },
   };
 
@@ -207,9 +215,12 @@ test('renderer fallback opens an exact chart target when CDP.New is unavailable'
   });
 
   assert.equal(result.id, 'renderer-target');
-  assert.equal(evaluations.length, 1);
-  assert.match(evaluations[0], /window\.open/);
-  assert.match(evaluations[0], /abc123/);
+  assert.deepEqual(evaluations, ['window']);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].objectId, 'window-1');
+  assert.deepEqual(calls[0].arguments, [{ value: 'https://www.tradingview.com/chart/abc123/' }]);
+  assert.match(calls[0].functionDeclaration, /this\.open\(targetUrl/);
+  assert.doesNotMatch(calls[0].functionDeclaration, /abc123/);
 });
 
 test('persistent worker falls back to renderer window.open when CDP.New fails', async () => {

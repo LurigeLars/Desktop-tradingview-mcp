@@ -174,6 +174,7 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
     assert.ok(names.has('pine_set_source'));
     assert.ok(names.has('alert_create'));
     assert.ok(names.has('capture_screenshot'));
+    assert.ok(names.has('news_flow_get'));
 
     for (const tool of result.tools) {
       assert.equal(tool.outputSchema, undefined, `${tool.name}: outputSchema should remain absent to avoid tool-definition/result duplication`);
@@ -203,6 +204,8 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
     assert.equal(byName.get('symbol_search').annotations.openWorldHint, false);
     assert.equal(byName.get('indicator_search').annotations.openWorldHint, false);
     assert.equal(byName.get('quote_get').annotations.openWorldHint, false);
+    assert.equal(byName.get('news_flow_get').annotations.readOnlyHint, true);
+    assert.equal(byName.get('news_flow_get').annotations.openWorldHint, false);
     assert.equal(byName.get('batch_run').annotations.openWorldHint, false);
     assert.equal(byName.get('chart_set_symbol').annotations.openWorldHint, false);
     assert.equal(byName.get('pane_set_symbol').annotations.openWorldHint, false);

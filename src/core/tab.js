@@ -404,14 +404,38 @@ export async function openChartViaRenderer(url, {
 } = {}) {
   const beforeIds = new Set((await listTargets()).map(target => String(target.id)));
   const wantedChartId = String(url).match(/\/chart\/([^/?]+)/)?.[1] || null;
-  if (!wantedChartId) throw new Error('Renderer chart open requires an exact TradingView chart URL token');
+  if (!wantedChartId || !isChartPageTarget({ type: 'page', url })) {
+    throw new Error('Renderer chart open requires an exact TradingView chart URL token');
+  }
 
   const client = await getActiveClient();
   await client.Runtime.enable();
-  await client.Runtime.evaluate({
-    expression: `(function(){ try { window.open(${JSON.stringify(url)}, '_blank'); return true; } catch(e) { return false; } })()`,
+
+  // Never interpolate the URL into executable JavaScript. Pass it as a CDP
+  // argument so even a malformed caller value cannot become page-context code.
+  const root = await client.Runtime.evaluate({
+    expression: 'window',
+    returnByValue: false,
+  });
+  const objectId = root?.result?.objectId;
+  if (!objectId) throw new Error('Renderer window object is unavailable');
+
+  const opened = await client.Runtime.callFunctionOn({
+    objectId,
+    functionDeclaration: `function(targetUrl) {
+      try {
+        this.open(targetUrl, '_blank');
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }`,
+    arguments: [{ value: String(url) }],
     returnByValue: true,
   });
+  if (opened?.exceptionDetails || opened?.result?.value !== true) {
+    throw new Error('Renderer window.open failed');
+  }
 
   const deadline = Date.now() + Number(timeoutMs);
   do {

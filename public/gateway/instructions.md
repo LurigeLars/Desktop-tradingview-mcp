@@ -12,3 +12,5 @@ TradingView Desktop MCP. The authenticated connector preserves the full TradingV
 - ui_evaluate is a powerful fallback/debug tool; use it only when a typed tool is insufficient.
 - tv_update is maintenance functionality and should be used only for explicit update work.
 - tv_close exits the whole MCP-managed TradingView Desktop app. tab_close closes only the active tab.
+
+- Use `news_flow_get` for one authenticated aggregated TradingView News Flow tied to a numeric watchlist; pass `since` when incremental freshness must be proven.
