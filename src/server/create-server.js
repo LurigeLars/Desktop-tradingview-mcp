@@ -10,6 +10,7 @@ import { registerBatchTools } from '../tools/batch.js';
 import { registerReplayTools } from '../tools/replay.js';
 import { registerIndicatorTools } from '../tools/indicators.js';
 import { registerWatchlistTools } from '../tools/watchlist.js';
+import { registerNewsTools } from '../tools/news.js';
 import { registerUiTools } from '../tools/ui.js';
 import { registerPaneTools } from '../tools/pane.js';
 import { registerTabTools } from '../tools/tab.js';
@@ -26,7 +27,7 @@ export const SERVER_INFO = {
   description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
 };
 
-export const SERVER_INSTRUCTIONS = `TradingView MCP — 93 tools for reading and controlling live TradingView Desktop charts.
+export const SERVER_INSTRUCTIONS = `TradingView MCP — 94 tools for reading and controlling live TradingView Desktop charts.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -62,6 +63,7 @@ Realtime: realtime_snapshot → read all currently resident open chart panes wit
 Worker: worker_set_universe / worker_status / worker_provision → configure and reconcile logical resident handles/groups without exposing tabs/panes
 Watch manifest: watch_manifest_apply → reconcile canonical market themes plus bounded dynamic trade/WATCH entries into resident worker groups
 Morning brief: morning_brief → collect compact resident decision evidence + configured rules; session_save / session_get → persist and compare completed briefs
+News Flow: news_flow_get → aggregated authenticated news for one TradingView watchlist; use since to prove cursor freshness
 Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
 Alerts: alert_create, alert_list, alert_delete
 Lifecycle: tv_health_check → tv_launch when needed → tv_close when finished. tv_close exits the entire verified MCP-managed TradingView Desktop application, including after an MCP-server restart.
@@ -98,6 +100,7 @@ export function createTradingViewServer() {
   registerReplayTools(server);
   registerIndicatorTools(server);
   registerWatchlistTools(server);
+  registerNewsTools(server);
   registerUiTools(server);
   registerPaneTools(server);
   registerTabTools(server);
