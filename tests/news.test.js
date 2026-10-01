@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getWatchlistNews,
+  NEWS_MEDIATOR_HOST,
   normalizeNewsFlowResponse,
   normalizeWatchlistId,
 } from '../src/core/news.js';
@@ -80,7 +81,7 @@ test('news flow page-context request is fixed to TradingView mediator and authen
     },
   });
 
-  assert.ok(expression.includes('news-mediator.tradingview.com'));
+  assert.equal(NEWS_MEDIATOR_HOST, 'news-mediator.tradingview.com');
   assert.match(expression, /watchlist:/);
   assert.match(expression, /349099896/);
   assert.match(expression, /credentials: 'include'/);
