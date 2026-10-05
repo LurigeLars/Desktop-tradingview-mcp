@@ -75,9 +75,6 @@ function runtimeKeys(value) {
   return keys;
 }
 
-function ownedRuntimeKey(value) {
-  return runtimeKeys(value)[0] || null;
-}
 
 function countChartIds(items) {
   const counts = new Map();
