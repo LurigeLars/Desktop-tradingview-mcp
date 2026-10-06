@@ -1,75 +1,147 @@
-# TradingView MCP Bridge
+# TradingView Desktop MCP Bridge
 
-## Current deployment and security posture
+[![CI](https://github.com/LurigeLars/Desktop-tradingview-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/LurigeLars/Desktop-tradingview-mcp/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/LurigeLars/Desktop-tradingview-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/LurigeLars/Desktop-tradingview-mcp/actions/workflows/codeql.yml)
+![Node.js](https://img.shields.io/badge/node-18%2B-green)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-This fork is designed to drive a user's own TradingView Desktop session rather than provide an independent market-data service.
+A Model Context Protocol (MCP) bridge that lets AI clients interact with **your own
+locally running TradingView Desktop application**.
 
-- TradingView Desktop stays local and is reached through the loopback CDP endpoint.
-- The optional public path terminates at a reviewed Cloudflare Access gateway before reaching the loopback MCP runtime.
-- The public gateway runs as non-root `node`, with a read-only filesystem, `cap_drop: ALL`, and `no-new-privileges`.
-- The gateway strips client credentials and applies bounded request/tool policy before forwarding.
-- Shared TradingView UI state is treated as mutable state: concurrent clients can affect the same chart and must coordinate mutations.
-- Machine-specific executable paths, account identity, Cloudflare values, and credentials belong only in ignored local configuration.
+Instead of pretending to be a separate TradingView data service, this project drives the
+real desktop app through Chrome DevTools Protocol (CDP). An MCP client can inspect chart
+state, read locally visible market data and indicators, navigate symbols/timeframes,
+develop Pine Script, manage chart objects and automate chart workflows.
 
-## About this fork
+> **Unofficial project.** This repository is not affiliated with, endorsed by or
+> associated with TradingView Inc.
 
-This is a maintained fork of [tradesdontlie/tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp). It preserves the upstream TradingView Desktop/CDP approach while hardening it for long-running local and remote MCP use.
+> **A valid TradingView subscription is still required.** The bridge does not bypass
+> subscriptions, paywalls, entitlements or other TradingView access controls.
 
-Fork-specific changes include:
+## Why this project exists
 
-- Fresher real-time quote reads from resident TradingView runtime fields and stricter symbol-identity validation.
-- More resilient worker/tab/pane reconciliation, including bounded CDP target discovery and handling of stale or hidden TradingView views.
-- MCP session-pressure and rate-budget handling intended to keep active sessions usable under bursty connector traffic.
-- Hardened Windows executable discovery, launch inputs, and local lifecycle behavior.
-- Cloudflare Access gateway support using the shared-tunnel deployment model and sanitized public configuration examples.
-- Fork-specific CI, dependency maintenance, and Advanced CodeQL security-and-quality scanning.
+TradingView Desktop already contains the state a human analyst is working with: the
+selected symbol, timeframe, layout, indicators, Pine scripts, drawings, alerts and
+subscription-entitled market data.
 
-The fork remains focused on interacting with a user's own local TradingView Desktop session; it is not a separate TradingView data service.
+The purpose of this bridge is to make that **existing interactive workspace legible and
+controllable through MCP**, rather than building another independent market-data stack.
 
-Personal AI assistant for your TradingView Desktop charts. Connects compatible MCP clients to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
+That makes it useful for workflows such as:
 
-> [!WARNING]
-> **This tool is not affiliated with, endorsed by, or associated with TradingView Inc.** It interacts with your locally running TradingView Desktop application via Chrome DevTools Protocol. Review the [Disclaimer](#disclaimer) before use.
+- asking an agent what is currently on a chart;
+- changing symbol/timeframe/layout and then restoring the previous state;
+- reading indicator tables, lines, labels and strategy output;
+- writing, compiling and debugging Pine Script;
+- capturing screenshots for visual analysis;
+- reading chart-local quote/OHLCV data;
+- coordinating multi-pane layouts;
+- running local chart-monitoring or research workflows.
 
-> [!IMPORTANT]
-> **Requires a valid TradingView subscription.** This tool does not bypass or circumvent any TradingView paywall or access control. It reads from and controls the TradingView Desktop app already running on your machine.
+It is an interface layer for human-AI collaboration around TradingView, **not a trading
+bot and not a broker connection**.
 
-> [!NOTE]
-> **Local stdio and CLI modes process data on your machine.** If you enable the optional HTTP/Cloudflare gateway, MCP responses are transmitted to the remote client you connect. The gateway does not turn this project into a hosted TradingView data service.
+## Why this fork exists
 
-> [!CAUTION]
-> This tool accesses undocumented internal TradingView APIs via the Electron debug interface. These can change or break without notice in any TradingView update. Pin your TradingView Desktop version if stability matters to you.
+This repository is a maintained fork of
+[tradesdontlie/tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp).
 
-## How It Works (and why it's safe to run)
+It keeps the upstream Desktop/CDP architecture while hardening it for long-running local
+and remote MCP use. Fork-specific work includes:
 
-This tool does not connect to TradingView's servers, modify any TradingView files, or intercept any network traffic. It communicates exclusively with your locally running TradingView Desktop instance via Chrome DevTools Protocol (CDP) — a standard debugging interface built into all Chromium/Electron applications by Google, including VS Code, Slack, and Discord.
+- fresher quote reads from resident TradingView runtime fields with stricter symbol
+  identity checks;
+- resilient worker/tab/pane discovery and recovery from stale or hidden views;
+- bounded session pressure and request/rate handling;
+- safer TradingView launch and process lifecycle behavior;
+- a shared resident watch manifest for repeated market context;
+- a loopback Streamable HTTP transport in addition to local stdio;
+- a reviewed Cloudflare Access gateway for remote MCP clients such as ChatGPT;
+- sanitized deployment templates, CI, static analysis and CodeQL hardening.
 
-The debug port is disabled by default and must be explicitly enabled by you using a standard Chromium flag (`--remote-debugging-port=9222`). Nothing happens without that deliberate step.
+The fork remains centered on **the user's own TradingView Desktop session**.
 
-## What This Tool Does Not Do
+## How it works
 
-- Connect to TradingView's servers or APIs
-- Operate as a hosted market-data feed or redistribute TradingView data on its own
-- Work without a valid TradingView subscription and installed Desktop app
-- Bypass any TradingView paywall or access restriction
-- Execute real trades (chart interaction only)
-- Work if TradingView changes their internal Electron structure
+TradingView Desktop is an Electron/Chromium application. When you explicitly start it
+with a Chromium remote-debugging flag, the bridge can connect to the local CDP endpoint
+and interact with the app.
 
-## Research Context
+```text
+Local MCP client
+      |
+      v
+TradingView MCP
+      |
+      v
+127.0.0.1:9222  (Chrome DevTools Protocol)
+      |
+      v
+TradingView Desktop
+```
 
-This project explores an open research question: **how can LLM-based agents interact with professional trading interfaces to support human decision-making?**
+For an optional remote MCP client:
 
-Specifically it investigates:
+```text
+ChatGPT / remote MCP client
+      |
+      v
+Cloudflare Access
+      |
+      v
+reviewed gateway
+      |
+      v
+127.0.0.1:8765/mcp
+      |
+      v
+TradingView MCP -> local CDP -> TradingView Desktop
+```
 
-- How structured tool APIs (MCP) can bridge LLMs and stateful desktop financial applications
-- What latency, context, and reliability constraints emerge when an agent operates on live chart data
-- How agents handle ambiguous financial UI state (e.g. interpreting Pine Script output, reading indicator tables)
-- Whether natural language is an effective interface for chart navigation and Pine Script development
-- The failure modes of LLM agents operating in real-time data environments
+The CDP endpoint and raw MCP HTTP server are intended to remain loopback-only.
 
-This is not a trading bot. It is an interface layer that makes a trading application legible to an LLM agent, allowing researchers and developers to study human-AI collaboration in financial workflows.
+## Security and state model
 
-See [RESEARCH.md](RESEARCH.md) for open questions, findings, and related work.
+The bridge controls a **stateful desktop application**, so the main risk is not only
+network exposure — it is also shared UI state.
+
+- TradingView CDP defaults to `127.0.0.1:9222`.
+- Streamable HTTP defaults to `127.0.0.1:8765/mcp` and rejects non-loopback binds.
+- Remote access should terminate at the included Cloudflare Access gateway.
+- The gateway validates Access identity, strips client credentials and applies bounded
+  request/tool policy before forwarding.
+- The CDP port should never be exposed directly to a LAN or the Internet.
+- Multiple clients control the **same** TradingView windows/tabs/panes.
+- A client that mutates chart state should account for the fact that another client or
+  the human user can change it concurrently.
+- `tv_close` is limited to instances launched by the current MCP process; it does not
+  perform a name-wide process kill.
+- Machine-specific paths, identities and Cloudflare credentials belong only in ignored
+  local configuration.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) and [SECURITY.md](SECURITY.md) for the detailed
+transport and security model.
+
+## What it does not do
+
+- It does **not** provide an independent hosted TradingView data feed.
+- It does **not** bypass TradingView subscriptions or market-data entitlements.
+- It does **not** connect to a brokerage account or execute real trades.
+- It does **not** make undocumented TradingView internals stable; Desktop updates can
+  break selectors, workers or runtime structures.
+- It does **not** give each MCP client an isolated chart session — the desktop UI is
+  shared state.
+
+## Research context
+
+The project also explores a practical question: how well can an LLM agent operate a
+professional, stateful financial desktop interface while keeping the human in control?
+
+That includes reliability around mutable UI state, latency, chart interpretation,
+Pine Script iteration and coordination between interactive and automated workflows.
+
+See [RESEARCH.md](RESEARCH.md) for the longer research notes.
 
 ## Prerequisites
 
