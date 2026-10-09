@@ -5,8 +5,10 @@
 param(
     [Parameter(Mandatory = $true)]
     [switch]$Restart,
-    [ValidateRange(1024, 65535)]
-    [int]$CdpPort = 9333
+    # 0 = auto-detect the unique known local TV CDP endpoint.
+    # Explicitly provide a port only when multiple valid endpoints exist.
+    [ValidateRange(0, 65535)]
+    [int]$CdpPort = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,16 +40,41 @@ $LocalStatus = (& git.exe -C $Repo status --porcelain)
 if ($LASTEXITCODE -ne 0 -or $LocalStatus) {
     throw 'Refusing: local checkout has uncommitted changes.'
 }
-$CdpUrl = "http://127.0.0.1:$CdpPort/json/version"
-try {
-    $Cdp = Invoke-RestMethod -Uri $CdpUrl -TimeoutSec 4
-    if (-not $Cdp.'Protocol-Version') {
-        throw 'Missing CDP version marker'
+# MCP HTTP's port 8765 is assigned in DockerLocal's 8760..8799
+# registry. TradingView's CDP debugging port is a separate endpoint and
+# MUST be validated independently; TradeCapture's 9333 is not evidence
+# that this bridge uses it.
+$KnownCdpPorts = if ($CdpPort -gt 0) { @($CdpPort) } else { @(9222, 9333) }
+if ($CdpPort -gt 0 -and $CdpPort -lt 1024) {
+    throw 'Refusing: explicit CDP port is outside supported range.'
+}
+$VerifiedCdpPorts = @()
+foreach ($Port in $KnownCdpPorts) {
+    try {
+        $Cdp = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/json/version" -TimeoutSec 3
+        if (-not $Cdp.'Protocol-Version') { continue }
+        $Targets = @(Invoke-RestMethod -Uri "http://127.0.0.1:$Port/json/list" -TimeoutSec 3)
+        $TradingViewCharts = @($Targets | Where-Object {
+            $_.type -eq 'page' -and
+            $_.id -match '^[A-Za-z0-9-]+$' -and
+            $_.url -match '^https://www[.]tradingview[.]com/chart/'
+        })
+        if ($TradingViewCharts.Count -gt 0) {
+            $VerifiedCdpPorts += [int]$Port
+        }
+    }
+    catch {
+        # A port without valid CDP version + live TradingView chart
+        # evidence is simply not a valid candidate.
     }
 }
-catch {
-    throw "Refusing: verified CDP endpoint unavailable on loopback port $CdpPort."
+if ($VerifiedCdpPorts.Count -ne 1) {
+    throw ("Refusing: expected exactly one validated TradingView CDP endpoint, " +
+        "found $($VerifiedCdpPorts.Count) among ports $($KnownCdpPorts -join ','). " +
+        "If both are valid, specify -CdpPort explicitly after checking which " +
+        "endpoint serves your current TradingView MCP chart.")
 }
+$CdpPort = $VerifiedCdpPorts[0]
 
 # The HTTP bridge binds 127.0.0.1:8765, never a LAN address.
 $Listeners = @(Get-NetTCPConnection -State Listen -LocalPort 8765 -ErrorAction Stop |
