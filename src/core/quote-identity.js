@@ -7,7 +7,6 @@ const fields = [
   ['series_symbol', 'series.symbol'],
   ['info_full_name', 'series.symbolInfo.full_name'],
   ['info_pro_name', 'series.symbolInfo.pro_name'],
-  ['chart_symbol', 'chart.symbol'],
 ];
 
 export function resolveQuoteSourceIdentity(candidates) {
