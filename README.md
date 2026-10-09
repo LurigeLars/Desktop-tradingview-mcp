@@ -30,13 +30,13 @@ controllable through MCP**, rather than building another independent market-data
 
 That makes it useful for workflows such as:
 
-- asking an agent what is currently on a chart;
-- changing symbol/timeframe/layout and then restoring the previous state;
-- reading indicator tables, lines, labels and strategy output;
-- writing, compiling and debugging Pine Script;
-- capturing screenshots for visual analysis;
-- reading chart-local quote/OHLCV data;
-- coordinating multi-pane layouts;
+- asking an agent what is currently on a chart.
+- changing symbol/timeframe/layout and then restoring the previous state.
+- reading indicator tables, lines, labels and strategy output.
+- writing, compiling and debugging Pine Script.
+- capturing screenshots for visual analysis.
+- reading chart-local quote/OHLCV data.
+- coordinating multi-pane layouts.
 - running local chart-monitoring or research workflows.
 
 It is an interface layer for human-AI collaboration around TradingView, **not a trading
@@ -52,12 +52,12 @@ and remote MCP use. Fork-specific work includes:
 
 - fresher quote reads from resident TradingView runtime fields with stricter symbol
   identity checks;
-- resilient worker/tab/pane discovery and recovery from stale or hidden views;
-- bounded session pressure and request/rate handling;
-- safer TradingView launch and process lifecycle behavior;
-- a shared resident watch manifest for repeated market context;
-- a loopback Streamable HTTP transport in addition to local stdio;
-- a reviewed Cloudflare Access gateway for remote MCP clients such as ChatGPT;
+- resilient worker/tab/pane discovery and recovery from stale or hidden views.
+- bounded session pressure and request/rate handling.
+- safer TradingView launch and process lifecycle behavior.
+- a shared resident watch manifest for repeated market context.
+- a loopback Streamable HTTP transport in addition to local stdio.
+- a reviewed Cloudflare Access gateway for remote MCP clients such as ChatGPT.
 - sanitized deployment templates, CI, static analysis and CodeQL hardening.
 
 The fork remains centered on **the user's own TradingView Desktop session**.
