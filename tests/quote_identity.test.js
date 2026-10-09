@@ -42,6 +42,7 @@ test('chart symbolInfo full_name is a fallback when the resident series identifi
 test('unqualified ticker, reactive and chart API-only values fail closed', () => {
   const missing = [
     { chart_symbol: 'NVDA' },
+    { chart_symbol: 'NASDAQ:NVDA' },
     { series_symbol: 'NVDA' },
     { series_symbol: { value: () => 'NASDAQ:NVDA' } },
     { series_symbol: 'NASDAQ:NVDA\nmalicious' },
