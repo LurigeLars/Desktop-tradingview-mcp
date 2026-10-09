@@ -4,6 +4,7 @@
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
 import { matchWatchlistSymbol } from './watchlist.js';
+import { resolveQuoteSourceIdentity } from './quote-identity.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -482,7 +483,7 @@ async function _getQuoteInternal({ symbol } = {}) {
         var ext = {};
         try { ext = api.symbolExt() || {}; } catch(e) {}
         var bars = ${BARS_PATH};
-        var quote = { symbol: sym, retrieved_at_ms: retrievedAtMs };
+        var quote = { retrieved_at_ms: retrievedAtMs };
 
         if (bars && typeof bars.lastIndex === 'function') {
           var bar = bars.valueAt(bars.lastIndex());
@@ -505,6 +506,30 @@ async function _getQuoteInternal({ symbol } = {}) {
             series = api._chartWidget.model().mainSeries();
           }
         } catch(e) {}
+
+        // Use the source identity on the *same main series* as the quote
+        // provider. api.symbol() is reactive on some TradingView builds,
+        // and must never be serialized as an instrument identifier.
+        var sourceSeriesSymbol = null, sourceInfo = {};
+        if (series) {
+          try {
+            var candidate = series.symbol ? series.symbol() : null;
+            if (typeof candidate === 'string') sourceSeriesSymbol = candidate;
+          } catch(e) {}
+          try {
+            sourceInfo = series.symbolInfo ? series.symbolInfo() : {};
+            if (sourceInfo && typeof sourceInfo.value === 'function') {
+              sourceInfo = sourceInfo.value();
+            }
+            if (!sourceInfo || typeof sourceInfo !== 'object') sourceInfo = {};
+          } catch(e) { sourceInfo = {}; }
+        }
+        quote._symbol_candidates = {
+          series_symbol: sourceSeriesSymbol,
+          info_full_name: typeof sourceInfo.full_name === 'string' ? sourceInfo.full_name : null,
+          info_pro_name: typeof sourceInfo.pro_name === 'string' ? sourceInfo.pro_name : null,
+          chart_symbol: typeof sym === 'string' ? sym : null,
+        };
 
         var live = {};
         if (series) {
@@ -584,7 +609,14 @@ async function _getQuoteInternal({ symbol } = {}) {
       })()
     `);
     if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
-    return { success: true, ...data };
+    const proof = resolveQuoteSourceIdentity(data._symbol_candidates);
+    const { _symbol_candidates, ...publicQuote } = data;
+    return {
+      success: true, ...publicQuote, ...proof,
+      requested_symbol: requested || null,
+      requested_symbol_matches_source: proof.symbol != null
+        && requested !== '' && proof.symbol.toUpperCase() === requested.toUpperCase(),
+    };
   } finally {
     if (needsRestore && originalSymbol) {
       try {
