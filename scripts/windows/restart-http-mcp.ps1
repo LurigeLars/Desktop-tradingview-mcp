@@ -21,6 +21,15 @@ $HttpScript = Join-Path $Repo 'src\server\http.js'
 if (-not (Test-Path -LiteralPath $HttpScript -PathType Leaf)) {
     throw 'Refusing: expected local HTTP server script is missing.'
 }
+$ActiveBranch = (& git.exe -C $Repo rev-parse --abbrev-ref HEAD).Trim()
+$OriginUrl = (& git.exe -C $Repo remote get-url origin).Trim()
+if ($LASTEXITCODE -ne 0 -or $ActiveBranch -cne 'main' -or
+    $OriginUrl -cnotin @(
+        'https://github.com/LurigeLars/Desktop-tradingview-mcp',
+        'https://github.com/LurigeLars/Desktop-tradingview-mcp.git'
+    )) {
+    throw 'Refusing: checkout is not the exact allowlisted main branch and GitHub origin.'
+}
 $Head = (& git.exe -C $Repo rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $Head -notmatch '^[0-9a-f]{40}$') {
     throw 'Refusing: installed Git revision could not be verified.'
