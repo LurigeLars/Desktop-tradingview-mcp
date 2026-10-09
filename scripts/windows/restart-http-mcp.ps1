@@ -5,8 +5,10 @@
 param(
     [Parameter(Mandatory = $true)]
     [switch]$Restart,
-    [ValidateRange(1024, 65535)]
-    [int]$CdpPort = 9333
+    # 0 = auto-detect the unique known local TV CDP endpoint.
+    # Explicitly provide a port only when multiple valid endpoints exist.
+    [ValidateRange(0, 65535)]
+    [int]$CdpPort = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,16 +40,114 @@ $LocalStatus = (& git.exe -C $Repo status --porcelain)
 if ($LASTEXITCODE -ne 0 -or $LocalStatus) {
     throw 'Refusing: local checkout has uncommitted changes.'
 }
-$CdpUrl = "http://127.0.0.1:$CdpPort/json/version"
+# MCP HTTP's port 8765 is assigned in DockerLocal's 8760..8799
+# registry. TradingView's CDP debugging port is a separate endpoint and
+# MUST be validated independently; TradeCapture's 9333 is not evidence
+# that this bridge uses it.
+$KnownCdpPorts = if ($CdpPort -gt 0) { @($CdpPort) } else { @(9222, 9333) }
+if ($CdpPort -gt 0 -and $CdpPort -lt 1024) {
+    throw 'Refusing: explicit CDP port is outside supported range.'
+}
+$VerifiedCdpPorts = @()
+foreach ($Port in $KnownCdpPorts) {
+    try {
+        $Cdp = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/json/version" -TimeoutSec 3
+        if (-not $Cdp.'Protocol-Version') { continue }
+        $Targets = @(Invoke-RestMethod -Uri "http://127.0.0.1:$Port/json/list" -TimeoutSec 3)
+        $TradingViewCharts = @($Targets | Where-Object {
+            $_.type -eq 'page' -and
+            $_.id -match '^[A-Za-z0-9-]+
+
+# The HTTP bridge binds 127.0.0.1:8765, never a LAN address.
+$Listeners = @(Get-NetTCPConnection -State Listen -LocalPort 8765 -ErrorAction Stop |
+    Where-Object { $_.LocalAddress -eq '127.0.0.1' })
+$OtherListeners = @(Get-NetTCPConnection -State Listen -LocalPort 8765 -ErrorAction Stop |
+    Where-Object { $_.LocalAddress -ne '127.0.0.1' })
+if ($Listeners.Count -ne 1 -or $OtherListeners.Count -ne 0) {
+    throw 'Refusing: HTTP loopback listener ownership or binding is ambiguous.'
+}
+$OwnerPid = [int]$Listeners[0].OwningProcess
+$Process = Get-CimInstance Win32_Process -Filter "ProcessId=$OwnerPid"
+if ($null -eq $Process -or $Process.Name -ine 'node.exe' -or
+    $Process.CommandLine -notmatch '(?i)src[\\/]server[\\/]http[.]js' -or
+    [string]::IsNullOrWhiteSpace([string]$Process.ExecutablePath)) {
+    throw 'Refusing: port 8765 is not owned by the expected Node HTTP process.'
+}
+$NodeExe = [string]$Process.ExecutablePath
+if (-not (Test-Path -LiteralPath $NodeExe -PathType Leaf)) {
+    throw 'Refusing: original Node executable is unavailable.'
+}
+
+Write-Host "Validated server PID $OwnerPid at 127.0.0.1:8765."
+Write-Host "Verified CDP at 127.0.0.1:$CdpPort and checkout $($Head.Substring(0, 8))."
+Write-Host 'Restarting the MCP HTTP bridge only; TradingView Desktop stays open.'
+
+Stop-Process -Id $OwnerPid -ErrorAction Stop
+$Deadline = (Get-Date).AddSeconds(12)
+do {
+    Start-Sleep -Milliseconds 250
+    $Remaining = @(Get-NetTCPConnection -State Listen -LocalPort 8765 -ErrorAction SilentlyContinue)
+    if ($Remaining.Count -eq 0) { break }
+    if ((Get-Date) -gt $Deadline) {
+        throw 'The previous HTTP listener did not release port 8765. No second server started.'
+    }
+} while ($true)
+
+$OldCdpPort = $env:TV_CDP_PORT
+$OldHttpPort = $env:TV_MCP_HTTP_PORT
+$OldHttpHost = $env:TV_MCP_HTTP_HOST
 try {
-    $Cdp = Invoke-RestMethod -Uri $CdpUrl -TimeoutSec 4
-    if (-not $Cdp.'Protocol-Version') {
-        throw 'Missing CDP version marker'
+    $env:TV_CDP_PORT = "$CdpPort"
+    $env:TV_MCP_HTTP_HOST = '127.0.0.1'
+    $env:TV_MCP_HTTP_PORT = '8765'
+    $Started = Start-Process -FilePath $NodeExe -ArgumentList @('src/server/http.js') `
+        -WorkingDirectory $Repo -WindowStyle Hidden -PassThru -ErrorAction Stop
+}
+finally {
+    $env:TV_CDP_PORT = $OldCdpPort
+    $env:TV_MCP_HTTP_HOST = $OldHttpHost
+    $env:TV_MCP_HTTP_PORT = $OldHttpPort
+}
+$Deadline = (Get-Date).AddSeconds(18)
+do {
+    Start-Sleep -Milliseconds 300
+    $New = @(Get-NetTCPConnection -State Listen -LocalPort 8765 -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalAddress -eq '127.0.0.1' })
+    if ($New.Count -eq 1 -and [int]$New[0].OwningProcess -eq [int]$Started.Id) {
+        Write-Host "Restarted DTV HTTP MCP successfully (PID $($Started.Id))."
+        Write-Host 'Reconnect the ChatGPT DTV plugin session if it retained the old transport.'
+        exit 0
+    }
+    if ($New.Count -gt 0 -and
+        ([int]$New[0].OwningProcess -ne [int]$Started.Id)) {
+        throw 'A different process acquired the MCP listener; investigate the supervisor.'
+    }
+    if ($Started.HasExited) {
+        throw "The restarted Node process exited with code $($Started.ExitCode)."
+    }
+    if ((Get-Date) -gt $Deadline) {
+        throw 'New Node process did not bind 127.0.0.1:8765 within 18 seconds.'
+    }
+} while ($true)
+ -and
+            $_.url -match '^https://www[.]tradingview[.]com/chart/'
+        })
+        if ($TradingViewCharts.Count -gt 0) {
+            $VerifiedCdpPorts += [int]$Port
+        }
+    }
+    catch {
+        # A port without valid CDP version + live TradingView chart
+        # evidence is simply not a valid candidate.
     }
 }
-catch {
-    throw "Refusing: verified CDP endpoint unavailable on loopback port $CdpPort."
+if ($VerifiedCdpPorts.Count -ne 1) {
+    throw ("Refusing: expected exactly one validated TradingView CDP endpoint, " +
+        "found $($VerifiedCdpPorts.Count) among ports $($KnownCdpPorts -join ','). " +
+        "If both are valid, specify -CdpPort explicitly after checking which " +
+        "endpoint serves your current TradingView MCP chart.")
 }
+$CdpPort = $VerifiedCdpPorts[0]
 
 # The HTTP bridge binds 127.0.0.1:8765, never a LAN address.
 $Listeners = @(Get-NetTCPConnection -State Listen -LocalPort 8765 -ErrorAction Stop |
