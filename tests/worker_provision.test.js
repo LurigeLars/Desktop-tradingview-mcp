@@ -869,8 +869,11 @@ test('reserved slots reduce the total usable budget including external charts', 
     }],
   };
 
+  const projection = await provisionWorker({ dry_run: true, _deps: runtime });
+  assert.equal(projection.capacity_projection.over_capacity, true);
+  assert.equal(projection.capacity_projection.projected_connections, 9);
   await assert.rejects(
-    () => provisionWorker({ dry_run: true, _deps: runtime }),
+    () => provisionWorker({ dry_run: false, _deps: runtime }),
     /9 projected chart connections.*exceed 8 usable slots/,
   );
 });
