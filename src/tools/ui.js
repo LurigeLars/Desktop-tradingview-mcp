@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/ui.js';
+import * as tabCore from '../core/tab.js';
+import { isWorkerOwnedTab, status as workerStatus } from '../core/worker.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerUiTools(server) {
@@ -30,11 +32,23 @@ export function registerUiTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('layout_switch', 'Switch to a saved chart layout by name or ID', {
-    name: z.string().describe('Name or ID of the layout to switch to'),
+  server.tool('layout_switch', 'Attach controls to an OPEN saved personal layout by name, numeric ID, or chart URL token. Never discards unsaved changes or alters the visible Desktop tab.', {
+    name: z.string().describe('Name, numeric saved-layout ID, or chart URL token'),
   }, async ({ name }) => {
-    try { return jsonResult(await withTopologyMutationLock('layout_switch', () => core.layoutSwitch({ name }))); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    try {
+      return jsonResult(await withTopologyMutationLock('layout_switch', async () => {
+        const layouts = await core.layoutList();
+        if (layouts.error) throw new Error(layouts.error);
+        const selected = core.resolveSavedLayout(layouts.layouts, name);
+        const tabs = await tabCore.list();
+        const live = tabs.tabs.filter(t => t.is_chart && t.chart_id === selected.chart_id);
+        if (live.length !== 1) throw new Error('Layout must have exactly one open chart: ' + selected.name);
+        if (isWorkerOwnedTab(live[0], workerStatus())) {
+          throw new Error('Refusing to attach interactive controls to a worker-owned layout.');
+        }
+        return core.layoutSwitch({ name, _deps: { listLayouts: async () => layouts } });
+      }));
+    } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
   server.tool('ui_keyboard', 'Press keyboard keys or shortcuts (e.g., Enter, Escape, Alt+S, Ctrl+Z)', {

@@ -10,7 +10,7 @@
  * (Approach from issue #155 and PR #163, verified on Desktop 3.1.0.)
  */
 import CDP from 'chrome-remote-interface';
-import { getClient, reconnectTo, CDP_HOST, CDP_PORT, listCdpTargets } from '../connection.js';
+import { getClient, getTargetInfo, reconnectTo, CDP_HOST, CDP_PORT, listCdpTargets } from '../connection.js';
 
 const LANDING_PROBE_TIMEOUT_MS = 500;
 const SHELL_OPERATION_TIMEOUT_MS = 6000;
@@ -135,6 +135,48 @@ export function rankLandingCandidates(targets, beforeIds = []) {
       || a.index - b.index
     )
     .map(item => item.target);
+}
+
+/** Stable identity is the chart URL token; CDP target IDs rotate on restart. */
+export function selectExactChartTarget(targets, chartId) {
+  const token = String(chartId || '').trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(token)) {
+    throw new Error('chart_id must be an exact TradingView chart URL token');
+  }
+  const matching = (targets || []).filter(target =>
+    isChartPageTarget(target)
+    && target.url.match(/\/chart\/([^/?]+)/i)?.[1] === token
+  );
+  if (matching.length !== 1) {
+    throw new Error(matching.length
+      ? 'Multiple CDP targets expose chart ' + token + '; refusing ambiguous attachment.'
+      : 'No live CDP target for chart ' + token + '. Open the layout in Desktop first.');
+  }
+  return matching[0];
+}
+
+/** Attach subsequent chart/indicator tools to one exact chart without altering
+ * the physical tab bar, layout state, worker panes, or saved changes. */
+export async function attachChart({ chart_id, _deps } = {}) {
+  const deps = {
+    listTargets: _deps?.listTargets || listCdpTargets,
+    reconnect: _deps?.reconnect || reconnectTo,
+    current: _deps?.current || getTargetInfo,
+  };
+  const target = selectExactChartTarget(await deps.listTargets(), chart_id);
+  await deps.reconnect(target.id);
+  const attached = await deps.current();
+  if (String(attached?.id || '') !== String(target.id)) {
+    throw new Error('CDP attachment verification failed for chart ' + chart_id);
+  }
+  return {
+    success: true,
+    action: 'chart_target_attached',
+    chart_id: String(chart_id),
+    target_id: target.id,
+    visually_switched: false,
+    verified: true,
+  };
 }
 
 /**
@@ -1070,17 +1112,15 @@ export async function switchTab({ index }) {
       }
       return null;
     });
+    // CDP target enumeration is not Desktop shell tab order. A chart can be
+    // loaded in a hidden renderer that has no matching shell tab; attach to
+    // its exact CDP target rather than report failure or switch a worker pane.
     if (clicked === null) {
-      throw new Error(`Clicked through all shell tabs but chart ${target.chart_id} never became visible.`);
+      const attachment = await attachChart({ chart_id: target.chart_id });
+      return { ...attachment, index: idx, tab_id: target.id, action: 'attached_without_visual_switch' };
     }
   }
 
-  // Re-attach the cached CDP client so subsequent reads follow the switch.
-  try {
-    await reconnectTo(target.id);
-  } catch (e) {
-    throw new Error(`Tab is visible but failed to re-attach CDP to it: ${e.message}`);
-  }
-
-  return { success: true, action: 'switched', index: idx, tab_id: target.id, chart_id: target.chart_id, visually_switched: true };
+  const attachment = await attachChart({ chart_id: target.chart_id });
+  return { ...attachment, action: 'switched', index: idx, tab_id: target.id, visually_switched: true };
 }
