@@ -2,6 +2,7 @@
  * Core UI automation logic.
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import * as tabCore from './tab.js';
 
 export async function click({ by, value }) {
   const escaped = JSON.stringify(value);
@@ -116,7 +117,7 @@ export async function layoutList() {
       try {
         window.TradingViewApi.getSavedCharts(function(charts) {
           if (!charts || !Array.isArray(charts)) { resolve({layouts: [], source: 'internal_api', error: 'getSavedCharts returned no data'}); return; }
-          var result = charts.map(function(c) { return { id: c.id || c.chartId || null, name: c.name || c.title || 'Untitled', symbol: c.symbol || null, resolution: c.resolution || null, modified: c.timestamp || c.modified || null }; });
+          var result = charts.map(function(c) { return { id: c.id || c.chartId || null, chart_id: c.url || null, name: c.name || c.title || 'Untitled', symbol: c.symbol || null, resolution: c.resolution || null, modified: c.timestamp || c.modified || null }; });
           resolve({layouts: result, source: 'internal_api'});
         });
         setTimeout(function() { resolve({layouts: [], source: 'internal_api', error: 'getSavedCharts timed out'}); }, 5000);
@@ -126,47 +127,47 @@ export async function layoutList() {
   return { success: true, layout_count: layouts?.layouts?.length || 0, source: layouts?.source, layouts: layouts?.layouts || [], error: layouts?.error };
 }
 
-export async function layoutSwitch({ name }) {
-  const escaped = JSON.stringify(name);
-  const result = await evaluateAsync(`
-    new Promise(function(resolve) {
-      try {
-        var target = ${escaped};
-        if (/^\\d+$/.test(target)) { window.TradingViewApi.loadChartFromServer(target); resolve({success: true, method: 'loadChartFromServer', id: target, source: 'internal_api'}); return; }
-        window.TradingViewApi.getSavedCharts(function(charts) {
-          if (!charts || !Array.isArray(charts)) { resolve({success: false, error: 'getSavedCharts returned no data', source: 'internal_api'}); return; }
-          var match = null;
-          for (var i = 0; i < charts.length; i++) { var cname = charts[i].name || charts[i].title || ''; if (cname === target || cname.toLowerCase() === target.toLowerCase()) { match = charts[i]; break; } }
-          if (!match) { for (var j = 0; j < charts.length; j++) { var cn = (charts[j].name || charts[j].title || '').toLowerCase(); if (cn.indexOf(target.toLowerCase()) !== -1) { match = charts[j]; break; } } }
-          if (!match) { resolve({success: false, error: 'Layout "' + target + '" not found.', source: 'internal_api'}); return; }
-          var chartId = match.id || match.chartId;
-          window.TradingViewApi.loadChartFromServer(chartId);
-          resolve({success: true, method: 'loadChartFromServer', id: chartId, name: match.name || match.title, source: 'internal_api'});
-        });
-        setTimeout(function() { resolve({success: false, error: 'getSavedCharts timed out', source: 'internal_api'}); }, 5000);
-      } catch(e) { resolve({success: false, error: e.message, source: 'internal_api'}); }
-    })
-  `);
-  if (!result?.success) throw new Error(result?.error || 'Unknown error switching layout');
+/** Strict resolver: exact name/id first; reject ambiguous partial names. */
+export function resolveSavedLayout(layouts, query) {
+  const target = String(query || '').trim();
+  if (!target) throw new Error('Saved layout name or ID is required');
+  const exact = (layouts || []).filter(x =>
+    String(x.id) === target ||
+    String(x.chart_id || '') === target ||
+    String(x.name || '').toLowerCase() === target.toLowerCase()
+  );
+  const partial = exact.length ? exact : (layouts || []).filter(x =>
+    String(x.name || '').toLowerCase().includes(target.toLowerCase())
+  );
+  if (partial.length !== 1) throw new Error(partial.length
+    ? 'Ambiguous saved layout name; specify exact name, chart token or numeric ID.'
+    : 'Saved layout not found: ' + target);
+  return partial[0];
+}
 
-  // Handle "unsaved changes" confirmation dialog
-  await new Promise(r => setTimeout(r, 500));
-  const dismissed = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/open anyway|don't save|discard/i.test(text)) {
-          btns[i].click();
-          return true;
-        }
-      }
-      return false;
-    })()
-  `);
-
-  if (dismissed) await new Promise(r => setTimeout(r, 1000));
-  return { success: true, layout: result.name || name, layout_id: result.id, source: result.source, action: 'switched', unsaved_dialog_dismissed: dismissed };
+/** Attach an OPEN saved layout without triggering unsaved-change dialogs or
+ * touching a worker pane. Non-open layouts must be opened in Desktop first. */
+export async function layoutSwitch({ name, _deps } = {}) {
+  const listLayouts = _deps?.listLayouts || layoutList;
+  const attach = _deps?.attach || tabCore.attachChart;
+  const layouts = await listLayouts();
+  if (layouts.error) throw new Error(layouts.error);
+  const selected = resolveSavedLayout(layouts.layouts, name);
+  if (!selected.chart_id) throw new Error(
+    'Saved layout ' + selected.name + ' has no stable chart URL token.'
+  );
+  const target = await attach({ chart_id: selected.chart_id });
+  return {
+    success: true,
+    action: 'attached_open_layout',
+    layout: selected.name,
+    layout_id: selected.id,
+    chart_id: selected.chart_id,
+    target_id: target.target_id,
+    visually_switched: false,
+    verified: target.verified === true,
+    source: 'internal_api',
+  };
 }
 
 export async function keyboard({ key, modifiers }) {
