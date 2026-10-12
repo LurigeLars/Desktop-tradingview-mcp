@@ -1371,11 +1371,15 @@ export async function provisionWorker({
   const externalConnections = externalTargets.reduce((sum, item) => sum + Number(item.pane_count || 0), 0);
   const usableCapacity = Number(state.usable_capacity);
   const projectedConnections = externalConnections + Number(state.configured || 0);
-  if (projectedConnections > usableCapacity) {
+  // Read-only planning must remain available even when an already-running
+  // Desktop session exceeds the reserved connection budget. Never allocate
+  // additional charts above the budget on a mutating provisioning call.
+  const overCapacity = projectedConnections > usableCapacity;
+  if (overCapacity && !dry_run) {
     throw new Error(
       'Worker capacity exceeded: ' + projectedConnections + ' projected chart connections (' +
       externalConnections + ' external + ' + state.configured + ' worker) exceed ' +
-      usableCapacity + ' usable slots',
+      usableCapacity + ' usable slots. Use worker_rebind to repair restored CDP IDs without allocating charts.',
     );
   }
 
@@ -1440,6 +1444,7 @@ export async function provisionWorker({
         external_connections: externalConnections,
         worker_connections: state.configured,
         projected_connections: projectedConnections,
+        over_capacity: overCapacity,
       },
       adoption_candidate: adoptionCandidate,
       legacy_direct_recovery: {
