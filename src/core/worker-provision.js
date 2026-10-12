@@ -264,6 +264,72 @@ export function persistentWorkerRecovery(state, topology, byHandle, inspectedTar
   return { bySlot, duplicatesBySlot, targetIds, pendingSlots, conflicts };
 }
 
+/** Rebind restored persistent worker charts to NEW CDP IDs without creating,
+ * modifying, saving or closing any chart. Refuse partial/ambiguous recovery. */
+export async function rebindPersistentWorkers({ dry_run = true, _deps } = {}) {
+  const deps = resolveDeps(_deps);
+  const state = deps.status();
+  const topology = state.topology_plan;
+  const workersByHandle = entryMap(state);
+  const targets = await deps.listTargets();
+  const inspected = await deps.inspectTargets(targets);
+  const recovery = persistentWorkerRecovery(state, topology, workersByHandle, inspected);
+  const expectedSlots = (topology.tabs || []).map(t => Number(t.tab_index));
+  const missingSlots = expectedSlots.filter(slot => !recovery.bySlot.has(slot));
+  const duplicateSlots = [...recovery.duplicatesBySlot.keys()];
+  const owned = workerTabMap(state);
+  const changes = expectedSlots.filter(slot => {
+    const saved = owned.get(slot);
+    const live = recovery.bySlot.get(slot);
+    return saved && live && String(saved.target_id || '') !== String(live.target_id || '');
+  }).map(slot => ({
+    slot,
+    layout: owned.get(slot).layout_name,
+    chart_id: owned.get(slot).chart_id,
+    from_target_id: owned.get(slot).target_id || null,
+    to_target_id: recovery.bySlot.get(slot).target_id,
+  }));
+  const valid = !missingSlots.length && !duplicateSlots.length
+    && !recovery.conflicts.length;
+  const report = {
+    success: valid,
+    dry_run: !!dry_run,
+    configured: state.configured,
+    verified_slots: [...recovery.bySlot.keys()].sort((a,b) => a-b),
+    missing_slots: missingSlots,
+    duplicate_slots: duplicateSlots,
+    conflicts: recovery.conflicts,
+    rebindings: changes,
+    changed: false,
+  };
+  if (dry_run || !valid || !changes.length) return report;
+
+  const tabs = (state.worker_tabs || []).map(saved => {
+    const live = recovery.bySlot.get(Number(saved.slot));
+    return live ? { ...saved, target_id: live.target_id } : saved;
+  });
+  const assignments = {};
+  for (const plan of topology.tabs) {
+    const live = recovery.bySlot.get(Number(plan.tab_index));
+    for (let index=0; index<plan.handles.length; index++) {
+      const handle = plan.handles[index];
+      const entry = workersByHandle.get(handle);
+      const pane = live.panes[index];
+      assignments[handle] = {
+        ...(entry.assignment || {}),
+        worker_slot: Number(plan.tab_index),
+        target_id: live.target_id,
+        chart_id: live.chart_id,
+        pane_index: index,
+        resolved_symbol: pane.resolved_symbol,
+        resolution: pane.resolution,
+      };
+    }
+  }
+  deps.record({ worker_tabs: tabs, assignments });
+  return { ...report, changed: true };
+}
+
 export function legacyDirectWorkerRecovery(state, inspectedTargets) {
   const tabs = (state?.worker_tabs || []).filter(tab =>
     tab?.chart_id && tab?.persistent_layout !== true
