@@ -18,7 +18,7 @@ export const FULL_ALLOWED_TOOLS = [
   'data_get_ohlcv', 'data_get_indicator', 'data_get_strategy_results', 'data_get_trades',
   'data_get_equity', 'quote_get', 'depth_get', 'data_get_pine_lines', 'data_get_pine_labels',
   'data_get_pine_tables', 'data_get_pine_boxes', 'data_get_study_values', 'realtime_snapshot',
-  'worker_set_universe', 'worker_status', 'worker_provision', 'watch_manifest_apply',
+  'worker_set_universe', 'worker_status', 'worker_provision', 'worker_rebind', 'watch_manifest_apply',
   'morning_brief', 'session_save', 'session_get',
   'capture_screenshot',
   'draw_shape', 'draw_list', 'draw_clear', 'draw_remove_one', 'draw_get_properties',
@@ -31,7 +31,7 @@ export const FULL_ALLOWED_TOOLS = [
   'ui_keyboard', 'ui_type_text', 'ui_hover', 'ui_scroll', 'ui_mouse_click', 'ui_find_element',
   'ui_evaluate',
   'pane_list', 'pane_set_layout', 'pane_focus', 'pane_set_symbol',
-  'tab_list', 'tab_new', 'layout_new', 'tab_close', 'tab_switch',
+  'tab_list', 'tab_new', 'layout_new', 'tab_close', 'tab_switch', 'tab_attach',
 ].join(',');
 
 // Optional operator-controlled reduced profile. It is never selected implicitly.
@@ -43,7 +43,7 @@ export const CORE_ALLOWED_TOOLS = [
   'data_get_ohlcv', 'data_get_indicator', 'data_get_strategy_results',
   'quote_get', 'depth_get', 'data_get_pine_lines', 'data_get_pine_labels',
   'data_get_pine_tables', 'data_get_pine_boxes', 'data_get_study_values', 'realtime_snapshot',
-  'worker_set_universe', 'worker_status', 'worker_provision', 'watch_manifest_apply',
+  'worker_set_universe', 'worker_status', 'worker_provision', 'worker_rebind', 'watch_manifest_apply',
   'morning_brief', 'session_save', 'session_get',
   'capture_screenshot',
   'alert_create', 'alert_list', 'alert_delete',
@@ -51,7 +51,7 @@ export const CORE_ALLOWED_TOOLS = [
   'watchlist_get', 'watchlist_add', 'watchlist_add_bulk', 'watchlist_remove', 'news_flow_get',
   'layout_list', 'layout_switch',
   'pane_list', 'pane_set_layout', 'pane_focus', 'pane_set_symbol',
-  'tab_list', 'tab_new', 'tab_close', 'tab_switch',
+  'tab_list', 'tab_new', 'tab_close', 'tab_switch', 'tab_attach',
 ].join(',');
 
 export const DEFAULT_ALLOWED_TOOLS = FULL_ALLOWED_TOOLS;

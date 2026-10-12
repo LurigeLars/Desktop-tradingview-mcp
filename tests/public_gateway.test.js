@@ -72,9 +72,9 @@ describe('public gateway configuration', () => {
     assert.equal(headers['content-length'], '12');
   });
 
-  it('preserves the full 94-tool TradingView surface by default', () => {
+  it('preserves the full 96-tool TradingView surface by default', () => {
     const allowed = parseAllowedTools();
-    assert.equal(allowed.size, 94);
+    assert.equal(allowed.size, 96);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('pine_set_source'), true);
     assert.equal(allowed.has('replay_start'), true);
@@ -94,7 +94,7 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit operator-controlled core profile', () => {
     const allowed = parseAllowedTools('core');
-    assert.equal(allowed.size, 52);
+    assert.equal(allowed.size, 54);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('data_get_ohlcv'), true);
     assert.equal(allowed.has('news_flow_get'), true);
@@ -108,9 +108,25 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit full profile', () => {
     const allowed = parseAllowedTools('full');
-    assert.equal(allowed.size, 94);
+    assert.equal(allowed.size, 96);
     assert.equal(allowed.has('ui_evaluate'), true);
     assert.equal(allowed.has('tv_update'), true);
+  });
+
+  it('advertises and permits safe tab attachment and worker recovery in both profiles', () => {
+    for (const profile of ['full', 'core']) {
+      const allowedTools = parseAllowedTools(profile);
+      const names = ['tab_attach', 'worker_rebind'];
+      const response = rewriteResponse({
+        result: { tools: names.map(name => ({ name, inputSchema: { type: 'object' } })) },
+      }, { allowedTools });
+      assert.deepEqual(response.result.tools.map(tool => tool.name), names);
+      for (const name of names) {
+        assert.deepEqual(checkRequest({ method: 'tools/call', params: { name } }, allowedTools), {});
+      }
+    }
+    const restricted = parseAllowedTools('chart_get_state,tab_list');
+    assert.match(checkRequest({ method: 'tools/call', params: { name: 'worker_rebind' } }, restricted).error, /not available/);
   });
 
   it('still supports a stricter ALLOWED_TOOLS override', () => {
