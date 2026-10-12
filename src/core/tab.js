@@ -16,7 +16,7 @@ const LANDING_PROBE_TIMEOUT_MS = 500;
 const SHELL_OPERATION_TIMEOUT_MS = 6000;
 const CHART_PROBE_TIMEOUT_MS = 750;
 const NEW_TAB_URL_RE = /app\.asar\/app\/new-tab\/index\.html/i;
-const SHELL_TITLE_RE = /tabbed-window/i;
+const SHELL_TITLE_RE = /^tabbed-window$/i;
 const SHELL_URL_RE = /\/window\/index\.html/i;
 
 export async function withDeadline(promise, timeoutMs, label = 'Operation') {
@@ -55,11 +55,11 @@ export function isNewTabPageTarget(target) {
 }
 
 function isShellTarget(target) {
-  return target?.type === 'page' && (
-    SHELL_TITLE_RE.test(String(target.title || ''))
-    || SHELL_TITLE_RE.test(String(target.url || ''))
-    || SHELL_URL_RE.test(String(target.url || ''))
-  );
+  if (target?.type !== 'page') return false;
+  if (SHELL_TITLE_RE.test(String(target.title || ''))) return true;
+  // New-tab and tooltip query strings also identify their tabbed-window owner.
+  try { return SHELL_URL_RE.test(new URL(String(target.url || '')).pathname); }
+  catch { return false; }
 }
 
 export function rankShellCandidates(targets) {
@@ -70,7 +70,7 @@ export function rankShellCandidates(targets) {
       const url = String(target.url || '');
       const score =
         (SHELL_TITLE_RE.test(title) ? 100 : 0)
-        + (SHELL_TITLE_RE.test(url) ? 50 : 0)
+        + (/tabbed-window/i.test(url) ? 50 : 0)
         + (SHELL_URL_RE.test(url) ? 10 : 0);
       return { target, index, score };
     })
@@ -1005,9 +1005,82 @@ export async function cleanupOrphanShellTabs({
   });
 }
 
-/**
- * Close the currently active tab by clicking its close button in the shell.
- */
+/** Map a renderer to a unique Desktop tab without trusting visibilityState. */
+async function resolveShellTabId(target, deps = {}) {
+  if (isNewTabPageTarget(target)) {
+    return JSON.parse(new URL(target.url).searchParams.get('rendererInitialData') || '{}').tabId || null;
+  }
+  if (!isChartPageTarget(target)) return null;
+  const targets = await (deps.listTargets || listCdpTargets)();
+  const charts = targets.filter(isChartPageTarget);
+  if (charts.length > 64) return null;
+  const readName = deps.readLayoutName || (id => withTarget(id, evalIn => evalIn(
+    'window.TradingViewApi?._chartWidgetCollection?.metaInfo?.name?.value()'
+  )));
+  const names = await Promise.all(charts.map(async t => ({ id: t.id, name: await readName(t.id) })));
+  if (names.some(t => !t.name)) return null;
+  const wanted = names.find(t => t.id === target.id)?.name;
+  if (!wanted || names.filter(t => t.name === wanted).length !== 1) return null;
+  const shell = deps.withShell || withShell;
+  return shell(async evalIn => {
+    // shortcut: Desktop's React tab title holds the layout name; fail closed if that structure changes.
+    const matches = await evalIn(`Array.from(document.querySelectorAll('.tabs-container .tab')).filter(tab => {
+      var fiber = tab[Object.keys(tab).find(k => k.indexOf('__reactFiber') === 0)];
+      for (var n = 0; fiber && n < 4; n++, fiber = fiber.return) {
+        if (fiber.stateNode?.state?.title?.name === ${JSON.stringify(wanted)}) return true;
+      }
+      return false;
+    }).map(tab => tab.id)`);
+    return matches.length === 1 ? matches[0] : null;
+  });
+}
+
+async function selectShellTab(evalIn, id, wait) {
+  const selected = await evalIn(`(function() {
+    var tab = document.getElementById(${JSON.stringify(id)});
+    if (!tab || !tab.matches('.tabs-container .tab')) return false;
+    var key = Object.keys(tab).find(k => k.indexOf('__reactProps') === 0);
+    if (key && typeof tab[key].onClick === 'function') {
+      tab[key].onClick({ button: 0, preventDefault: function(){}, stopPropagation: function(){}, currentTarget: tab, target: tab });
+    } else tab.click();
+    return true;
+  })()`);
+  if (!selected) throw new Error('Exact Desktop shell tab not found.');
+  for (let n = 0; n < 20; n++) {
+    if (await evalIn(`document.querySelector('.tabs-container .tab.active')?.id === ${JSON.stringify(id)}`)) return;
+    await wait(100);
+  }
+  throw new Error('Exact Desktop tab did not become active.');
+}
+
+async function closeShellTarget(target, deps = {}) {
+  // Electron visibility is unreliable for background renderers; map identity before clicking.
+  const id = await resolveShellTabId(target, deps);
+  if (!id) throw new Error('Exact Desktop tab identity unavailable; refusing renderer-only close.');
+  const shell = deps.withShell || withShell;
+  const wait = deps.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  return shell(async evalIn => {
+    await selectShellTab(evalIn, id, wait);
+    const clicked = await evalIn(`(function() {
+      var tab = document.getElementById(${JSON.stringify(id)});
+      if (!tab || !tab.matches('.tabs-container .tab')) return false;
+      var close = tab.querySelector('.tab-close-button-container button, [class*="close"] button, button[class*="close"]');
+      if (!close) return false;
+      var key = Object.keys(close).find(k => k.indexOf('__reactProps') === 0);
+      if (key && typeof close[key].onClick === 'function') {
+        close[key].onClick({ button: 0, preventDefault: function(){}, stopPropagation: function(){}, currentTarget: close, target: close });
+      } else close.click();
+      return true;
+    })()`);
+    if (!clicked) throw new Error('Close button not found for exact Desktop tab.');
+    for (let n = 0; n < 15; n++) {
+      if (!(await evalIn(`!!document.getElementById(${JSON.stringify(id)})`))) return;
+      await wait(100);
+    }
+    throw new Error('Desktop shell tab remained open; check for unsaved changes before retrying.');
+  });
+}
+
 export async function closeTabByTargetId({ target_id, _deps } = {}) {
   const targetId = String(target_id || '').trim();
   if (!targetId) throw new Error('target_id is required');
@@ -1015,7 +1088,7 @@ export async function closeTabByTargetId({ target_id, _deps } = {}) {
   const listTargets = _deps?.listTargets || listCdpTargets;
   const listTabs = _deps?.listTabs || list;
   const closeTarget = _deps?.closeTarget
-    || (id => CDP.Close({ host: CDP_HOST, port: CDP_PORT, id }));
+    || (id => closeShellTarget(beforeTargets.find(tab => String(tab.id) === id), _deps));
   const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
   const timeoutMs = Number(_deps?.timeoutMs || 3000);
 
@@ -1090,37 +1163,24 @@ export async function closeTab() {
  * chart target actually became visible, then re-attaches the CDP client so
  * subsequent reads follow it.
  */
-export async function switchTab({ index }) {
-  const tabs = await list();
+export async function switchTab({ index, _deps }) {
+  const listTabs = _deps?.listTabs || list;
+  const shell = _deps?.withShell || withShell;
+  const attach = _deps?.attachChart || attachChart;
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const tabs = await listTabs();
   const idx = Number(index);
-
-  if (idx >= tabs.tab_count) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= tabs.tab_count) {
     throw new Error(`Tab index ${idx} out of range (have ${tabs.tab_count} tabs)`);
   }
-
-  const target = tabs.tabs[idx];
-
-  if (!(await isTargetVisible(target.id))) {
-    const clicked = await withShell(async (evalIn) => {
-      const count = await evalIn(`document.querySelectorAll('.tabs-container .tab').length`);
-      // Try the same ordinal first (shell order usually matches), then the rest.
-      const order = [...new Set([Math.min(idx, count - 1), ...Array.from({ length: count }, (_, k) => k)])];
-      for (const k of order) {
-        await evalIn(`document.querySelectorAll('.tabs-container .tab')[${k}].click()`);
-        await new Promise(r => setTimeout(r, 400));
-        if (await isTargetVisible(target.id)) return k;
-      }
-      return null;
-    });
-    // CDP target enumeration is not Desktop shell tab order. A chart can be
-    // loaded in a hidden renderer that has no matching shell tab; attach to
-    // its exact CDP target rather than report failure or switch a worker pane.
-    if (clicked === null) {
-      const attachment = await attachChart({ chart_id: target.chart_id });
-      return { ...attachment, index: idx, tab_id: target.id, action: 'attached_without_visual_switch' };
-    }
+  const target = { ...tabs.tabs[idx], type: 'page' };
+  const id = await resolveShellTabId(target, _deps);
+  if (!id) {
+    if (!target.is_chart) throw new Error('New-tab target has no matching visible Desktop tab.');
+    const attachment = await attach({ chart_id: target.chart_id });
+    return { ...attachment, index: idx, tab_id: target.id, action: 'attached_without_visual_switch', visually_switched: false };
   }
-
-  const attachment = await attachChart({ chart_id: target.chart_id });
+  await shell(evalIn => selectShellTab(evalIn, id, wait));
+  const attachment = target.is_chart ? await attach({ chart_id: target.chart_id }) : { success: true, chart_id: null };
   return { ...attachment, action: 'switched', index: idx, tab_id: target.id, visually_switched: true };
 }

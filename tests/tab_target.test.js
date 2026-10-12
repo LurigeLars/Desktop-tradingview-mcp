@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attachChart, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, withDeadline } from '../src/core/tab.js';
+import { attachChart, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline } from '../src/core/tab.js';
 import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
@@ -77,6 +77,60 @@ test('landing candidates exclude chart and shell targets', () => {
     rankLandingCandidates(targets).map(target => target.id),
     ['landing'],
   );
+});
+
+test('renderer owner metadata does not classify new tabs or tooltips as shells', () => {
+  const query = '?rendererInitialData=%7B%22remoteServiceInstanceId%22%3A%22instance-tvd%3Atabbed-window%22%7D';
+  const base = 'file:///C:/TradingView/resources/app.asar/app/';
+  const landing = { id: 'landing', type: 'page', title: 'New tab', url: base + 'new-tab/index.html' + query };
+  const tooltip = { id: 'tooltip', type: 'page', title: 'index.html' + query, url: base + 'tooltip/index.html' + query };
+  const shell = { id: 'shell', type: 'page', title: 'TradingView', url: base + 'window/index.html' + query };
+  const targets = [landing, tooltip, shell];
+
+  assert.deepEqual(rankShellCandidates(targets).map(t => t.id), ['shell']);
+  assert.deepEqual(rankLandingCandidates(targets).map(t => t.id), ['landing', 'tooltip']);
+  assert.equal(isReusableWorkerBootstrapTarget(landing), true);
+  assert.equal(isReusableWorkerBootstrapTarget(tooltip), false);
+  assert.equal(isReusableWorkerBootstrapTarget(shell), false);
+  assert.deepEqual(rankReusableWorkerBootstrapCandidates(targets).map(t => t.id), ['landing']);
+});
+
+test('switching to a new tab verifies the exact active shell ID without chart attachment', async () => {
+  const url = 'file:///app.asar/app/new-tab/index.html?rendererInitialData=' + encodeURIComponent(JSON.stringify({ tabId: 'shell-id' }));
+  const deps = {
+    listTabs: async () => ({ tab_count: 1, tabs: [{ id: 'landing', url, is_chart: false, chart_id: null }] }),
+    withShell: async fn => fn(async expression => {
+      assert.ok(expression.includes('shell-id'));
+      return true;
+    }),
+    wait: async () => {},
+    attachChart: async () => { throw new Error('must not attach a new tab as a chart'); },
+  };
+  const result = await switchTab({ index: 0, _deps: deps });
+  assert.equal(result.success, true);
+  assert.equal(result.visually_switched, true);
+  assert.equal(result.chart_id, null);
+  await assert.rejects(switchTab({ index: 0, _deps: {
+    ...deps, withShell: async fn => fn(async () => false),
+  } }), /shell tab not found/);
+});
+
+test('chart switching maps unique layout identities and reports ambiguous mapping as attachment only', async () => {
+  const target = { id: 'chart', type: 'page', url: 'https://www.tradingview.com/chart/abc/', is_chart: true, chart_id: 'abc' };
+  for (const mode of ['unique', 'duplicate-renderer', 'duplicate-shell', 'missing-name']) {
+    const deps = {
+      listTabs: async () => ({ tab_count: 1, tabs: [target] }),
+      listTargets: async () => mode === 'duplicate-renderer' ? [target, { ...target, id: 'other' }] : [target],
+      readLayoutName: async () => mode === 'missing-name' ? null : 'Personal',
+      withShell: async fn => fn(async expression => expression.includes('.filter(tab =>')
+        ? mode === 'duplicate-shell' ? ['a', 'b'] : ['a'] : true),
+      wait: async () => {},
+      attachChart: async args => { assert.equal(args.chart_id, 'abc'); return { success: true, verified: true }; },
+    };
+    const result = await switchTab({ index: 0, _deps: deps });
+    assert.equal(result.success, true);
+    assert.equal(result.visually_switched, mode === 'unique');
+  }
 });
 
 test('direct CDP chart target bootstrap creates and waits for exact target', async () => {
@@ -429,6 +483,40 @@ test('exact tab close refuses the last Desktop tab', async () => {
     }),
     /Cannot close the last tab/,
   );
+});
+
+test('new-tab close uses its exact Desktop ID even when every renderer appears visible', async () => {
+  for (const mode of ['close', 'missing', 'unsaved', 'chart']) {
+    let closed = false;
+    const selected = [];
+    const url = mode === 'chart' ? 'https://www.tradingview.com/chart/example/'
+      : 'file:///app.asar/app/new-tab/index.html?rendererInitialData=' + encodeURIComponent(JSON.stringify({ tabId: 'wanted' }));
+    const deps = {
+      listTabs: async () => ({ tab_count: 2, tabs: [{ id: 'target', type: 'page', url }] }),
+      listTargets: async () => closed ? [] : [{ id: 'target', type: 'page', url }],
+      isTargetVisible: async () => true,
+      readLayoutName: async () => null,
+      wait: async () => {},
+      withShell: async fn => fn(async expression => {
+        if (expression.includes('.tab.active')) return true;
+        const id = JSON.parse(expression.match(/getElementById\(("[^"]+")\)/)[1]);
+        assert.equal(id, 'wanted');
+        if (expression.includes('tab.click()')) { selected.push(id); return mode !== 'missing'; }
+        if (expression.includes('close.click()')) { closed = mode === 'close'; return true; }
+        if (expression.startsWith('!!')) return !closed;
+        throw new Error('Unexpected shell expression');
+      }),
+    };
+    if (mode === 'close') {
+      const result = await closeTabByTargetId({ target_id: 'target', _deps: deps });
+      assert.equal(result.success, true);
+      assert.deepEqual(selected, ['wanted']);
+    } else {
+      await assert.rejects(closeTabByTargetId({ target_id: 'target', _deps: deps }),
+        mode === 'missing' ? /shell tab not found/ : mode === 'chart' ? /refusing renderer-only close/ : /unsaved changes/);
+      assert.equal(closed, false);
+    }
+  }
 });
 
 
