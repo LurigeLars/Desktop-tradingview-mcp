@@ -12,6 +12,7 @@ import {
   persistentWorkerRecovery,
   provisionWorker,
   recordedTabComplete,
+  rebindPersistentWorkers,
   settlePersistentWorkerRestore,
 } from '../src/core/worker-provision.js';
 import {
@@ -710,8 +711,11 @@ test('worker provisioning fails closed when external charts would exceed total c
     closeTabByOwned: async () => ({ success: true }),
   };
 
+  const projection = await provisionWorker({ dry_run: true, _deps: runtime });
+  assert.equal(projection.capacity_projection.over_capacity, true);
+  assert.equal(projection.capacity_projection.projected_connections, 6);
   await assert.rejects(
-    () => provisionWorker({ dry_run: true, _deps: runtime }),
+    () => provisionWorker({ dry_run: false, _deps: runtime }),
     /6 projected chart connections.*exceed 5 usable slots/,
   );
 });
@@ -1235,4 +1239,83 @@ test('persisted worker intent creates a restart-stable saved layout', async () =
   assert.equal(owned.chart_id, 'persistent-worker');
   assert.equal(owned.layout_name, 'DTV Worker 01');
   assert.equal(owned.persistent_layout, true);
+});
+
+test('worker_rebind refreshes only live verified persistent CDP IDs, preserving personal charts', async () => {
+  const store = makeStore();
+  setUniverse({ capacity: 4, reserve_slots: 1, entries: [
+    {handle:'a',symbol:'EX:AAA',timeframe:'5'},
+    {handle:'b',symbol:'EX:BBB',timeframe:'5'},
+  ], _deps: store.deps });
+  recordWorkerProvision({
+    worker_tabs:[{slot:0,target_id:'old-CDP',chart_id:'stable-chart',
+      layout_name:'DTV Market 01',pane_count:2,persistent_layout:true}],
+    assignments:{
+      a:{worker_slot:0,target_id:'old-CDP',chart_id:'stable-chart',pane_index:0},
+      b:{worker_slot:0,target_id:'old-CDP',chart_id:'stable-chart',pane_index:1},
+    },_deps:store.deps
+  });
+  const runtime={
+    status:()=>status({_deps:store.deps}),
+    record:args=>recordWorkerProvision({...args,_deps:store.deps}),
+    listTargets:async()=>[
+      {type:'page',id:'new-CDP',url:'https://www.tradingview.com/chart/stable-chart/'},
+      {type:'page',id:'personal',url:'https://www.tradingview.com/chart/default/'},
+    ],
+    inspectTargets:async()=>[
+      {target_id:'new-CDP',chart_id:'stable-chart',pane_count:2,panes:[
+        {resolved_symbol:'EX:AAA',resolution:'5',studies:[]},
+        {resolved_symbol:'EX:BBB',resolution:'5',studies:[]},
+      ]},
+      {target_id:'personal',chart_id:'default',pane_count:1,panes:[]},
+    ],
+  };
+  const preview=await rebindPersistentWorkers({dry_run:true,_deps:runtime});
+  assert.equal(preview.success,true);
+  assert.equal(preview.changed,false);
+  assert.equal(preview.rebindings.length,1);
+  assert.equal(store.get().worker_tabs[0].target_id,'old-CDP');
+  const applied=await rebindPersistentWorkers({dry_run:false,_deps:runtime});
+  assert.equal(applied.changed,true);
+  const after=store.get();
+  assert.equal(after.worker_tabs[0].target_id,'new-CDP');
+  assert.equal(after.entries[0].assignment.target_id,'new-CDP');
+  assert.equal(after.entries[1].assignment.target_id,'new-CDP');
+  assert.equal(after.worker_tabs.length,1);
+  const again=await rebindPersistentWorkers({dry_run:false,_deps:runtime});
+  assert.equal(again.changed,false);
+});
+
+test('worker_rebind refuses mismatching or duplicate restored worker layouts', async () => {
+  const store=makeStore();
+  setUniverse({entries:[{handle:'a',symbol:'EX:AAA',timeframe:'5'}],_deps:store.deps});
+  recordWorkerProvision({
+    worker_tabs:[{slot:0,target_id:'old',chart_id:'stable',pane_count:1,persistent_layout:true}],
+    assignments:{a:{worker_slot:0,target_id:'old',chart_id:'stable',pane_index:0}},
+    _deps:store.deps,
+  });
+  const base={
+    status:()=>status({_deps:store.deps}),
+    record:args=>recordWorkerProvision({...args,_deps:store.deps}),
+    listTargets:async()=>[],
+  };
+  const mismatch=await rebindPersistentWorkers({dry_run:false,_deps:{
+    ...base,inspectTargets:async()=>[{
+      target_id:'rotated',chart_id:'stable',pane_count:1,
+      panes:[{resolved_symbol:'EX:DIFFERENT',resolution:'5',studies:[]}],
+    }],
+  }});
+  assert.equal(mismatch.success,false);
+  assert.deepEqual(mismatch.missing_slots,[0]);
+  assert.equal(store.get().worker_tabs[0].target_id,'old');
+
+  const duplicate=await rebindPersistentWorkers({dry_run:false,_deps:{
+    ...base,inspectTargets:async()=>['a','b'].map(target_id=>({
+      target_id,chart_id:'stable',pane_count:1,
+      panes:[{resolved_symbol:'EX:AAA',resolution:'5',studies:[]}],
+    })),
+  }});
+  assert.equal(duplicate.success,false);
+  assert.deepEqual(duplicate.duplicate_slots,[0]);
+  assert.equal(store.get().worker_tabs[0].target_id,'old');
 });
