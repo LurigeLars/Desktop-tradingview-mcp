@@ -1,9 +1,24 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
-import { provisionWorker } from '../core/worker-provision.js';
+import { provisionWorker, rebindPersistentWorkers } from '../core/worker-provision.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerWorkerProvisionTools(server) {
+  server.registerTool('worker_rebind', {
+    description: 'Verify all five persisted worker layouts by exact chart IDs and live pane signatures, then refresh rotated CDP IDs WITHOUT opening, closing, saving or changing any chart. Dry-run by default.',
+    inputSchema: {
+      dry_run: z.coerce.boolean().optional().describe('Default true. Set false to atomically refresh verified worker target IDs in local state.'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ dry_run } = {}) => {
+    try {
+      if (dry_run !== false) return jsonResult(await rebindPersistentWorkers({ dry_run: true }));
+      return jsonResult(await withTopologyMutationLock('worker_rebind', () =>
+        rebindPersistentWorkers({ dry_run: false })
+      ));
+    } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.registerTool('worker_provision', {
     description: 'Reconcile logical worker entries into DTV-owned TradingView tabs/panes using bounded resumable phases. A call may open/recover a worker tab or configure a limited number of panes; repeat until complete=true.',
     inputSchema: {
