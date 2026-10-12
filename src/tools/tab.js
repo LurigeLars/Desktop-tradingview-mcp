@@ -14,6 +14,26 @@ export function registerTabTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.registerTool('tab_attach', {
+    description: 'Attach chart and indicator commands to an exact OPEN personal layout by stable chart URL token, without switching Windows tabs or modifying worker charts. Use tab_list to discover chart_id.',
+    inputSchema: {
+      chart_id: z.string().describe('Exact chart URL token (e.g. eh2ouJQ6), not numeric saved-layout ID or list index'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ chart_id }) => {
+    try {
+      return jsonResult(await withTopologyMutationLock('tab_attach', async () => {
+        const live = await core.list();
+        const match = live.tabs.filter(tab => tab.is_chart && tab.chart_id === chart_id);
+        if (match.length !== 1) throw new Error('Expected exactly one open chart with chart_id ' + chart_id);
+        if (isWorkerOwnedTab(match[0], workerStatus())) {
+          throw new Error('Refusing to attach interactive commands to a DTV worker-owned layout.');
+        }
+        return core.attachChart({ chart_id });
+      }));
+    } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.registerTool('tab_new', {
     description: 'Open another TradingView Desktop tab. Optionally navigate the new-tab target directly to a chart, or use the saved-layout picker workflow.',
     inputSchema: {
