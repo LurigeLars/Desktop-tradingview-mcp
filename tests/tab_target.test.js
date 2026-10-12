@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, withDeadline } from '../src/core/tab.js';
+import { attachChart, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, withDeadline } from '../src/core/tab.js';
+import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
   assert.equal(isChartPageTarget({
@@ -484,3 +485,64 @@ test('orphan shell cleanup preserves mapped worker tabs and closes only stale sh
   assert.deepEqual(result.closed_indexes, [3, 1]);
   assert.deepEqual(shellTabs.map(tab => tab.owner), ['worker-a', 'worker-b']);
 });
+
+test('chart selection uses stable URL tokens and fails closed on duplicate targets', async () => {
+  const targets = [
+    { type: 'page', id: 'worker-new-id', url: 'https://www.tradingview.com/chart/worker-01/' },
+    { type: 'page', id: 'personal-new-id', url: 'https://www.tradingview.com/chart/default123/' },
+    { type: 'page', id: 'evil', url: 'https://tradingview.com.evil.invalid/chart/default123/' },
+  ];
+  assert.equal(selectExactChartTarget(targets, 'default123').id, 'personal-new-id');
+  assert.throws(() => selectExactChartTarget(targets, 'absent'), /No live CDP target/);
+  assert.throws(() => selectExactChartTarget(targets, '../bad'), /exact TradingView/);
+  assert.throws(() => selectExactChartTarget([...targets, {
+    type: 'page', id: 'duplicate', url: 'https://www.tradingview.com/chart/default123/',
+  }], 'default123'), /Multiple CDP targets/);
+
+  const calls = [];
+  const result = await attachChart({
+    chart_id: 'default123',
+    _deps: {
+      listTargets: async () => targets,
+      reconnect: async id => { calls.push(id); },
+      current: async () => ({ id: 'personal-new-id' }),
+    },
+  });
+  assert.equal(result.verified, true);
+  assert.equal(result.visually_switched, false);
+  assert.deepEqual(calls, ['personal-new-id']);
+  await assert.rejects(() => attachChart({
+    chart_id: 'default123',
+    _deps: {
+      listTargets: async () => targets,
+      reconnect: async () => {},
+      current: async () => ({ id: 'worker-new-id' }),
+    },
+  }), /verification failed/);
+});
+
+test('saved-layout attachment uses URL token and never silently discards unsaved changes', async () => {
+  const layouts = [
+    { id: 206255929, name: 'Default', chart_id: 'eh2ouJQ6' },
+    { id: 205961832, name: 'DTV Market 04', chart_id: 'H3pDwClg' },
+    { id: 51, name: 'Default copy', chart_id: 'other' },
+  ];
+  assert.equal(resolveSavedLayout(layouts, 'Default').chart_id, 'eh2ouJQ6');
+  assert.equal(resolveSavedLayout(layouts, '206255929').chart_id, 'eh2ouJQ6');
+  assert.throws(() => resolveSavedLayout(layouts, 'def'), /Ambiguous/);
+  const calls = [];
+  const result = await layoutSwitch({
+    name: 'Default',
+    _deps: {
+      listLayouts: async () => ({ layouts }),
+      attach: async ({chart_id}) => {
+        calls.push(chart_id);
+        return { target_id: 'new-CDP-id', verified: true };
+      },
+    },
+  });
+  assert.equal(result.verified, true);
+  assert.equal(result.visually_switched, false);
+  assert.deepEqual(calls, ['eh2ouJQ6']);
+});
+
