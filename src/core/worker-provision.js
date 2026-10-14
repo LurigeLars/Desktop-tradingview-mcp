@@ -1298,6 +1298,7 @@ export async function provisionWorker({
   force = false,
   adopt_single_existing = false,
   layout_prefix,
+  only_slots = null,
   _deps,
 } = {}) {
   const deps = resolveDeps(_deps);
@@ -1312,6 +1313,25 @@ export async function provisionWorker({
 
   let state = deps.status();
   const topology = state.topology_plan;
+  const scoped = only_slots != null;
+  const limitedSlots = scoped ? new Set(only_slots) : null;
+  if (scoped) {
+    if (!Array.isArray(only_slots) || only_slots.length !== 1
+        || !Number.isInteger(only_slots[0]) || only_slots[0] < 0
+        || !topology.tabs.some(tab => tab.tab_index === only_slots[0])
+        || force || adopt_single_existing) {
+      throw new Error('scoped provisioning requires exactly one existing dynamic slot, no force/adoption');
+    }
+    const tab = topology.tabs.find(tab => tab.tab_index === only_slots[0]);
+    const firstDynamic = state.entries.findIndex(entry => (entry.groups || []).includes('watch:dynamic'));
+    const tabStart = topology.tabs.slice(0, only_slots[0])
+      .reduce((sum, current) => sum + current.pane_count, 0);
+    if (firstDynamic < 1 || tabStart !== firstDynamic
+        || !tab.handles.every(handle => (state.entries.find(entry => entry.handle === handle)?.groups || [])
+          .includes('watch:dynamic'))) {
+      throw new Error('scoped provisioning cannot mutate baseline or mixed-layout worker panes');
+    }
+  }
   const byHandle = entryMap(state);
   let liveTargets = await deps.listTargets();
   liveTargets = await settlePersistentWorkerRestore(state, liveTargets, {
@@ -1421,9 +1441,10 @@ export async function provisionWorker({
   const ownedBySlot = workerTabMap(state);
 
   const pending = topology.tabs.filter(plan =>
-    force
-    || persistentRecovery.pendingSlots.has(Number(plan.tab_index))
-    || !recordedTabComplete(plan, state, liveRuntimeKeys, liveByRuntimeKey)
+    (!scoped || limitedSlots.has(plan.tab_index))
+    && (force
+      || persistentRecovery.pendingSlots.has(Number(plan.tab_index))
+      || !recordedTabComplete(plan, state, liveRuntimeKeys, liveByRuntimeKey))
   );
 
   const staleOwned = (state.worker_tabs || []).filter(tab =>
@@ -1677,7 +1698,8 @@ export async function provisionWorker({
     }
   }
   const recordedRemaining = state.topology_plan.tabs.filter(plan =>
-    !recordedTabComplete(plan, state, afterRuntimeKeys, afterByRuntimeKey)
+    (!scoped || limitedSlots.has(plan.tab_index))
+    && !recordedTabComplete(plan, state, afterRuntimeKeys, afterByRuntimeKey)
   );
   const processedSlots = new Set(results.filter(result => result.success).map(result => Number(result.tab_index)));
   const forcedRemaining = force
@@ -1689,7 +1711,7 @@ export async function provisionWorker({
   const remaining = [...remainingBySlot.values()].sort((a, b) => Number(a.tab_index) - Number(b.tab_index));
 
   const cleanup = [];
-  if (remaining.length === 0) {
+  if (!scoped && remaining.length === 0) {
     const desiredSlots = new Set(state.topology_plan.tabs.map(plan => Number(plan.tab_index)));
     const keepTabs = [];
     for (const owned of state.worker_tabs || []) {
@@ -1714,7 +1736,8 @@ export async function provisionWorker({
 
   let shell_cleanup = null;
   if (
-    force
+    !scoped
+    && force
     && remaining.length === 0
     && cleanup.every(item => item.success)
     && externalConnections === 0
