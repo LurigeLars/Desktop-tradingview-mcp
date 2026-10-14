@@ -30,6 +30,12 @@ test('managed task migration uses an exact existing task and verifies stop/start
   assert.doesNotMatch(script, /Stop-Process\s+.*TradingView/i);
   assert.match(script, /Wait-HttpState/);
   assert.match(script, /Task XML backup/);
+  assert.match(script, /\[switch\]\$Inspect/);
+  assert.match(script, /No task action was changed and no process was stopped/);
+  assert.match(script, /No process was terminated and no ownership was assumed/);
+  assert.match(script, /dtv_script_match/);
+  assert.match(script, /command_visible/);
+  assert.doesNotMatch(script, /Write-Host.*\$Command\b/);
 });
 
 test('hidden launcher owns the Node lifetime through a Windows Job Object', () => {

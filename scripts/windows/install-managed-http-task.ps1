@@ -6,6 +6,7 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [switch]$Apply,
+    [switch]$Inspect,
     [ValidateSet(0, 9222, 9333)][int]$CdpPort = 0,
     [string]$PythonwPath = ""
 )
@@ -13,8 +14,11 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if (-not $Apply) {
-    throw 'Use -Apply explicitly to migrate the existing DTV HTTP task.'
+if (-not $Apply -and -not $Inspect) {
+    throw 'Use -Inspect to diagnose without modifying anything, or -Apply for migration.'
+}
+if ($Apply -and $Inspect) {
+    throw '-Inspect and -Apply are mutually exclusive.'
 }
 
 $TaskName = 'TradingViewMcpHttpServer'
@@ -100,23 +104,45 @@ if ($ValidatedPorts.Count -ne 1) {
 $ValidatedCdpPort = [int]$ValidatedPorts[0]
 
 function Get-HttpListener {
+    # The port-to-PID mapping may be transient during task startup/teardown.
+    # Never infer ownership from a listening port alone.
     $Connections = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
     if ($Connections.Count -eq 0) { return $null }
     $Local = @($Connections | Where-Object { $_.LocalAddress -eq '127.0.0.1' })
     if ($Connections.Count -ne 1 -or $Local.Count -ne 1) {
-        throw 'Refusing: port 8765 has ambiguous or non-loopback listener ownership.'
+        throw "Refusing: DTV port ownership ambiguous (listener_count=$($Connections.Count), loopback_count=$($Local.Count)); no process was terminated."
     }
     $OwnerId = [int]$Local[0].OwningProcess
-    $Owner = Get-CimInstance Win32_Process -Filter "ProcessId=$OwnerId"
-    if ($null -eq $Owner -or $Owner.Name -ine 'node.exe' -or
-        $Owner.CommandLine -notmatch '(?i)(src[\\/]server[\\/]http[.]js|scripts[\\/]windows[\\/]http-managed[.]js)' -or
-        [string]::IsNullOrWhiteSpace([string]$Owner.ExecutablePath)) {
-        throw 'Refusing: port 8765 is not owned by the verified DTV Node HTTP process.'
+    $Owner = Get-CimInstance Win32_Process -Filter "ProcessId=$OwnerId" -ErrorAction SilentlyContinue
+    $Name = if ($Owner) { [string]$Owner.Name } else { '<unavailable>' }
+    $Exe = if ($Owner) { [string]$Owner.ExecutablePath } else { '' }
+    $Command = if ($Owner) { [string]$Owner.CommandLine } else { '' }
+    $NameOk = $null -ne $Owner -and $Name -ieq 'node.exe'
+    $ExeOk = -not [string]::IsNullOrWhiteSpace($Exe) -and
+             [IO.Path]::GetFileName($Exe) -ieq 'node.exe'
+    $ScriptOk = $Command -match '(?i)(src[\\/]server[\\/]http[.]js|scripts[\\/]windows[\\/]http-managed[.]js)'
+    $Owned = $NameOk -and $ExeOk -and $ScriptOk
+    if (-not $Owned) {
+        # Deliberately omit full command line (could contain sensitive args).
+        throw "Refusing: unverified port 8765 listener PID=$OwnerId, process=$Name, executable_node=$ExeOk, dtv_script_match=$ScriptOk, command_visible=$(-not [string]::IsNullOrWhiteSpace($Command)). No process was terminated and no ownership was assumed."
     }
-    return @{ ProcessId = $OwnerId; NodeExe = [string]$Owner.ExecutablePath
-              CommandLine = [string]$Owner.CommandLine }
+    return @{ ProcessId = $OwnerId; NodeExe = $Exe
+              CommandLine = $Command }
 }
 $ExistingListener = Get-HttpListener
+if ($Inspect) {
+    Write-Host "DIAGNOSTIC ONLY: task=$TaskName state=$($Task.State) launcher=$Launcher."
+    Write-Host "Task path: $TaskPath"
+    if ($ExistingListener) {
+        Write-Host "Verified DTV HTTP listener on 127.0.0.1:8765, PID $($ExistingListener.ProcessId)."
+    }
+    else {
+        Write-Host 'No TCP listener on port 8765.'
+    }
+    Write-Host "Validated TradingView CDP port: $ValidatedCdpPort"
+    Write-Host 'No task action was changed and no process was stopped.'
+    return
+}
 $NodeExe = if ($ExistingListener) {
     $ExistingListener.NodeExe
 }
