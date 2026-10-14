@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import { realtimeSnapshot } from '../core/realtime.js';
+import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerRealtimeTools(server) {
   server.registerTool('realtime_snapshot', {
@@ -17,7 +18,7 @@ export function registerRealtimeTools(server) {
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {
-    try { return jsonResult(await realtimeSnapshot(args)); }
+    try { return jsonResult(await withTopologyMutationLock('realtime_snapshot', () => realtimeSnapshot(args), { timeoutMs: 60_000 })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
