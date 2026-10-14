@@ -32,9 +32,14 @@ test('managed task migration uses an exact existing task and verifies stop/start
   assert.match(script, /Task XML backup/);
   assert.match(script, /\[switch\]\$Inspect/);
   assert.match(script, /No task action was changed and no process was stopped/);
-  assert.match(script, /No process was terminated and no ownership was assumed/);
-  assert.match(script, /dtv_script_match/);
-  assert.match(script, /command_visible/);
+  assert.match(script, /No unverified process terminated/);
+  assert.match(script, /CIM_OR_SOCKET_UNSTABLE/);
+  assert.match(script, /DTV listener changed owner during cleanup/);
+  assert.match(script, /\$Attempt -lt 6/);
+  assert.match(script, /\$Rechecked[.]Verified/);
+  assert.ok(script.indexOf('Stop-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath')
+    < script.indexOf('Set-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Action $NewAction'),
+    'stop the known task BEFORE changing its action');
   assert.doesNotMatch(script, /Write-Host.*\$Command\b/);
 });
 

@@ -104,37 +104,50 @@ if ($ValidatedPorts.Count -ne 1) {
 $ValidatedCdpPort = [int]$ValidatedPorts[0]
 
 function Get-HttpListener {
-    # The port-to-PID mapping may be transient during task startup/teardown.
-    # Never infer ownership from a listening port alone.
-    $Connections = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
-    if ($Connections.Count -eq 0) { return $null }
-    $Local = @($Connections | Where-Object { $_.LocalAddress -eq '127.0.0.1' })
-    if ($Connections.Count -ne 1 -or $Local.Count -ne 1) {
-        throw "Refusing: DTV port ownership ambiguous (listener_count=$($Connections.Count), loopback_count=$($Local.Count)); no process was terminated."
+    # PID->CIM mapping is transient while Task Scheduler starts or stops Node.
+    # Return UNKNOWN rather than assuming an unavailable process is DTV.
+    for ($Attempt = 0; $Attempt -lt 6; $Attempt++) {
+        $Connections = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
+        if ($Connections.Count -eq 0) { return $null }
+        $Local = @($Connections | Where-Object { $_.LocalAddress -eq '127.0.0.1' })
+        if ($Connections.Count -ne 1 -or $Local.Count -ne 1) {
+            throw "Refusing: ambiguous port 8765 owner; listener_count=$($Connections.Count), loopback_count=$($Local.Count)."
+        }
+        $OwnerId = [int]$Local[0].OwningProcess
+        $Owner = Get-CimInstance Win32_Process -Filter "ProcessId=$OwnerId" -ErrorAction SilentlyContinue
+        $Name = if ($Owner) { [string]$Owner.Name } else { '<unavailable>' }
+        $Exe = if ($Owner) { [string]$Owner.ExecutablePath } else { '' }
+        $Command = if ($Owner) { [string]$Owner.CommandLine } else { '' }
+        $NameOk = $null -ne $Owner -and $Name -ieq 'node.exe'
+        $ExeOk = -not [string]::IsNullOrWhiteSpace($Exe) -and
+                 [IO.Path]::GetFileName($Exe) -ieq 'node.exe'
+        $ScriptOk = $Command -match '(?i)(src[\\/]server[\\/]http[.]js|scripts[\\/]windows[\\/]http-managed[.]js)'
+        if ($NameOk -and $ExeOk -and $ScriptOk) {
+            $After = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue |
+                Where-Object { $_.LocalAddress -eq '127.0.0.1' })
+            if ($After.Count -eq 1 -and [int]$After[0].OwningProcess -eq $OwnerId) {
+                return @{ Verified = $true; ProcessId = $OwnerId; NodeExe = $Exe
+                          CommandLine = $Command; Reason = 'VERIFIED' }
+            }
+        }
+        elseif ($NameOk -and $ExeOk -and -not $ScriptOk) {
+            return @{ Verified = $false; ProcessId = $OwnerId; Reason = 'NON_DTV_NODE'
+                      ProcessName = $Name }
+        }
+        if ($Attempt -lt 5) { Start-Sleep -Milliseconds 250 }
     }
-    $OwnerId = [int]$Local[0].OwningProcess
-    $Owner = Get-CimInstance Win32_Process -Filter "ProcessId=$OwnerId" -ErrorAction SilentlyContinue
-    $Name = if ($Owner) { [string]$Owner.Name } else { '<unavailable>' }
-    $Exe = if ($Owner) { [string]$Owner.ExecutablePath } else { '' }
-    $Command = if ($Owner) { [string]$Owner.CommandLine } else { '' }
-    $NameOk = $null -ne $Owner -and $Name -ieq 'node.exe'
-    $ExeOk = -not [string]::IsNullOrWhiteSpace($Exe) -and
-             [IO.Path]::GetFileName($Exe) -ieq 'node.exe'
-    $ScriptOk = $Command -match '(?i)(src[\\/]server[\\/]http[.]js|scripts[\\/]windows[\\/]http-managed[.]js)'
-    $Owned = $NameOk -and $ExeOk -and $ScriptOk
-    if (-not $Owned) {
-        # Deliberately omit full command line (could contain sensitive args).
-        throw "Refusing: unverified port 8765 listener PID=$OwnerId, process=$Name, executable_node=$ExeOk, dtv_script_match=$ScriptOk, command_visible=$(-not [string]::IsNullOrWhiteSpace($Command)). No process was terminated and no ownership was assumed."
-    }
-    return @{ ProcessId = $OwnerId; NodeExe = $Exe
-              CommandLine = $Command }
+    return @{ Verified = $false; ProcessId = $OwnerId; Reason = 'CIM_OR_SOCKET_UNSTABLE'
+              ProcessName = $Name }
 }
 $ExistingListener = Get-HttpListener
 if ($Inspect) {
     Write-Host "DIAGNOSTIC ONLY: task=$TaskName state=$($Task.State) launcher=$Launcher."
     Write-Host "Task path: $TaskPath"
-    if ($ExistingListener) {
+    if ($ExistingListener -and $ExistingListener.Verified) {
         Write-Host "Verified DTV HTTP listener on 127.0.0.1:8765, PID $($ExistingListener.ProcessId)."
+    }
+    elseif ($ExistingListener) {
+        Write-Host "UNVERIFIED listener PID=$($ExistingListener.ProcessId), reason=$($ExistingListener.Reason). No process changed."
     }
     else {
         Write-Host 'No TCP listener on port 8765.'
@@ -143,7 +156,7 @@ if ($Inspect) {
     Write-Host 'No task action was changed and no process was stopped.'
     return
 }
-$NodeExe = if ($ExistingListener) {
+$NodeExe = if ($ExistingListener -and $ExistingListener.Verified) {
     $ExistingListener.NodeExe
 }
 else {
@@ -199,7 +212,7 @@ function Wait-HttpState {
     do {
         $Info = Get-HttpListener
         if (-not $Present -and $null -eq $Info) { return $null }
-        if ($Present -and $Info -and $Info.ProcessId -ne $ExcludePid -and
+        if ($Present -and $Info -and $Info.Verified -and $Info.ProcessId -ne $ExcludePid -and
             $Info.CommandLine -match '(?i)src[\\/]server[\\/]http[.]js') {
             return $Info
         }
@@ -214,12 +227,8 @@ if (-not $PSCmdlet.ShouldProcess($TaskName, 'Migrate to hidden pythonw Job Objec
 
 $Changed = $false
 try {
-    if (-not $AlreadyManaged) {
-        Set-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Action $NewAction -ErrorAction Stop | Out-Null
-        $Changed = $true
-    }
-    # Stop the existing task FIRST; only retire an orphan verified DTV port
-    # owner when Task Scheduler could not stop that child (old launcher).
+    # Stop the exact approved task BEFORE changing its action. A historical
+    # listener may disappear while its PID is unavailable through CIM.
     $TaskBefore = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction Stop
     if ([string]$TaskBefore.State -eq 'Running') {
         Stop-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction Stop
@@ -230,11 +239,30 @@ try {
         } while ($StillRunning -and (Get-Date) -lt $Deadline)
         if ($StillRunning) { throw 'Old DTV task did not stop within 12 seconds.' }
     }
-    $Leftover = Get-HttpListener
+    $PortDeadline = (Get-Date).AddSeconds(8)
+    do {
+        $Leftover = Get-HttpListener
+        if (-not $Leftover) { break }
+        if ((Get-Date) -lt $PortDeadline) { Start-Sleep -Milliseconds 300 }
+    } while ((Get-Date) -lt $PortDeadline)
     if ($Leftover) {
-        # A known detached legacy Node listener; never process-name-wide kill.
-        Stop-Process -Id $Leftover.ProcessId -Force -ErrorAction Stop
+        if (-not $Leftover.Verified) {
+            throw "Refusing: listener PID=$($Leftover.ProcessId), reason=$($Leftover.Reason), remains after exact task stop. No unverified process terminated."
+        }
+        # Only the exact, independently verified DTV Node HTTP listener may be
+        # retired. Re-read the port and PID immediately before Stop-Process.
+        $Rechecked = Get-HttpListener
+        if (-not $Rechecked -or -not $Rechecked.Verified -or
+            $Rechecked.ProcessId -ne $Leftover.ProcessId) {
+            throw 'DTV listener changed owner during cleanup. No process terminated.'
+        }
+        Stop-Process -Id $Rechecked.ProcessId -Force -ErrorAction Stop
         [void](Wait-HttpState)
+    }
+    # Do not mutate the existing task until the old listener is safely gone.
+    if (-not $AlreadyManaged) {
+        Set-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Action $NewAction -ErrorAction Stop | Out-Null
+        $Changed = $true
     }
 
     # A running pythonw.exe task must OWN a live hidden Node Job Object child.
