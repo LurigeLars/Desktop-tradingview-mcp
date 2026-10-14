@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/worker.js';
-import { ensureDynamicSymbols } from '../core/dynamic-worker.js';
+// The legacy six-tab dynamic provisioner is intentionally disabled.
+
 import { rotateWorkerSnapshot, recoverRotatingPane } from '../core/rotating-worker.js';
 import { topologyMutationLockStatus, withTopologyMutationLock } from '../core/topology-lock.js';
 
@@ -66,23 +67,18 @@ export function registerWorkerTools(server) {
   });
 
   server.registerTool('worker_dynamic_ensure', {
-    description: 'Bounded isolated on-demand symbol residency: keep baseline worker tabs unchanged, use <=4 dynamic suffix pane slots, no chart/UI changes outside DTV-owned dynamic layout. One phase per call; quote must be read separately.',
+    description: 'Deprecated: opening a sixth TradingView Desktop worker window is disabled. Use worker_rotate_snapshot to temporarily sample an existing pane.',
     inputSchema: {
-      symbols: z.array(z.string()).max(12).describe('Verified exchange-qualified TradingView symbols in priority order; not new portfolio truth.'),
-      dry_run: z.coerce.boolean().optional().describe('Only inspect candidate pool, do not change any state or charts.'),
-      max_panes: z.coerce.number().int().min(1).max(2).optional().describe('At most two dynamic pane changes per call.'),
+      symbols: z.array(z.string()).max(12),
+      dry_run: z.coerce.boolean().optional(),
+      max_panes: z.coerce.number().int().min(1).max(2).optional(),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, async (args) => {
-    try {
-      if (args?.dry_run) return jsonResult(await ensureDynamicSymbols(args));
-      return jsonResult(await withTopologyMutationLock(
-        'worker_dynamic_ensure', () => ensureDynamicSymbols(args)));
-    } catch (error) {
-      return jsonResult({ success: false, error_code: 'DYNAMIC_WORKER_UNAVAILABLE',
-        message: String(error?.message || 'unavailable').slice(0, 240) }, true);
-    }
-  });
+    annotations: {readOnlyHint: true, destructiveHint: false,
+      idempotentHint: true, openWorldHint: false},
+  }, async () => jsonResult({success:false,error_code:'SIXTH_TAB_DISABLED',
+      message:'No new TradingView Desktop windows allowed; use worker_rotate_snapshot instead.',
+      opened_tabs:0,execution_quote:false},true));
+
 
   server.registerTool('worker_status', {
     description: 'Read the logical realtime worker registry, capacity, groups and current physical-assignment status.',
