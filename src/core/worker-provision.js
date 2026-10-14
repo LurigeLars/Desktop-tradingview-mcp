@@ -615,7 +615,7 @@ export function activePaneStates(runtime) {
   return panes.slice(0, Math.min(inlineCount, panes.length));
 }
 
-async function readActivePaneStates(client) {
+export async function readActivePaneStates(client) {
   const runtime = await evaluateValue(client, readPaneStatesExpression());
   return activePaneStates(runtime);
 }
