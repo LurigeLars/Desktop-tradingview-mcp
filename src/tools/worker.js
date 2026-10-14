@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/worker.js';
 import { ensureDynamicSymbols } from '../core/dynamic-worker.js';
+import { rotateWorkerSnapshot, recoverRotatingPane } from '../core/rotating-worker.js';
 import { topologyMutationLockStatus, withTopologyMutationLock } from '../core/topology-lock.js';
 
 const studySchema = z.union([
@@ -34,6 +35,34 @@ export function registerWorkerTools(server) {
   }, async (args) => {
     try { return jsonResult(await withTopologyMutationLock('worker_set_universe', () => core.setUniverse(args))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.registerTool('worker_rotate_snapshot', {
+    description: 'Reversibly sample exactly one missing qualified symbol inside the fifth EXISTING DTV worker tab. No new tabs/windows, no persistent worker universe change. The lower-priority tactical pane is restored before reply. This is never an execution-grade broker quote.',
+    inputSchema: {
+      symbol: z.string().describe('One verified, exchange-qualified nonresident symbol.'),
+      dry_run: z.coerce.boolean().optional().describe('Plan and verify original worker layout without mutation.'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async args => {
+    try {
+      return jsonResult(await withTopologyMutationLock('worker_rotate_snapshot',
+        () => rotateWorkerSnapshot(args), { timeoutMs: 60_000 }));
+    } catch(err) {
+      return jsonResult({success:false,error_code:'ROTATION_REJECTED',
+        message:String(err?.message || 'failed').slice(0,240), execution_quote:false},true);
+    }
+  });
+
+  server.registerTool('worker_rotation_recover', {
+    description: 'Verify or restore a journaled in-place worker rotation after interruption. Never opens a tab or changes unrelated panes.',
+    inputSchema: { dry_run: z.coerce.boolean().optional() },
+    annotations: {readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+  }, async args => {
+    try { return jsonResult(await withTopologyMutationLock('worker_rotation_recover',
+      () => recoverRotatingPane(args), { timeoutMs: 60_000 })); }
+    catch(err) { return jsonResult({success:false,error_code:'RECOVERY_REJECTED',
+      message:String(err?.message || 'failed').slice(0,240)},true); }
   });
 
   server.registerTool('worker_dynamic_ensure', {
