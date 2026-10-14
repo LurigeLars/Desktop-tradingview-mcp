@@ -285,6 +285,11 @@ node src/server/http.js
 
 By default it listens on `http://127.0.0.1:8765/mcp` and refuses non-loopback bind hosts.
 
+**Windows managed HTTP task:** To make Docker MCP's allowlisted `restart` reliably
+restart the actual Node listener (rather than an old detached launcher), use the
+one-time, verified [Task Scheduler migration](docs/windows-managed-http-task.md).
+This does not restart TradingView Desktop or change existing chart layouts.
+
 For remote clients such as ChatGPT, keep that HTTP server on loopback and place the included gateway behind Cloudflare Access:
 
 ```text
