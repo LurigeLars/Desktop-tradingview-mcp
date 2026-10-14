@@ -18,6 +18,9 @@ test('managed task migration uses an exact existing task and verifies stop/start
     '../scripts/windows/install-managed-http-task.ps1', import.meta.url)), 'utf8');
   assert.match(script, /TradingViewMcpHttpServer/);
   assert.match(script, /New-ScheduledTaskAction/);
+  assert.match(script, /pythonw[.]exe/i);
+  assert.match(script, /run-http-hidden[.]py/i);
+  assert.match(script, /_job_process[.]py/i);
   assert.match(script, /Set-ScheduledTask/);
   assert.match(script, /Stop-ScheduledTask/);
   assert.match(script, /Start-ScheduledTask/);
@@ -25,4 +28,19 @@ test('managed task migration uses an exact existing task and verifies stop/start
   assert.match(script, /127\.0\.0\.1/);
   assert.doesNotMatch(script, /Stop-Process\s+-Name/);
   assert.doesNotMatch(script, /Stop-Process\s+.*TradingView/i);
+  assert.match(script, /Wait-HttpState/);
+  assert.match(script, /Task XML backup/);
+});
+
+test('hidden launcher owns the Node lifetime through a Windows Job Object', () => {
+  const launcher = readFileSync(fileURLToPath(new URL(
+    '../scripts/windows/run-http-hidden.py', import.meta.url)), 'utf8');
+  const helper = readFileSync(fileURLToPath(new URL(
+    '../scripts/windows/_job_process.py', import.meta.url)), 'utf8');
+  assert.match(launcher, /run_job_child/);
+  assert.match(launcher, /src.*server.*http[.]js/);
+  assert.match(helper, /CREATE_NO_WINDOW/);
+  assert.match(helper, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
+  assert.match(helper, /AssignProcessToJobObject/);
+  assert.match(helper, /process[.]wait/);
 });
