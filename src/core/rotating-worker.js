@@ -218,11 +218,17 @@ export async function rotateWorkerSnapshot({ symbol, dry_run = false, _deps } = 
     await d.set(chosen.chart_id,chosen.pane_index,requested,'60');
     await d.wait(chosen.chart_id,chosen.pane_index,requested,'60');
     const snap = await d.snapshot(requested);
+    // realtimeSnapshot already verified the qualified identity against
+    // TradingView's internal instrument metadata before stripping that private
+    // identity from the public payload. Do not re-match alias BATS/NYSE here.
     const matching = (snap.snapshots || []).filter(x=>x.target_id
       && String(x.chart_id)===chosen.chart_id
-      && Number(x.pane_index)===chosen.pane_index
-      && identityMatches(requested,{resolved_symbol:x.resolved_symbol,
-          symbol_identity:x._symbol_identity || {}}));
+      && Number(x.pane_index)===chosen.pane_index);
+    if (!(snap.requested_symbols || []).includes(requested)
+        || (snap.missing || []).includes(requested)
+        || (snap.ambiguous_symbols || []).length) {
+      throw new Error('Snapshot provider did not verify requested qualified symbol');
+    }
     if (matching.length !== 1 || matching[0].success !== true)
       throw new Error('Rotated quote identity not independently verified');
     result = {success:true,...safe,restored:false,sampled:true,
