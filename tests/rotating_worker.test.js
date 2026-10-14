@@ -84,5 +84,6 @@ test('preflight refuses changed resident layouts and already-resident symbols',a
   await assert.rejects(()=>rotateWorkerSnapshot({symbol:'NASDAQ:ADBE',_deps:x.deps}),/identities not aligned/);
   assert.equal(x.calls.length,0);
   await assert.rejects(()=>rotateWorkerSnapshot({symbol:'ADBE',_deps:x.deps}),/exchange-qualified/);
-  await assert.rejects(()=>rotateWorkerSnapshot({symbol:'NASDAQ:BASE2',_deps:x.deps}),/does not need/);
+  const already=await rotateWorkerSnapshot({symbol:'NASDAQ:BASE2',_deps:x.deps});
+  assert.equal(already.error_code,'ALREADY_RESIDENT');
 });
