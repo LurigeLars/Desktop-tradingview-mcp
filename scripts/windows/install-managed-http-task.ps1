@@ -1,12 +1,13 @@
-# Migrate the existing DTV HTTP Scheduled Task to own its Node listener.
-# The previous pythonw launcher detached node.exe: Task Scheduler stopped the
-# launcher, leaving the old HTTP process on 127.0.0.1:8765.
+# Migrate DTV HTTP Scheduled Task to a hidden pythonw-owned Windows Job Object.
+# Task Scheduler stops pythonw; JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE kills its
+# hidden node.exe child, avoiding both orphaned port listeners and console windows.
 # This one-time migration changes only the existing TradingViewMcpHttpServer
 # task action. It never restarts TradingView Desktop or its CDP chart windows.
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [switch]$Apply,
-    [ValidateSet(0, 9222, 9333)][int]$CdpPort = 0
+    [ValidateSet(0, 9222, 9333)][int]$CdpPort = 0,
+    [string]$PythonwPath = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,10 +23,14 @@ $ExpectedRepo = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Desktop-tra
 if (-not [string]::Equals($Repo, $ExpectedRepo, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Refusing: repository is not the known LOCALAPPDATA Desktop-tradingview checkout.'
 }
-$ManagedScript = Join-Path $Repo 'scripts\windows\http-managed.js'
+$ManagedScript = Join-Path $Repo 'scripts\windows\run-http-hidden.py'
 if (-not (Test-Path -LiteralPath $ManagedScript -PathType Leaf)) {
-    throw 'Managed HTTP server entrypoint is missing.'
+    throw 'Hidden, job-bound DTV HTTP launcher is missing.'
 }
+if (-not (Test-Path -LiteralPath (Join-Path $Repo 'scripts\windows\_job_process.py'))) {
+    throw 'Windows Job Object helper is missing.'
+}
+$LegacyManaged = Join-Path $Repo 'scripts\windows\http-managed.js'
 $Origin = (& git.exe -C $Repo remote get-url origin).Trim()
 $OriginExit = $LASTEXITCODE
 $Branch = (& git.exe -C $Repo branch --show-current).Trim()
@@ -65,10 +70,11 @@ if (-not [string]::Equals(($TaskUser -split '\\')[-1], $ThisUser,
 $OriginalAction = $Actions[0]
 $Launcher = [IO.Path]::GetFileName([string]$OriginalAction.Execute)
 $LaunchArgs = [string]$OriginalAction.Arguments
-$AlreadyManaged = $Launcher -ieq 'node.exe' -and
-    $LaunchArgs.Contains($ManagedScript)
+$AlreadyManaged = $Launcher -ieq 'pythonw.exe' -and
+    $LaunchArgs.Contains($ManagedScript) -and $LaunchArgs.Contains('--node')
 $OldLauncher = $Launcher -in @('pythonw.exe', 'python.exe', 'node.exe') -and
-    ($LaunchArgs -match '(?i)run-http-hidden[.]py' -or
+    ($LaunchArgs.Contains($LegacyManaged) -or
+     $LaunchArgs -match '(?i)run-http-hidden[.]py' -or
      $LaunchArgs -match '(?i)src[\\/]server[\\/]http[.]js')
 if (-not $AlreadyManaged -and -not $OldLauncher) {
     throw 'Refusing: existing scheduled launcher is not an approved DTV HTTP action.'
@@ -121,8 +127,39 @@ if (-not (Test-Path -LiteralPath $NodeExe -PathType Leaf)) {
     throw 'Refusing: node.exe is unavailable.'
 }
 
-$ActionArgs = ('"{0}" --cdp-port={1}' -f $ManagedScript, $ValidatedCdpPort)
-$NewAction = New-ScheduledTaskAction -Execute $NodeExe -Argument $ActionArgs -WorkingDirectory $Repo
+# A console-subsystem node.exe started directly by an interactive Scheduled
+# Task creates the unwanted visible terminal. Reuse the existing stack's
+# pythonw.exe hidden launcher convention (Avanza MCP / Trade Spine).
+$PythonCandidates = @()
+if (-not [string]::IsNullOrWhiteSpace($PythonwPath)) {
+    $PythonCandidates += $PythonwPath
+}
+else {
+    if ($Launcher -ieq 'pythonw.exe') { $PythonCandidates += [string]$OriginalAction.Execute }
+    $Known = Get-Command pythonw.exe -ErrorAction SilentlyContinue
+    if ($Known) { $PythonCandidates += $Known.Source }
+    $Python = Get-Command python.exe -ErrorAction SilentlyContinue
+    if ($Python) { $PythonCandidates += (Join-Path (Split-Path -Parent $Python.Source) 'pythonw.exe') }
+    $Uv = Get-Command uv.exe -ErrorAction SilentlyContinue
+    if ($Uv) {
+        $UvPy = (& $Uv.Source python find 3.12 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $UvPy) {
+            $PythonCandidates += (Join-Path (Split-Path -Parent ([string]$UvPy).Trim()) 'pythonw.exe')
+        }
+    }
+    $PythonCandidates += (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\pythonw.exe')
+    $PythonCandidates += (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\pythonw.exe')
+}
+$Pythonw = @($PythonCandidates | Where-Object {
+    $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) -and
+    [IO.Path]::GetFileName($_) -ieq 'pythonw.exe'
+} | Select-Object -First 1)
+if ($Pythonw.Count -ne 1) {
+    throw 'Could not locate pythonw.exe. Provide -PythonwPath with an installed pythonw.exe.'
+}
+$PythonwExe = [IO.Path]::GetFullPath($Pythonw[0])
+$ActionArgs = ('"{0}" --node "{1}" --cdp-port {2}' -f $ManagedScript, $NodeExe, $ValidatedCdpPort)
+$NewAction = New-ScheduledTaskAction -Execute $PythonwExe -Argument $ActionArgs -WorkingDirectory $Repo
 $BackupRoot = Join-Path $env:LOCALAPPDATA 'DTV-Http-Task-Backups'
 New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
 $Backup = Join-Path $BackupRoot ("TradingViewMcpHttpServer-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".xml")
@@ -137,7 +174,7 @@ function Wait-HttpState {
         $Info = Get-HttpListener
         if (-not $Present -and $null -eq $Info) { return $null }
         if ($Present -and $Info -and $Info.ProcessId -ne $ExcludePid -and
-            $Info.CommandLine.Contains($ManagedScript)) {
+            $Info.CommandLine -match '(?i)src[\\/]server[\\/]http[.]js') {
             return $Info
         }
         Start-Sleep -Milliseconds 250
@@ -145,7 +182,7 @@ function Wait-HttpState {
     throw 'DTV HTTP listener did not enter the expected managed state.'
 }
 
-if (-not $PSCmdlet.ShouldProcess($TaskName, 'Migrate to direct Node task action and verify stop/restart')) {
+if (-not $PSCmdlet.ShouldProcess($TaskName, 'Migrate to hidden pythonw Job Object task action and verify stop/restart')) {
     return
 }
 
@@ -155,18 +192,32 @@ try {
         Set-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Action $NewAction -ErrorAction Stop | Out-Null
         $Changed = $true
     }
-    if ($ExistingListener) {
-        # Terminate ONLY the previously verified DTV HTTP port owner.
-        Stop-Process -Id $ExistingListener.ProcessId -Force -ErrorAction Stop
+    # Stop the existing task FIRST; only retire an orphan verified DTV port
+    # owner when Task Scheduler could not stop that child (old launcher).
+    $TaskBefore = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction Stop
+    if ([string]$TaskBefore.State -eq 'Running') {
+        Stop-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction Stop
+        $Deadline = (Get-Date).AddSeconds(12)
+        do {
+            Start-Sleep -Milliseconds 200
+            $StillRunning = (Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath).State -eq 'Running'
+        } while ($StillRunning -and (Get-Date) -lt $Deadline)
+        if ($StillRunning) { throw 'Old DTV task did not stop within 12 seconds.' }
+    }
+    $Leftover = Get-HttpListener
+    if ($Leftover) {
+        # A known detached legacy Node listener; never process-name-wide kill.
+        Stop-Process -Id $Leftover.ProcessId -Force -ErrorAction Stop
         [void](Wait-HttpState)
     }
 
-    # Task Scheduler must own the listener itself. Verify the full lifecycle.
+    # A running pythonw.exe task must OWN a live hidden Node Job Object child.
+    # Verify a full stop/start lifecycle, including automatic port release.
     Start-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction Stop
     $First = Wait-HttpState -Present -ExcludePid $(if ($ExistingListener) { $ExistingListener.ProcessId } else { 0 })
     $RunningTask = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath
     if ([string]$RunningTask.State -ne 'Running') {
-        throw 'Managed Node bound port but Scheduled Task does not own a running process.'
+        throw 'Hidden DTV Node bound port but scheduled pythonw owner is not Running.'
     }
 
     Stop-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction Stop
@@ -177,8 +228,14 @@ try {
     if ([string]$CurrentTask.State -ne 'Running') {
         throw 'Managed HTTP server is not owned by the running Scheduled Task.'
     }
-    Write-Host "PASS: task directly owns DTV Node PID $($Second.ProcessId) on 127.0.0.1:8765."
-    Write-Host "PASS: Stop-ScheduledTask released port; Start-ScheduledTask created a different PID."
+    $OwnedAction = @(($CurrentTask.Actions))[0]
+    if ([IO.Path]::GetFileName([string]$OwnedAction.Execute) -ine 'pythonw.exe' -or
+        [string]$OwnedAction.Arguments -notmatch '(?i)run-http-hidden[.]py') {
+        throw 'Task is not running the expected hidden pythonw launcher.'
+    }
+    Write-Host "PASS: DTV HTTP runs under hidden pythonw owner, Node PID $($Second.ProcessId) at 127.0.0.1:8765."
+    Write-Host "PASS: Stop-ScheduledTask killed the previous Node listener; restart created a new PID."
+    Write-Host "PASS: Node uses CREATE_NO_WINDOW and the Windows Job Object kill-on-close lifetime."
     Write-Host "TradingView Desktop and all its charts remain untouched."
     Write-Host "Task XML backup: $Backup"
 }

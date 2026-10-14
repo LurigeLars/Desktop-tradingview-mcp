@@ -7,9 +7,11 @@ launcher that starts `node.exe` and then exits. A normal Task Scheduler
 `restart` may therefore leave an orphaned HTTP listener on 127.0.0.1:8765;
 the task records result `1` while the old server continues serving the old code.
 
-The managed task launcher is instead **directly** `node.exe` with
-`scripts/windows/http-managed.js --cdp-port=9222` (or 9333 after verification).
-Stopping the Windows task terminates the actual listener process.
+The managed task instead runs **`pythonw.exe`**, which has no console window, with
+`scripts/windows/run-http-hidden.py`. This launches Node using `CREATE_NO_WINDOW`
+and attaches it to a Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
+Unlike the old detached launcher, pythonw **waits** for Node. Stopping the task
+closes the job handle and terminates the actual HTTP listener.
 Neither entrypoint starts/stops TradingView Desktop or changes chart layouts.
 
 ## One-time installation
@@ -34,7 +36,8 @@ explicitly with `-CdpPort 9222` or `-CdpPort 9333` after checking.
 Before changing the task action, the script exports its XML to
 `%LOCALAPPDATA%\DTV-Http-Task-Backups`. It changes only that task's
 **action**; existing trigger, principal, run level, settings and other tasks
-are preserved. It then retires only the validated old HTTP listener and
+are preserved. `pythonw.exe` is resolved from installed Python/uv or the
+previous task action. If necessary, supply an explicit installed `-PythonwPath`. It then retires only the validated old HTTP listener and
 performs two launches separated by a Task Scheduler stop. The second launch
 must have a different PID, with the task reporting `Running` and port 8765
 rebound, otherwise the migration reports failure. If an error occurs it
@@ -49,8 +52,8 @@ scheduled_task_control(task="desktop-tradingview-http",operation="restart")
 scheduled_task_status(task="desktop-tradingview-http")
 ```
 
-Expect task status **Running** during service operation, and a new Node
-listener PID following each restart. `Ready` with result `1` is no longer
+Expect task status **Running** during service operation, no visible Node or
+PowerShell terminal window, and a new Node listener PID after each restart. `Ready` with result `1` is no longer
 considered a successful HTTP restart. Confirm DTV MCP connectivity and
 that chart/source identity remains correct before resuming any automated
 symbol provisioning. Restarting Docker's gateway container is not a
