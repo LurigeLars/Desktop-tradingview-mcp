@@ -62,7 +62,10 @@ export function selectRotatingPane(state) {
     && Array.isArray(e.studies) && e.studies.length === 0
     && Number(e.assignment?.worker_slot) === 4
     && Number(e.assignment?.pane_index) === i - 32);
-  const entry = eligible.at(-1);
+  // A simple single-symbol Nasdaq pane is more reliably restored than a
+  // composite spread/formula expression; preserve QQQ/SPY in its own pane.
+  const entry = eligible.find(e => e.handle === 'qqq-5m'
+    && e.symbol === 'NASDAQ:QQQ' && String(e.timeframe) === '5');
   const owner = state.worker_tabs.find(t => Number(t.slot) === 4);
   if (!entry || !owner?.chart_id || state.worker_tabs.filter(t => Number(t.slot) <= 4).length !== 5)
     throw new Error('No safely replaceable pane in existing fifth worker layout');
