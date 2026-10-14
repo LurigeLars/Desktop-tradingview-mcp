@@ -19,14 +19,16 @@ class HiddenJobObjectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "child.pid"
             launcher = Path(tmp) / "owner.py"
+            child = (
+                f"import os,time;"
+                f"open({str(marker)!r},'w').write(str(os.getpid()));"
+                f"time.sleep(60)"
+            )
             launcher.write_text(
                 "import os,sys\n"
-                "from pathlib import Path\n"
                 "sys.path.insert(0, sys.argv[1])\n"
                 "from _job_process import run_job_child\n"
-                "pid_file=Path(sys.argv[2])\n"
-                "cmd='import os,time;open(' + repr(str(marker)) + "
-                "',' + repr('w') + ').write(str(os.getpid()));time.sleep(60)'\n"
+                f"cmd={child!r}\n"
                 "with open(os.devnull, 'w', encoding='utf-8') as log:\n"
                 "  raise SystemExit(run_job_child([sys.executable,'-c',cmd],"
                 "cwd=os.getcwd(),env=os.environ,log=log))\n",
