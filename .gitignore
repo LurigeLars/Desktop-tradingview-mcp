@@ -6,3 +6,7 @@ temp_*
 discovery-log.json
 rules.json
 public/*.env
+
+# Windows pythonw launcher bytecode cache (not source or task state)
+__pycache__/
+*.py[cod]
