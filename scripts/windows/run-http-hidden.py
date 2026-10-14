@@ -1,0 +1,70 @@
+"""Background-only DTV HTTP launcher, invoked by Windows Task Scheduler via pythonw.exe.
+
+Unlike the old detached launcher, this process WAITS for Node. A Windows Job
+Object kills Node when the Scheduled Task stops the pythonw owner. No visible
+node or PowerShell consoles, no TradingView Desktop lifecycle changes.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+from _job_process import run_job_child
+
+_ALLOWED_CDP = (9222, 9333)
+_HTTP_PORT = "8765"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--node", required=True)
+    parser.add_argument("--cdp-port", type=int, required=True, choices=_ALLOWED_CDP)
+    args = parser.parse_args(argv)
+    script = Path(__file__).resolve()
+    repo = script.parents[2]
+    node = Path(args.node).resolve()
+    if node.name.lower() != "node.exe" or not node.is_file():
+        raise RuntimeError("Expected an absolute existing node.exe path")
+    if not (repo / "src" / "server" / "http.js").is_file():
+        raise RuntimeError("Expected DTV HTTP server entrypoint not found")
+    env = os.environ.copy()
+    env["TV_CDP_PORT"] = str(args.cdp_port)
+    env["TV_MCP_HTTP_HOST"] = "127.0.0.1"
+    env["TV_MCP_HTTP_PORT"] = _HTTP_PORT
+
+    logs = Path(os.environ["LOCALAPPDATA"]) / "Desktop-tradingview"
+    logs.mkdir(parents=True, exist_ok=True)
+    logfile = logs / "managed-http.log"
+    backup = logs / "managed-http.log.1"
+    if logfile.is_file() and logfile.stat().st_size >= 5_000_000:
+        if backup.is_file():
+            backup.unlink()
+        logfile.replace(backup)
+    with logfile.open("a", encoding="utf-8") as out:
+        out.write(f"[{datetime.now(timezone.utc).isoformat()}] hidden DTV MCP start\n")
+        out.flush()
+        code = run_job_child(
+            [str(node), str(repo / "src" / "server" / "http.js")],
+            cwd=str(repo), env=env, log=out,
+        )
+        out.write(f"[{datetime.now(timezone.utc).isoformat()}] DTV MCP stopped, exit={code}\n")
+        out.flush()
+    return code
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as exc:
+        # pythonw has no terminal. Keep sanitized startup diagnosis in local file.
+        try:
+            root = Path(os.environ["LOCALAPPDATA"]) / "Desktop-tradingview"
+            root.mkdir(parents=True, exist_ok=True)
+            with (root / "managed-http-error.log").open("a", encoding="utf-8") as stream:
+                stream.write(f"{datetime.now(timezone.utc).isoformat()}: {type(exc).__name__}: {exc}\n")
+        except OSError:
+            pass
+        sys.exit(1)
