@@ -400,35 +400,30 @@ Use `watch_manifest_apply` with no theme arguments to load the defaults. Optiona
 
 After applying the manifest, run `worker_provision` until it reports `complete: true`.
 
-### Isolated dynamic workers for current holdings
+### Reversible in-place sampling in the existing five worker tabs
 
-The optional `worker_dynamic_ensure` tool accepts an ordered list of
-exchange-qualified TradingView symbols; no symbol needs to be checked into
-`watch-manifest.json` just because a broker position changed. The tool:
+`worker_rotate_snapshot({symbol, dry_run})` can sample a missing,
+exchange-qualified TradingView instrument without opening another tab, window,
+or extra connection. Under the shared topology lock it selects one
+lower-priority short-horizon tactical pane in the **fifth existing worker tab**,
+verifies all eight original pane identities, journals its original symbol,
+temporarily switches that pane to the requested symbol, independently reads
+the qualified quote, and **restores the original symbol/timeframe before
+returning**. The 40 logical worker entries and five chart layouts remain
+unchanged; a quote is not an Avanza executable broker bid/ask.
 
-- Leaves every baseline eight-pane worker layout intact.
-- Uses the four spare usable connections at the end of the active registry
-  (the current default watch manifest has 40 baseline connections out of 44
-  usable slots), provisioning **only** the dedicated suffix tab.
-- Never adopts an external/user tab, switches a user chart, modifies the
-  preceding resident tabs, or bypasses the subscription connection budget.
-- Loads at most two dynamic panes per call and replaces no more than one
-  established pool symbol per request, with a 15-minute minimum dwell.
-- Returns `provisioned=false` during opening/reconciliation. A later ordinary
-  `realtime_snapshot` independently verifies the requested symbol and
-  source freshness. A worker assignment is not a quote or execution price.
+If the quote is missing or stale the result exposes that fact and restores
+the original. If restoration fails, the durable pending-rotation journal
+blocks further swaps until `worker_rotation_recover` can verify a safe
+restoration. An unexpected third-party chart change is never overwritten.
+Concurrent realtime snapshots are serialized with the swap so they cannot
+mistake a temporary quote for a resident assigned worker. Sampling only
+occurs for missing symbols confirmed by the fresh broker-backed Trade Spine
+run, not free-form headlines or context panes; one symbol per invocation.
 
-Use `worker_dynamic_ensure({symbols:[...],dry_run:true})` for planning,
-then `worker_dynamic_ensure({symbols:[...]})` to reconcile one bounded phase.
-The global topology lock serializes mutations across clients. The tool fails
-closed if baseline entries have been interleaved with dynamic entries, an
-unexpected extra worker tab exists, there is inadequate connection headroom,
-or the dynamic suffix is not isolated.
-
-Trade Spine only requests dynamic symbols from the *current, fresh, verified*
-Avanza holdings mapping. Supplemental missing context symbols and manual
-ad-hoc chart requests never trigger unattended changes. DTV quote metadata
-is never Avanza's executable broker bid/ask.
+The previous `worker_dynamic_ensure` API, which created a sixth worker
+tab/window, now explicitly returns `SIXTH_TAB_DISABLED`. It must not be used
+for automated Portfolio Watch or manual background provisioning.
 
 ### Morning Brief
 
