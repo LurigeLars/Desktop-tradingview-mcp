@@ -235,6 +235,7 @@ export async function rotateWorkerSnapshot({ symbol, dry_run = false, _deps } = 
     if (matching.length !== 1 || matching[0].success !== true)
       throw new Error('Rotated quote identity not independently verified');
     result = {success:true,...safe,restored:false,sampled:true,
+      qualified_identity_verified:true, verified_requested_symbol:requested,
       snapshot:matching[0],source_timestamp_ms:matching[0].quote?.source_timestamp_ms??null};
   } catch(e) {failure = e;}
   try {
