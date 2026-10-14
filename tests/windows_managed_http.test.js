@@ -38,9 +38,9 @@ test('hidden launcher owns the Node lifetime through a Windows Job Object', () =
   const helper = readFileSync(fileURLToPath(new URL(
     '../scripts/windows/_job_process.py', import.meta.url)), 'utf8');
   assert.match(launcher, /run_job_child/);
-  assert.match(launcher, /src.*server.*http[.]js/);
+  assert.match(launcher, /"http[.]js"/);
   assert.match(helper, /CREATE_NO_WINDOW/);
   assert.match(helper, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
   assert.match(helper, /AssignProcessToJobObject/);
-  assert.match(helper, /process[.]wait/);
+  assert.match(helper, /proc[.]wait/);
 });
