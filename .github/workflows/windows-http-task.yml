@@ -5,12 +5,18 @@ on:
     paths:
       - 'scripts/windows/install-managed-http-task.ps1'
       - 'scripts/windows/http-managed.js'
+      - 'scripts/windows/run-http-hidden.py'
+      - 'scripts/windows/_job_process.py'
+      - 'tests/windows_hidden_job_test.py'
       - '.github/workflows/windows-http-task.yml'
   push:
     branches: [main]
     paths:
       - 'scripts/windows/install-managed-http-task.ps1'
       - 'scripts/windows/http-managed.js'
+      - 'scripts/windows/run-http-hidden.py'
+      - 'scripts/windows/_job_process.py'
+      - 'tests/windows_hidden_job_test.py'
 
 permissions:
   contents: read
@@ -31,3 +37,7 @@ jobs:
             throw ($errors | ForEach-Object { $_.Message } | Out-String)
           }
           Write-Host 'PowerShell migration parses successfully.'
+
+      - name: Verify job-owned child lifetime on Windows
+        shell: pwsh
+        run: python tests/windows_hidden_job_test.py
