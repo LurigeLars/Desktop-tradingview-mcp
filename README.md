@@ -395,6 +395,36 @@ Use `watch_manifest_apply` with no theme arguments to load the defaults. Optiona
 
 After applying the manifest, run `worker_provision` until it reports `complete: true`.
 
+### Isolated dynamic workers for current holdings
+
+The optional `worker_dynamic_ensure` tool accepts an ordered list of
+exchange-qualified TradingView symbols; no symbol needs to be checked into
+`watch-manifest.json` just because a broker position changed. The tool:
+
+- Leaves every baseline eight-pane worker layout intact.
+- Uses the four spare usable connections at the end of the active registry
+  (the current default watch manifest has 40 baseline connections out of 44
+  usable slots), provisioning **only** the dedicated suffix tab.
+- Never adopts an external/user tab, switches a user chart, modifies the
+  preceding resident tabs, or bypasses the subscription connection budget.
+- Loads at most two dynamic panes per call and replaces no more than one
+  established pool symbol per request, with a 15-minute minimum dwell.
+- Returns `provisioned=false` during opening/reconciliation. A later ordinary
+  `realtime_snapshot` independently verifies the requested symbol and
+  source freshness. A worker assignment is not a quote or execution price.
+
+Use `worker_dynamic_ensure({symbols:[...],dry_run:true})` for planning,
+then `worker_dynamic_ensure({symbols:[...]})` to reconcile one bounded phase.
+The global topology lock serializes mutations across clients. The tool fails
+closed if baseline entries have been interleaved with dynamic entries, an
+unexpected extra worker tab exists, there is inadequate connection headroom,
+or the dynamic suffix is not isolated.
+
+Trade Spine only requests dynamic symbols from the *current, fresh, verified*
+Avanza holdings mapping. Supplemental missing context symbols and manual
+ad-hoc chart requests never trigger unattended changes. DTV quote metadata
+is never Avanza's executable broker bid/ask.
+
 ### Morning Brief
 
 The morning workflow is deliberately split into collection, interpretation, and storage:
