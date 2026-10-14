@@ -361,7 +361,7 @@ export async function startTradingViewHttpServer(overrides = {}) {
   };
 }
 
-async function runMain() {
+export async function runMain() {
   writeStartupNotice();
   const runtime = await startTradingViewHttpServer();
   process.stderr.write(`[tradingview-mcp:http] listening on ${runtime.url}\n`);
