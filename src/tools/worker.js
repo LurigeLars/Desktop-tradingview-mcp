@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/worker.js';
+import { ensureDynamicSymbols } from '../core/dynamic-worker.js';
 import { topologyMutationLockStatus, withTopologyMutationLock } from '../core/topology-lock.js';
 
 const studySchema = z.union([
@@ -33,6 +34,25 @@ export function registerWorkerTools(server) {
   }, async (args) => {
     try { return jsonResult(await withTopologyMutationLock('worker_set_universe', () => core.setUniverse(args))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.registerTool('worker_dynamic_ensure', {
+    description: 'Bounded isolated on-demand symbol residency: keep baseline worker tabs unchanged, use <=4 dynamic suffix pane slots, no chart/UI changes outside DTV-owned dynamic layout. One phase per call; quote must be read separately.',
+    inputSchema: {
+      symbols: z.array(z.string()).max(12).describe('Verified exchange-qualified TradingView symbols in priority order; not new portfolio truth.'),
+      dry_run: z.coerce.boolean().optional().describe('Only inspect candidate pool, do not change any state or charts.'),
+      max_panes: z.coerce.number().int().min(1).max(2).optional().describe('At most two dynamic pane changes per call.'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async (args) => {
+    try {
+      if (args?.dry_run) return jsonResult(await ensureDynamicSymbols(args));
+      return jsonResult(await withTopologyMutationLock(
+        'worker_dynamic_ensure', () => ensureDynamicSymbols(args)));
+    } catch (error) {
+      return jsonResult({ success: false, error_code: 'DYNAMIC_WORKER_UNAVAILABLE',
+        message: String(error?.message || 'unavailable').slice(0, 240) }, true);
+    }
   });
 
   server.registerTool('worker_status', {
