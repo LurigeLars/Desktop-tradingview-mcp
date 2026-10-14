@@ -227,12 +227,8 @@ if (-not $PSCmdlet.ShouldProcess($TaskName, 'Migrate to hidden pythonw Job Objec
 
 $Changed = $false
 try {
-    if (-not $AlreadyManaged) {
-        Set-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Action $NewAction -ErrorAction Stop | Out-Null
-        $Changed = $true
-    }
-    # Stop the existing task FIRST; only retire an orphan verified DTV port
-    # owner when Task Scheduler could not stop that child (old launcher).
+    # Stop the exact approved task BEFORE changing its action. A historical
+    # listener may disappear while its PID is unavailable through CIM.
     $TaskBefore = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction Stop
     if ([string]$TaskBefore.State -eq 'Running') {
         Stop-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction Stop
@@ -243,11 +239,30 @@ try {
         } while ($StillRunning -and (Get-Date) -lt $Deadline)
         if ($StillRunning) { throw 'Old DTV task did not stop within 12 seconds.' }
     }
-    $Leftover = Get-HttpListener
+    $PortDeadline = (Get-Date).AddSeconds(8)
+    do {
+        $Leftover = Get-HttpListener
+        if (-not $Leftover) { break }
+        if ((Get-Date) -lt $PortDeadline) { Start-Sleep -Milliseconds 300 }
+    } while ((Get-Date) -lt $PortDeadline)
     if ($Leftover) {
-        # A known detached legacy Node listener; never process-name-wide kill.
-        Stop-Process -Id $Leftover.ProcessId -Force -ErrorAction Stop
+        if (-not $Leftover.Verified) {
+            throw "Refusing: listener PID=$($Leftover.ProcessId), reason=$($Leftover.Reason), remains after exact task stop. No unverified process terminated."
+        }
+        # Only the exact, independently verified DTV Node HTTP listener may be
+        # retired. Re-read the port and PID immediately before Stop-Process.
+        $Rechecked = Get-HttpListener
+        if (-not $Rechecked -or -not $Rechecked.Verified -or
+            $Rechecked.ProcessId -ne $Leftover.ProcessId) {
+            throw 'DTV listener changed owner during cleanup. No process terminated.'
+        }
+        Stop-Process -Id $Rechecked.ProcessId -Force -ErrorAction Stop
         [void](Wait-HttpState)
+    }
+    # Do not mutate the existing task until the old listener is safely gone.
+    if (-not $AlreadyManaged) {
+        Set-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Action $NewAction -ErrorAction Stop | Out-Null
+        $Changed = $true
     }
 
     # A running pythonw.exe task must OWN a live hidden Node Job Object child.
