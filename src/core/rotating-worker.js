@@ -201,7 +201,7 @@ export async function rotateWorkerSnapshot({ symbol, dry_run = false, _deps } = 
     if (!recovery.restored) return {success:false,error_code:'RESTORATION_PENDING',recovery};
   }
   const state = d.status(), chosen = selectRotatingPane(state);
-  if (state.entries.some(e=>e.symbol.toUpperCase()===requested))
+  if (chosen.entry.symbol.toUpperCase()===requested)
     return {success:false,error_code:'ALREADY_RESIDENT',requested};
   const original = await d.read(chosen.chart_id,chosen.pane_index);
   assertBaseline(state,chosen,original.all);
