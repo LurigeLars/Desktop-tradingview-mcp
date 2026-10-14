@@ -32,7 +32,7 @@ test('managed task migration uses an exact existing task and verifies stop/start
   assert.match(script, /Task XML backup/);
   assert.match(script, /\[switch\]\$Inspect/);
   assert.match(script, /No task action was changed and no process was stopped/);
-  assert.match(script, /Unverified process was not terminated/);
+  assert.match(script, /No unverified process terminated/);
   assert.match(script, /CIM_OR_SOCKET_UNSTABLE/);
   assert.match(script, /DTV listener changed owner during cleanup/);
   assert.match(script, /\$Attempt -lt 6/);
