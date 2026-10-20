@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
-import { provisionWorker, rebindPersistentWorkers, auditWorkerTargetCandidates } from '../core/worker-provision.js';
+import { provisionWorker, rebindPersistentWorkers, auditWorkerTargetCandidates, retireNonmatchingWorkerRenderer } from '../core/worker-provision.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerWorkerProvisionTools(server) {
@@ -12,6 +12,21 @@ export function registerWorkerProvisionTools(server) {
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, async ({slot}) => {
     try {return jsonResult(await auditWorkerTargetCandidates({slot}));}
+    catch(err){return jsonResult({success:false,error:err.message},true);}
+  });
+
+  server.registerTool('worker_retire_nonmatching', {
+    description: 'Retire exactly one extra worker-layout renderer whose CDP target is proven nonmatching, while verifying the registered worker remains healthy. Dry-run by default.',
+    inputSchema: {
+      slot: z.coerce.number().int().min(0).max(49),
+      target_id: z.string().describe('Exact nonmatching CDP target ID from worker_target_audit.'),
+      dry_run: z.coerce.boolean().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  }, async ({slot,target_id,dry_run}) => {
+    try {return jsonResult(await withTopologyMutationLock('worker_retire_nonmatching',() =>
+      retireNonmatchingWorkerRenderer({slot,target_id,dry_run:dry_run!==false})
+    ));}
     catch(err){return jsonResult({success:false,error:err.message},true);}
   });
 
@@ -39,10 +54,19 @@ export function registerWorkerProvisionTools(server) {
       force: z.coerce.boolean().optional().describe('Reconfigure worker-owned tabs even when recorded assignments look complete.'),
       adopt_single_existing: z.coerce.boolean().optional().describe('Explicitly adopt the sole existing non-worker TradingView chart as worker slot 0. Useful when consuming the full connection budget.'),
       layout_prefix: z.string().optional().describe('Optional technical name prefix for DTV-owned saved layouts.'),
+      orphan_slot: z.coerce.number().int().min(0).max(49).optional().describe('Technical cleanup: worker slot of one proven nonmatching renderer.'),
+      orphan_target_id: z.string().optional().describe('Technical cleanup: exact CDP target from worker_target_audit, never the registered worker target.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {
     try {
+      if (args?.orphan_target_id) {
+        return jsonResult(await withTopologyMutationLock('worker_retire_nonmatching', () =>
+          retireNonmatchingWorkerRenderer({
+            slot:args.orphan_slot,target_id:args.orphan_target_id,dry_run:args.dry_run!==false,
+          })
+        ));
+      }
       if (args?.dry_run) return jsonResult(await provisionWorker(args));
       return jsonResult(await withTopologyMutationLock('worker_provision', () => provisionWorker(args)));
     }
