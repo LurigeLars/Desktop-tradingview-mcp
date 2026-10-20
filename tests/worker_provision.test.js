@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   activePaneStates,
+  auditWorkerTargetCandidates,
   buildWorkerLayoutName,
   closeTabByOwned,
   closeWorkerTargetGracefully,
@@ -1321,4 +1322,41 @@ test('worker_rebind refuses mismatching or duplicate restored worker layouts', a
   assert.equal(duplicate.success,false);
   assert.deepEqual(duplicate.duplicate_slots,[0]);
   assert.equal(store.get().worker_tabs[0].target_id,'old');
+});
+
+
+test('worker audit exposes nonmatching identical-layout renderer without deleting or assigning it', async () => {
+  const state={
+    topology_plan:{tab_count:1,tabs:[{tab_index:0,pane_count:2,handles:['brent','nasdaq']}]},
+    worker_tabs:[{slot:0,chart_id:'worker06',target_id:'registered',layout_name:'DTV Worker 06'}],
+    entries:[
+      {handle:'brent',symbol:'TVC:UKOIL',timeframe:'1',studies:[]},
+      {handle:'nasdaq',symbol:'CME_MINI:NQ1!',timeframe:'1',studies:[]},
+    ],
+  };
+  const targets=[
+    {id:'registered',url:'https://www.tradingview.com/chart/worker06/'},
+    {id:'extra',url:'https://www.tradingview.com/chart/worker06/'},
+    {id:'personal',url:'https://www.tradingview.com/chart/mycharts/'},
+  ];
+  const report=await auditWorkerTargetCandidates({slot:0,_deps:{
+    status:()=>state,
+    listTargets:async()=>targets,
+    inspectTargets:async subset=>{
+      assert.equal(subset.length,2);
+      return [
+        {target_id:'registered',chart_id:'worker06',pane_count:2,panes:[
+          {resolved_symbol:'TVC:UKOIL',resolution:'1',studies:[]},
+          {resolved_symbol:'CME_MINI:NQ1!',resolution:'1',studies:[]},
+        ]},
+        {target_id:'extra',chart_id:'worker06',pane_count:1,panes:[
+          {resolved_symbol:'TVC:UKOIL',resolution:'5',studies:[]},
+        ]},
+      ];
+    },
+  }});
+  assert.equal(report.success,true);
+  assert.equal(report.candidate_count,2);
+  assert.equal(report.candidates.find(t=>t.target_id==='extra').worker_signature_matches,false);
+  assert.equal(report.candidates.find(t=>t.target_id==='extra').registered_target_id,false);
 });
