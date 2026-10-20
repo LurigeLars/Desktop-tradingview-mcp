@@ -15,21 +15,31 @@ export function registerTabTools(server) {
   });
 
   server.registerTool('tab_attach', {
-    description: 'Attach chart and indicator commands to an exact OPEN personal layout by stable chart URL token, without switching Windows tabs or modifying worker charts. Use tab_list to discover chart_id.',
+    description: 'Attach to an exact live CDP target_id from tab_list (supports duplicate layouts), or to a unique chart_id. Rediscover IDs after TradingView restart. Worker tabs are protected.',
     inputSchema: {
-      chart_id: z.string().describe('Exact chart URL token (e.g. eh2ouJQ6), not numeric saved-layout ID or list index'),
+      chart_id: z.string().optional().describe('Unique chart URL token; use target_id instead for duplicate layouts.'),
+      target_id: z.string().optional().describe('Exact live CDP target from a fresh tab_list, including duplicate layouts.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, async ({ chart_id }) => {
+  }, async ({ chart_id, target_id }) => {
     try {
       return jsonResult(await withTopologyMutationLock('tab_attach', async () => {
+        if (Boolean(chart_id) === Boolean(target_id)) {
+          throw new Error('Supply exactly one of target_id or chart_id.');
+        }
         const live = await core.list();
-        const match = live.tabs.filter(tab => tab.is_chart && tab.chart_id === chart_id);
-        if (match.length !== 1) throw new Error('Expected exactly one open chart with chart_id ' + chart_id);
+        const match = target_id
+          ? live.tabs.filter(tab => tab.is_chart && tab.id === target_id)
+          : live.tabs.filter(tab => tab.is_chart && tab.chart_id === chart_id);
+        if (match.length !== 1) {
+          throw new Error('No unique open chart matched. Refresh tab_list and use exact target_id.');
+        }
         if (isWorkerOwnedTab(match[0], workerStatus())) {
           throw new Error('Refusing to attach interactive commands to a DTV worker-owned layout.');
         }
-        return core.attachChart({ chart_id });
+        return target_id
+          ? core.attachChartTarget({ target_id })
+          : core.attachChart({ chart_id });
       }));
     } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
@@ -72,13 +82,29 @@ export function registerTabTools(server) {
   server.registerTool('tab_close', {
     description: 'Close one non-worker TradingView Desktop tab. In multi-tab runtimes target_id is required so concurrent MCP clients cannot close whichever tab happens to be active. DTV-owned worker tabs are protected; worker lifecycle changes must go through worker_provision.',
     inputSchema: {
-      target_id: z.string().optional().describe('Exact CDP target ID from tab_list. Required when more than one tab is open.'),
+      target_id: z.string().optional().describe('Exact live CDP target ID from tab_list, for uniquely mappable shell tabs.'),
+      shell_tab_id: z.string().optional().describe('Physical Desktop shell_tab_id from a fresh tab_list. Supports duplicate layouts.'),
+      expected_layout_name: z.string().optional().describe('Expected layout name from shell_tabs to prevent stale-identity mistakes.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  }, async ({ target_id }) => {
+  }, async ({ target_id, shell_tab_id, expected_layout_name }) => {
     try {
       return jsonResult(await withTopologyMutationLock('tab_close', async () => {
+        if (target_id && shell_tab_id) throw new Error('Use either target_id or shell_tab_id, not both.');
         const tabs = await core.list();
+        if (shell_tab_id) {
+          const current = tabs.shell_tabs.find(tab => tab.shell_tab_id === shell_tab_id);
+          if (!current?.layout_name) throw new Error('Shell tab missing or unidentified; refresh tab_list.');
+          const state = workerStatus();
+          const workerNames = (state.worker_tabs || []).map(tab => tab.layout_name).filter(Boolean);
+          if (workerNames.includes(current.layout_name) || /^DTV (?:Market|Worker)\b/i.test(current.layout_name)) {
+            throw new Error('Refusing to close a DTV worker-owned layout.');
+          }
+          return core.closeShellTabById({
+            shell_tab_id, expected_layout_name: expected_layout_name || current.layout_name,
+            protected_layout_names: workerNames,
+          });
+        }
         let target = null;
 
         if (target_id) {
@@ -108,16 +134,23 @@ export function registerTabTools(server) {
   });
 
   server.registerTool('tab_switch', {
-    description: 'Switch the active TradingView Desktop chart tab by index without closing any tabs.',
+    description: 'Switch one physical Desktop tab by shell_tab_id (works with duplicate layouts), or by legacy CDP list index. Refresh tab_list after restart.',
     inputSchema: {
-      index: z.coerce.number().describe('Tab index (0-based, from tab_list)'),
+      index: z.coerce.number().optional().describe('Legacy CDP tab index (0-based).'),
+      shell_tab_id: z.string().optional().describe('Exact physical Desktop shell_tab_id from tab_list.'),
+      expected_layout_name: z.string().optional().describe('Expected layout name for identity validation.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, async ({ index }) => {
+  }, async ({ index, shell_tab_id, expected_layout_name }) => {
     try {
+      if (Boolean(shell_tab_id) === (index !== undefined && index !== null)) {
+        throw new Error('Supply exactly one of index or shell_tab_id.');
+      }
       return jsonResult(await withTopologyMutationLock(
         'tab_switch',
-        () => core.switchTab({ index }),
+        () => shell_tab_id
+          ? core.switchShellTab({shell_tab_id, expected_layout_name})
+          : core.switchTab({ index }),
       ));
     }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
