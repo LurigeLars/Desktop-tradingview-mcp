@@ -3,7 +3,7 @@
  * Does not switch symbols, navigate charts, edit studies, or change layout.
  * Private TradingView series API: fail closed if its shape/behaviour changes.
  */
-import { evaluate, KNOWN_PATHS } from '../connection.js';
+import { evaluate, getTargetInfo, KNOWN_PATHS } from '../connection.js';
 
 const API = KNOWN_PATHS.chartApi;
 const BARS = KNOWN_PATHS.mainSeriesBars;
@@ -89,6 +89,7 @@ function makeRead(before, count) {
 async function fetchHistory({ count = 500, before_time, cursor, expected_symbol, expected_resolution, _deps } = {}) {
   const run = _deps?.evaluate || evaluate;
   const delay = _deps?.delay || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const readTarget = _deps?.getTargetInfo || getTargetInfo;
   const symbol = requireId(expected_symbol, 'expected_symbol');
   const resolution = requireId(expected_resolution, 'expected_resolution');
   const rows = Number(count);
@@ -103,7 +104,14 @@ async function fetchHistory({ count = 500, before_time, cursor, expected_symbol,
     before = decoded.before;
   }
 
+  const originalTarget = await readTarget();
+  if (!originalTarget?.id) throw new Error('TARGET_UNAVAILABLE: attach an explicit TradingView chart');
+  async function assertTarget() {
+    const current = await readTarget();
+    if (current?.id !== originalTarget.id) throw new Error('TARGET_CHANGED: chart attachment changed during history read');
+  }
   let state = await run(makeProbe(before));
+  await assertTarget();
   validateIdentity(state, symbol, resolution);
   if (state.loaded === 0) throw new Error('HISTORY_EMPTY: chart has no loaded bars');
   let loads = 0;
@@ -120,6 +128,7 @@ async function fetchHistory({ count = 500, before_time, cursor, expected_symbol,
     for (let poll = 0; poll < POLL_ROUNDS; poll++) {
       await delay(POLL_DELAY_MS);
       state = await run(makeProbe(before));
+      await assertTarget();
       validateIdentity(state, symbol, resolution);
       if (state.first_time !== prev.first_time || state.loaded > prev.loaded || state.eligible > prev.eligible) {
         advanced = true;
@@ -135,6 +144,7 @@ async function fetchHistory({ count = 500, before_time, cursor, expected_symbol,
   }
 
   const final = await run(makeRead(before, rows));
+  await assertTarget();
   validateIdentity(final, symbol, resolution);
   if (!Array.isArray(final.bars)) throw new Error('HISTORY_UNAVAILABLE: missing bar rows');
   if (final.bars.length !== Math.min(rows, state.eligible)) {
@@ -148,13 +158,14 @@ async function fetchHistory({ count = 500, before_time, cursor, expected_symbol,
       throw new Error('HISTORY_INVALID: non-finite, duplicate, unordered, or inconsistent OHLCV');
     }
   }
+  if (final.bars.length === 0) throw new Error('HISTORY_OUT_OF_RANGE: no bars satisfy requested cursor/time');
   const firstTime = final.bars[0]?.time ?? null;
   const lastTime = final.bars.at(-1)?.time ?? null;
   // If the cache contains additional eligible bars we know an older page exists.
   // Otherwise the feed's availability indication is conservative, not a guarantee.
   const hasMore = final.bars.length > 0 && (state.eligible > final.bars.length || state.more);
   return {
-    success:true, source:'tradingview_desktop_chart_series', symbol, resolution,
+    success:true, source:'tradingview_desktop_chart_series', target_id:originalTarget.id, symbol, resolution,
     requested:rows, returned:final.bars.length, first_time:firstTime, last_time:lastTime,
     total_loaded:final.loaded, pages_loaded:loads,
     has_more:hasMore, next_cursor:hasMore ? encodeCursor(symbol, resolution, firstTime) : null,
