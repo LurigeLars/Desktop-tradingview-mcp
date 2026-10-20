@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/data.js';
+import { getOhlcvHistory } from '../core/history.js';
 
 export function registerDataTools(server) {
   server.tool('data_get_ohlcv', 'Get OHLCV bar data from the chart. Use summary=true for compact stats instead of all bars (saves context).', {
@@ -8,6 +9,17 @@ export function registerDataTools(server) {
     summary: z.coerce.boolean().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
   }, async ({ count, summary }) => {
     try { return jsonResult(await core.getOhlcv({ count, summary })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('data_get_ohlcv_history', 'Read paginated historical candles from the ATTACHED TradingView Desktop chart without changing it. Use chart_get_state for the exact observed symbol/resolution; BATS aliases may differ from the requested exchange. For older data, pass next_cursor back with the same identity. No partial/stale data is returned on failed loading.', {
+    expected_symbol: z.string().min(1).describe('Exact chart_get_state symbol, e.g. BATS:NVDA (required, identity checked before and after every history read)'),
+    expected_resolution: z.string().min(1).describe('Exact chart_get_state resolution, e.g. 1, 3, 5, 15 (required)'),
+    before_time: z.coerce.number().int().optional().describe('UNIX UTC seconds. Return bars strictly earlier than this time; omit for most recent bars. Do not combine with cursor.'),
+    cursor: z.string().optional().describe('Opaque next_cursor from previous successful page; do not combine with before_time'),
+    count: z.coerce.number().int().min(1).max(1000).optional().describe('Number of bars per page, 1–1000, default 500'),
+  }, async (args) => {
+    try { return jsonResult(await getOhlcvHistory(args)); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
