@@ -289,6 +289,105 @@ export async function closeShellTabById({
   });
 }
 
+
+/**
+ * Inspect physical shell-to-CDP relationships without touching chart state.
+ * The only UI action is visual tab selection; the original tab is restored.
+ * Electron can report unreliable background visibility, so never claim a
+ * mapping unless every repeated observation distinguishes exactly one target.
+ */
+export function rankShellRendererWitnesses(samples, shellIds, targetIds) {
+  const observations = new Map();
+  for (const shellId of shellIds) {
+    const found = samples.filter(sample => sample.shell_tab_id === shellId);
+    if (found.length < 2) return {confirmed:false, reason:'insufficient_repeated_samples', by_shell:[]};
+    const candidates = targetIds.filter(id => found.every(sample => {
+      const state = sample.targets.find(row => row.target_id === id);
+      return state?.visibility === 'visible' && state.focused === true;
+    }));
+    if (candidates.length !== 1) {
+      return {confirmed:false,reason:'no_unique_focused_renderer',by_shell:[]};
+    }
+    observations.set(shellId, candidates[0]);
+  }
+  if (new Set(observations.values()).size !== shellIds.length) {
+    return {confirmed:false,reason:'renderer_not_distinct_per_shell',by_shell:[]};
+  }
+  // Any renderer claimed by one shell must not also look focused on another.
+  for (const [shellId,targetId] of observations) {
+    for (const sample of samples) {
+      if (sample.shell_tab_id === shellId) continue;
+      const other = sample.targets.find(row => row.target_id === targetId);
+      if (other?.visibility === 'visible' && other.focused === true) {
+        return {confirmed:false,reason:'ambiguous_cross_shell_focus',by_shell:[]};
+      }
+    }
+  }
+  return {
+    confirmed:true,reason:'repeated_unique_focus_visibility',
+    by_shell:[...observations.entries()].map(([shell_tab_id,target_id])=>({shell_tab_id,target_id})),
+  };
+}
+
+export async function probeShellRendererCorrespondence({
+  shell_tab_ids = [], target_ids = [], _deps,
+} = {}) {
+  const ids = [...new Set(shell_tab_ids.map(String))];
+  const targetsWanted = [...new Set(target_ids.map(String))];
+  if (ids.length < 2 || ids.length > 4 || targetsWanted.length < 2 || targetsWanted.length > 8) {
+    throw new Error('Probe requires 2-4 physical shell IDs and 2-8 renderer IDs.');
+  }
+  const tabs = await (_deps?.listShellTabs || listShellTabs)();
+  const current = await (_deps?.listTargets || listCdpTargets)();
+  const active = tabs.find(tab => tab.active)?.shell_tab_id;
+  if (!active) throw new Error('No unique active Desktop shell tab to restore.');
+  for (const id of ids) {
+    if (!tabs.some(tab => tab.shell_tab_id === id)) {
+      throw new Error('Unknown shell_tab_id: refresh tab_list.');
+    }
+  }
+  for (const id of targetsWanted) {
+    if (!current.some(row => row.id === id && isChartPageTarget(row))) {
+      throw new Error('Unknown or stale chart target_id: refresh tab_list.');
+    }
+  }
+  const shell = _deps?.withShell || withShell;
+  const probeTarget = _deps?.probeTarget || (id => withTarget(id, evalIn => evalIn(
+    "({visibility:document.visibilityState,focused:document.hasFocus()," +
+    "title:String(document.title||'').slice(0,100),url:location.href})"
+  ), 1500));
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve,ms)));
+  const samples = [];
+  let restoreError = null;
+  try {
+    // Two full cycles, verifying repeatability without relying on cached IDs.
+    for (let pass=0;pass<2;pass++) {
+      for (const id of ids) {
+        await shell(evalIn => selectShellTab(evalIn, id, wait));
+        await wait(180);
+        const targetStates = await Promise.all(targetsWanted.map(async target_id => {
+          try { return {target_id,...await probeTarget(target_id)}; }
+          catch(error){return {target_id,error:String(error?.message || error).slice(0,100)};}
+        }));
+        samples.push({pass,shell_tab_id:id,targets:targetStates});
+      }
+    }
+  } finally {
+    try { await shell(evalIn => selectShellTab(evalIn, active, wait)); }
+    catch(error){restoreError = String(error?.message || error);}
+  }
+  const witness = restoreError
+    ? {confirmed:false,reason:'could_not_restore_active_shell',by_shell:[]}
+    : rankShellRendererWitnesses(samples,ids,targetsWanted);
+  return {
+    success:true,read_only_chart_state:true,
+    original_active_shell_tab_id:active,restored:!restoreError,
+    restore_error:restoreError,
+    witness,samples,
+    caution:'A single visibility or title result does not prove identity; never close a worker by guessing.',
+  };
+}
+
 /** Exact live CDP target attachment handles duplicate chart/layout IDs. */
 export async function attachChartTarget({ target_id, _deps } = {}) {
   const id = String(target_id || '').trim();

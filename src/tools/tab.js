@@ -1,17 +1,52 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/tab.js';
+import { auditWorkerTargetCandidates } from '../core/worker-provision.js';
 import { isWorkerOwnedTab, status as workerStatus } from '../core/worker.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerTabTools(server) {
   server.registerTool('tab_list', {
-    description: 'List all open TradingView Desktop chart tabs. This does not close or exit the TradingView application.',
-    inputSchema: {},
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  }, async () => {
-    try { return jsonResult(await core.list()); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    description: 'List current chart and shell tabs. Optionally include an all-candidate worker renderer audit and bounded physical-tab focus witness (restores selected tab). Never closes any tab.',
+    inputSchema: {
+      audit_worker_slot: z.coerce.number().int().min(0).max(49).optional(),
+      probe_shell_tab_ids: z.array(z.string()).min(2).max(4).optional(),
+      probe_target_ids: z.array(z.string()).min(2).max(8).optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, async ({audit_worker_slot,probe_shell_tab_ids,probe_target_ids} = {}) => {
+    try {
+      const snapshot = await core.list();
+      if (audit_worker_slot !== undefined) {
+        snapshot.worker_target_audit = await auditWorkerTargetCandidates({slot:audit_worker_slot});
+      }
+      if (probe_shell_tab_ids || probe_target_ids) {
+        if (!probe_shell_tab_ids || !probe_target_ids) {
+          throw new Error('Both probe_shell_tab_ids and probe_target_ids are required.');
+        }
+        snapshot.shell_renderer_probe = await withTopologyMutationLock('tab_list_probe',()=> 
+          core.probeShellRendererCorrespondence({
+            shell_tab_ids:probe_shell_tab_ids,target_ids:probe_target_ids,
+          })
+        );
+      }
+      return jsonResult(snapshot);
+    } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.registerTool('tab_probe_identity', {
+    description: 'Read-only chart-state shell/renderer correspondence probe. Visually cycles only explicitly named physical tabs and restores the original active tab. Reports unverified mapping if focus/visibility evidence is ambiguous; never closes tabs.',
+    inputSchema: {
+      shell_tab_ids: z.array(z.string()).min(2).max(4),
+      target_ids: z.array(z.string()).min(2).max(8),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, async ({shell_tab_ids,target_ids}) => {
+    try {
+      return jsonResult(await withTopologyMutationLock('tab_probe_identity', () =>
+        core.probeShellRendererCorrespondence({shell_tab_ids,target_ids})
+      ));
+    } catch(err){return jsonResult({success:false,error:err.message},true);}
   });
 
   server.registerTool('tab_attach', {
