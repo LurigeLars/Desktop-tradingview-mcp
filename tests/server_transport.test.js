@@ -197,7 +197,9 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
       openWorldHint: false,
     });
     assert.deepEqual(byName.get('tab_list').annotations, {
-      readOnlyHint: true,
+      // Optional identity probe changes the visibly selected physical tab and
+      // then restores it; therefore tab_list is not strictly read-only.
+      readOnlyHint: false,
       destructiveHint: false,
       openWorldHint: false,
     });
