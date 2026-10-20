@@ -14,6 +14,21 @@ export function registerTabTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.registerTool('tab_probe_identity', {
+    description: 'Read-only chart-state shell/renderer correspondence probe. Visually cycles only explicitly named physical tabs and restores the original active tab. Reports unverified mapping if focus/visibility evidence is ambiguous; never closes tabs.',
+    inputSchema: {
+      shell_tab_ids: z.array(z.string()).min(2).max(4),
+      target_ids: z.array(z.string()).min(2).max(8),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, async ({shell_tab_ids,target_ids}) => {
+    try {
+      return jsonResult(await withTopologyMutationLock('tab_probe_identity', () =>
+        core.probeShellRendererCorrespondence({shell_tab_ids,target_ids})
+      ));
+    } catch(err){return jsonResult({success:false,error:err.message},true);}
+  });
+
   server.registerTool('tab_attach', {
     description: 'Attach to an exact live CDP target_id from tab_list (supports duplicate layouts), or to a unique chart_id. Rediscover IDs after TradingView restart. Worker tabs are protected.',
     inputSchema: {
