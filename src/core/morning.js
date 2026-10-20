@@ -247,6 +247,7 @@ export async function runMorningBrief({
     : normalizeStringArray(study_filters, 'study_filters');
 
   const snapshotArgs = {
+    consumer: 'morning_brief',
     mode: 'decision',
     bars: requestedBars,
     include_studies: true,
