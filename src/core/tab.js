@@ -416,6 +416,13 @@ export async function inspectShellTabMetadata({ shell_tab_ids = [], _deps } = {}
     'elementType:String(fiber.elementType?.displayName||fiber.elementType?.name||fiber.elementType||"").slice(0,70),' +
     'tag:fiber.tag,props:describe(fiber.memoizedProps),state:describe(node?.state),' +
     'memoizedState:describe(fiber.memoizedState),' +
+    'title:describe(node?.state?.title),' +
+    'tabStoreKind:Array.isArray(node?.state?.tabs)?"array":typeof node?.state?.tabs,' +
+    'tabStoreEntries:Array.isArray(node?.state?.tabs)?node.state.tabs.filter(entry=>' +
+    'wanted.has(String(entry?.id||entry?.tabId||entry?.tab_id||""))).slice(0,4).map(entry=>({' +
+    'fields:describe(entry),keyFields:describe(entry?.data),' +
+    'title:describe(entry?.title),location:describe(entry?.location)' +
+    '})):[],' +
     '});}' +
     'return {shell_tab_id:tab.id,label:String(tab.textContent||"").slice(0,100),' +
     'attributes:Array.from(tab.attributes||[]).map(a=>[a.name,String(a.value).slice(0,90)]).slice(0,12),' +
