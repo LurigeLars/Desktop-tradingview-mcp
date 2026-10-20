@@ -3,6 +3,7 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/tab.js';
 import { auditWorkerTargetCandidates } from '../core/worker-provision.js';
 import { isWorkerOwnedTab, status as workerStatus } from '../core/worker.js';
+import { planPersonalLayoutOpen } from '../core/personal-routing.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerTabTools(server) {
@@ -110,32 +111,22 @@ export function registerTabTools(server) {
           if (saved.error) throw new Error('Saved chart lookup failed: ' + saved.error);
           const selected = resolveSavedLayout(saved.layouts, requested);
           if (!selected.chart_id) throw new Error('Saved layout has no chart URL token: ' + selected.name);
-          const tabState = await core.list();
-          const matches = (tabState.tabs || []).filter(t =>
-            t.is_chart && String(t.chart_id) === String(selected.chart_id)
-          );
-          const currentWorkers = workerStatus();
-          if (matches.some(t => isWorkerOwnedTab(t, currentWorkers)) ||
-              (currentWorkers.worker_tabs || []).some(w =>
-                String(w.chart_id) === String(selected.chart_id))) {
-            throw new Error('Cannot open or reuse a protected worker layout using interactive tab_new.');
-          }
-          if (!force_new_tab && matches.length > 1) {
-            throw new Error('Multiple personal tabs for the saved layout already exist; tab_attach by exact target_id and close duplicates explicitly.');
-          }
-          if (!force_new_tab && matches.length === 1) {
-            const attachment = await core.attachChartTarget({target_id: matches[0].id});
-            if (!attachment.success || attachment.chart_id !== String(selected.chart_id)) {
+          const route = planPersonalLayoutOpen({
+            chartId:selected.chart_id,
+            tabState:await core.list(),
+            workerState:workerStatus(),
+            forceNew:force_new_tab===true,
+          });
+          if(route.action==='reuse') {
+            const attachment = await core.attachChartTarget({target_id:route.target_id});
+            if(!attachment.success || attachment.chart_id!==String(selected.chart_id)) {
               throw new Error('Saved personal chart reuse failed exact target verification.');
             }
             return {
-              ...attachment,
-              action: 'existing_personal_layout_reused',
-              reused_existing_target: true,
-              opened_tabs: 0,
-              requested_layout: selected.name,
-              saved_layout_id: selected.id,
-              requested_chart_id: selected.chart_id,
+              ...attachment, action:'existing_personal_layout_reused',
+              reused_existing_target:true, opened_tabs:0,
+              requested_layout:selected.name,saved_layout_id:selected.id,
+              requested_chart_id:selected.chart_id,
             };
           }
           const opened = await core.newTab({ chart_id: selected.chart_id });
