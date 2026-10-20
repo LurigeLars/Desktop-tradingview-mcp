@@ -94,14 +94,18 @@ export function registerTabTools(server) {
         const tabs = await core.list();
         if (shell_tab_id) {
           const current = tabs.shell_tabs.find(tab => tab.shell_tab_id === shell_tab_id);
-          if (!current?.layout_name) throw new Error('Shell tab missing or unidentified; refresh tab_list.');
+          if (!current) throw new Error('Shell tab missing; refresh tab_list.');
+          const expected = expected_layout_name || current.layout_name;
+          if (!expected) {
+            throw new Error('React layout name is unavailable. Supply expected_layout_name from the visible shell tab label.');
+          }
           const state = workerStatus();
           const workerNames = (state.worker_tabs || []).map(tab => tab.layout_name).filter(Boolean);
-          if (workerNames.includes(current.layout_name) || /^DTV (?:Market|Worker)\b/i.test(current.layout_name)) {
+          if (workerNames.includes(expected) || /^DTV (?:Market|Worker)\b/i.test(expected)) {
             throw new Error('Refusing to close a DTV worker-owned layout.');
           }
           return core.closeShellTabById({
-            shell_tab_id, expected_layout_name: expected_layout_name || current.layout_name,
+            shell_tab_id, expected_layout_name: expected,
             protected_layout_names: workerNames,
           });
         }
