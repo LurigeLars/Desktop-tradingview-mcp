@@ -24,7 +24,7 @@ function createHarness({
       if (breakIdentity) change=true;
       return true;
     }
-    if (js.includes('var rows = []')) {
+    if (js.includes('rows = []')) {
       const m = js.match(/rows.length < (\d+)/), count = Number(m?.[1]);
       const before = js.match(/v\[0\] < (\d+)/);
       const subset = all.slice(earliest).filter(b=>!before||b.time<Number(before[1]));
