@@ -61,8 +61,8 @@ function makeProbe(before) {
         var v = b.valueAt(i);
         if (v && (${before === null ? 'true' : 'v[0] < ' + before})) eligible++;
       }
-      var fv = b.valueAt(first), lv = b.valueAt(last), more = false;
-      try { more = ms.requestMoreDataAvailable() === true; } catch (e) {}
+      var fv = b.valueAt(first), lv = b.valueAt(last), more = true;
+      try { more = ms.requestMoreDataAvailable() !== false; } catch (e) { /* probe is optional */ }
       return { symbol: api.symbol(), resolution: String(api.resolution()),
         loaded: b.size(), eligible: eligible, first_time: fv ? fv[0] : null,
         last_time: lv ? lv[0] : null, more: more };
