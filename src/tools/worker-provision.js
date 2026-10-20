@@ -1,9 +1,20 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
-import { provisionWorker, rebindPersistentWorkers } from '../core/worker-provision.js';
+import { provisionWorker, rebindPersistentWorkers, auditWorkerTargetCandidates } from '../core/worker-provision.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerWorkerProvisionTools(server) {
+  server.registerTool('worker_target_audit', {
+    description: 'Read-only audit of all chart renderer candidates for one registered worker slot, including mismatch/orphan candidates by identical chart ID. Never closes a chart.',
+    inputSchema: {
+      slot: z.coerce.number().int().min(0).max(49).describe('Registered worker slot, zero based.'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  }, async ({slot}) => {
+    try {return jsonResult(await auditWorkerTargetCandidates({slot}));}
+    catch(err){return jsonResult({success:false,error:err.message},true);}
+  });
+
   server.registerTool('worker_rebind', {
     description: 'Verify all five persisted worker layouts by exact chart IDs and live pane signatures, then refresh rotated CDP IDs WITHOUT opening, closing, saving or changing any chart. Dry-run by default.',
     inputSchema: {
