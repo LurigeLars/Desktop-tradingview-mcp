@@ -45,7 +45,7 @@ export function registerTabTools(server) {
   });
 
   server.registerTool('tab_new', {
-    description: 'Open another TradingView Desktop tab. Optionally navigate the new-tab target directly to a chart, or use the saved-layout picker workflow.',
+    description: 'Open another TradingView Desktop tab. Named saved layouts are resolved through TradingView saved-chart API, not the fragile new-tab picker. Duplicate instances of the same chart_id are supported.',
     inputSchema: {
       layout: z.string().optional().describe('"new" for a blank new layout, or a saved layout name (substring match). Omit to leave the tab on the new-tab page.'),
       name: z.string().optional().describe('Name for the new layout (used with layout: "new"; default "New layout")'),
@@ -55,10 +55,28 @@ export function registerTabTools(server) {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ layout, name, symbol, as_chart }) => {
     try {
-      return jsonResult(await withTopologyMutationLock(
-        'tab_new',
-        () => core.newTab({ layout, name, symbol, as_chart }),
-      ));
+      return jsonResult(await withTopologyMutationLock('tab_new', async () => {
+        const requested = String(layout || '').trim();
+        if (requested && requested.toLowerCase() !== 'new' && !symbol && !as_chart) {
+          // The Desktop landing-page layout picker can be blank even when the
+          // user's saved charts exist. Resolve the exact saved chart identity
+          // *before* creating a new physical Desktop tab, so failures leave
+          // no orphan new-tab shell behind.
+          const { layoutList, resolveSavedLayout } = await import('../core/ui.js');
+          const saved = await layoutList();
+          if (saved.error) throw new Error('Saved chart lookup failed: ' + saved.error);
+          const selected = resolveSavedLayout(saved.layouts, requested);
+          if (!selected.chart_id) throw new Error('Saved layout has no chart URL token: ' + selected.name);
+          const opened = await core.newTab({ chart_id: selected.chart_id });
+          return {
+            ...opened,
+            requested_layout: selected.name,
+            saved_layout_id: selected.id,
+            requested_chart_id: selected.chart_id,
+          };
+        }
+        return core.newTab({ layout, name, symbol, as_chart });
+      }));
     }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
