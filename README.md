@@ -620,3 +620,17 @@ By using this software, you acknowledge and agree that:
 MIT — see [LICENSE](LICENSE) for details.
 
 The MIT license applies to the source code of this project only. It does not grant any rights to TradingView's software, data, trademarks, or intellectual property.
+
+## Desktop tab identity and restart recovery
+
+A saved chart layout is **not** a physical Desktop tab. Several tabs may use the same `chart_id`.
+CDP `target_id` values and Desktop `shell_tab_id` values must be rediscovered after every restart.
+
+- `tab_list`: lists chart renderers in `tabs` plus distinct physical `shell_tabs` (`shell_tab_id`, `layout_name`, `active`). Shell discovery fails closed.
+- `tab_close(shell_tab_id, expected_layout_name)`: closes exactly one physical Desktop tab even when layout names repeat. Worker tabs are protected.
+- `tab_switch(shell_tab_id, expected_layout_name)`: switches the visible physical Desktop tab even when layout names repeat.
+- `tab_attach(target_id)`: selects an exact current CDP chart renderer for editing, including duplicate `chart_id` instances, while protecting workers.
+- `tab_attach(chart_id)`: legacy shortcut for uniquely opened chart layouts; `tab_new` continues to create/open tabs.
+
+After restart, always call `tab_list` again. Do not reuse previous session IDs or infer an exact renderer from a duplicate layout name.
+The shell and renderer inventories are intentionally distinct. When a shell-to-renderer pairing cannot be proven, do not infer it; choose the exact target from the fresh renderer inventory before editing.

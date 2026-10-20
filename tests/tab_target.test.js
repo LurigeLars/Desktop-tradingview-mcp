@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attachChart, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline } from '../src/core/tab.js';
+import { attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline } from '../src/core/tab.js';
 import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
@@ -634,3 +634,112 @@ test('saved-layout attachment uses URL token and never silently discards unsaved
   assert.deepEqual(calls, ['eh2ouJQ6']);
 });
 
+
+
+test('physical shell tab listing distinguishes duplicate layout instances', async () => {
+  const tabs = [
+    {index:0,shell_tab_id:'desktop-a',layout_name:'Stocks',active:false},
+    {index:1,shell_tab_id:'desktop-b',layout_name:'Stocks',active:true},
+    {index:2,shell_tab_id:'desktop-c',layout_name:'Stocks',active:false},
+  ];
+  const shell = async fn => fn(async () => tabs.map(row => ({...row})));
+  const result = await listShellTabs({_deps:{withShell:shell}});
+  assert.equal(result.length, 3);
+  assert.deepEqual(result.map(row => row.shell_tab_id), ['desktop-a','desktop-b','desktop-c']);
+  assert.deepEqual(result.map(row => row.layout_name), ['Stocks','Stocks','Stocks']);
+  await assert.rejects(
+    listShellTabs({_deps:{withShell:async fn=>fn(async()=>[tabs[0],tabs[0]])}}),
+    /missing or duplicated/
+  );
+});
+
+test('physical shell identity refreshes after a Desktop restart without cached CDP IDs', async () => {
+  const snapshot = shellId => ({
+    shell_tab_id:shellId,layout_name:'Stocks',index:0,active:false,
+  });
+  let current = snapshot('previous-session');
+  let selected = false;
+  const shell = async fn => fn(async expression => {
+    if (expression.includes('Array.from(document.querySelectorAll')) return [current];
+    if (expression.includes('.tab.active')) return true;
+    if (expression.includes('tab.click()')) {selected=true;return true;}
+    throw new Error('Unexpected shell expression: '+expression);
+  });
+  current = snapshot('new-session');
+  const switched = await switchShellTab({
+    shell_tab_id:'new-session',expected_layout_name:'Stocks',
+    _deps:{withShell:shell,wait:async()=>{}},
+  });
+  assert.equal(switched.success,true);
+  assert.equal(selected,true);
+  await assert.rejects(switchShellTab({
+    shell_tab_id:'previous-session',_deps:{withShell:shell},
+  }),/Stale shell_tab_id/);
+});
+
+test('shell close selects one duplicate layout by physical ID and preserves its peers', async () => {
+  const tabs=[
+    {shell_tab_id:'keep',layout_name:'Stocks'},
+    {shell_tab_id:'close-this',layout_name:'Stocks'},
+    {shell_tab_id:'other',layout_name:'Futures'},
+  ];
+  let active=null;
+  const shell=async fn=>fn(async expression=>{
+    if(expression.includes('Array.from(document.querySelectorAll'))return tabs.map((x,i)=>({...x,index:i}));
+    if(expression.includes('const k=Object.keys(tab).find'))return tabs.find(x=>expression.includes(JSON.stringify(x.shell_tab_id)))?.layout_name || null;
+    if(expression.includes("const close=tab.querySelector")) {
+      const id=JSON.parse(expression.match(/getElementById\(("[^"]+")\)/)[1]);
+      assert.equal(id,'close-this');const index=tabs.findIndex(x=>x.shell_tab_id===id);
+      if(index<0)return false; tabs.splice(index,1);return true;
+    }
+    if(expression.includes('.tab.active'))return true;
+    if(expression.includes('tab.click()')){active='close-this';return true;}
+    if(expression.startsWith('!!document.getElementById'))return tabs.some(x=>expression.includes(JSON.stringify(x.shell_tab_id)));
+    throw new Error('Unexpected shell expression: '+expression);
+  });
+  const result=await closeShellTabById({
+    shell_tab_id:'close-this', expected_layout_name:'Stocks',
+    protected_layout_names:['DTV Market 01'],
+    _deps:{withShell:shell,wait:async()=>{}},
+  });
+  assert.equal(result.success,true);
+  assert.equal(active,'close-this');
+  assert.deepEqual(tabs.map(x=>x.shell_tab_id),['keep','other']);
+});
+
+test('shell close fails closed for workers, unknown layouts and mismatched stale identities', async () => {
+  for (const row of [
+    {shell_tab_id:'a',layout_name:'DTV Market 01'},
+    {shell_tab_id:'a',layout_name:'Private Worker'},
+    {shell_tab_id:'a',layout_name:null},
+    {shell_tab_id:'a',layout_name:'Stocks'},
+  ]) {
+    const shell=async fn=>fn(async()=>[row,{shell_tab_id:'b',layout_name:'Stocks'}]);
+    await assert.rejects(closeShellTabById({
+      shell_tab_id:'a',expected_layout_name:row.layout_name==='Stocks'?'Something Else':undefined,
+      protected_layout_names:['Private Worker'],
+      _deps:{withShell:shell},
+    }),/worker-owned|missing|changed/);
+  }
+});
+
+test('exact chart target attachment disambiguates identical chart URLs', async () => {
+  const charts=[
+    {id:'first',type:'page',url:'https://www.tradingview.com/chart/same/'},
+    {id:'second',type:'page',url:'https://www.tradingview.com/chart/same/'},
+  ];
+  let attached=null;
+  const result=await attachChartTarget({
+    target_id:'second',
+    _deps:{
+      listTargets:async()=>charts,
+      reconnect:async id=>{attached=id},
+      current:async()=>({id:attached}),
+    },
+  });
+  assert.equal(result.target_id,'second');
+  assert.equal(result.chart_id,'same');
+  await assert.rejects(attachChartTarget({
+    target_id:'old-session',_deps:{listTargets:async()=>charts},
+  }),/Stale\/non-chart/);
+});
