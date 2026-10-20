@@ -212,7 +212,8 @@ function requireShellTab(tabs, shell_tab_id, expected_layout_name) {
     // tabs. The exact shell-tab id is still available; allow an explicit
     // expected layout only if the visible label ends with that full name.
     const normalizedLabel = String(tab.label || '').replace(/\s+/g, ' ').trim();
-    if (tab.layout_name !== null || !normalizedLabel.endsWith(' ' + expected)) {
+    const exactNewTab = expected === 'New tab' && normalizedLabel === 'New tab';
+    if (tab.layout_name !== null || !(exactNewTab || normalizedLabel.endsWith(' ' + expected))) {
       throw new Error('Layout name changed; refresh tab_list.');
     }
     tab.layout_name = expected;
@@ -260,7 +261,9 @@ export async function closeShellTabById({
       "if(!tab||!tab.matches('.tabs-container .tab'))return null;" +
       "return {name:("+readName+")(),label:String(tab.textContent||'').replace(/\\s+/g,' ').trim()};})()");
     if (!fresh || !(fresh.name === tab.layout_name ||
-      (fresh.name === null && fresh.label.endsWith(' ' + tab.layout_name)))) {
+      (fresh.name === null &&
+        (fresh.label.endsWith(' ' + tab.layout_name) ||
+          (tab.layout_name === 'New tab' && fresh.label === 'New tab'))))) {
       throw new Error('Shell layout identity changed before close.');
     }
     await selectShellTab(evalIn, tab.shell_tab_id, wait);
