@@ -12,13 +12,17 @@ export function registerTabTools(server) {
       audit_worker_slot: z.coerce.number().int().min(0).max(49).optional(),
       probe_shell_tab_ids: z.array(z.string()).min(2).max(4).optional(),
       probe_target_ids: z.array(z.string()).min(2).max(8).optional(),
+      inspect_shell_tab_ids: z.array(z.string()).min(1).max(4).optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, async ({audit_worker_slot,probe_shell_tab_ids,probe_target_ids} = {}) => {
+  }, async ({audit_worker_slot,probe_shell_tab_ids,probe_target_ids,inspect_shell_tab_ids} = {}) => {
     try {
       const snapshot = await core.list();
       if (audit_worker_slot !== undefined) {
         snapshot.worker_target_audit = await auditWorkerTargetCandidates({slot:audit_worker_slot});
+      }
+      if (inspect_shell_tab_ids) {
+        snapshot.shell_tab_details = await core.inspectShellTabMetadata({shell_tab_ids:inspect_shell_tab_ids});
       }
       if (probe_shell_tab_ids || probe_target_ids) {
         if (!probe_shell_tab_ids || !probe_target_ids) {

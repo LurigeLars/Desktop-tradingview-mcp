@@ -388,6 +388,41 @@ export async function probeShellRendererCorrespondence({
   };
 }
 
+
+/** Strictly read-only inspection of Electron shell tab metadata for stale-tab troubleshooting. */
+export async function inspectShellTabMetadata({ shell_tab_ids = [], _deps } = {}) {
+  const ids = [...new Set((shell_tab_ids || []).map(String))];
+  if (!ids.length || ids.length > 4) throw new Error('Choose between 1 and 4 exact shell tab IDs.');
+  const shellTabs = await (_deps?.listShellTabs || listShellTabs)();
+  if (ids.some(id => !shellTabs.some(t => t.shell_tab_id === id))) {
+    throw new Error('Unknown shell tab identity; refresh tab_list.');
+  }
+  const shell = _deps?.withShell || withShell;
+  return shell(evalIn => evalIn('(function(){const wanted=new Set(' + JSON.stringify(ids) + ');' +
+    "const tabs=Array.from(document.querySelectorAll('.tabs-container .tab'));" +
+    'return tabs.filter(t=>wanted.has(t.id)).map(tab=>{' +
+    "const reactPropsKey=Object.keys(tab).find(k=>k.indexOf('__reactProps')===0);" +
+    "const props=reactPropsKey?tab[reactPropsKey]||{}:{};" +
+    "const fiberKey=Object.keys(tab).find(k=>k.indexOf('__reactFiber')===0);" +
+    'let fiber=fiberKey?tab[fiberKey]:null;const ancestors=[];' +
+    'const describe=obj=>{if(!obj||typeof obj!=="object")return null;' +
+    "const keys=Object.keys(obj).slice(0,65);" +
+    'const primitive={};for(const key of keys){' +
+    'if(!/^(id|tabId|viewId|webContentsId|name|title|url|label|active|isActive|isReady|isLoading|status|loading|symbol|key|type)$/i.test(key))continue;' +
+    'try{const v=obj[key];if(["string","number","boolean"].includes(typeof v))primitive[key]=String(v).slice(0,100);}catch{}}' +
+    'return {keys,primitive};};' +
+    'for(let i=0;fiber&&i<7;i++,fiber=fiber.return){' +
+    'const node=fiber.stateNode;ancestors.push({' +
+    'elementType:String(fiber.elementType?.displayName||fiber.elementType?.name||fiber.elementType||"").slice(0,70),' +
+    'tag:fiber.tag,props:describe(fiber.memoizedProps),state:describe(node?.state),' +
+    'memoizedState:describe(fiber.memoizedState),' +
+    '});}' +
+    'return {shell_tab_id:tab.id,label:String(tab.textContent||"").slice(0,100),' +
+    'attributes:Array.from(tab.attributes||[]).map(a=>[a.name,String(a.value).slice(0,90)]).slice(0,12),' +
+    'dom_props:describe(props),react_ancestors:ancestors};' +
+    '});})()'));
+}
+
 /** Exact live CDP target attachment handles duplicate chart/layout IDs. */
 export async function attachChartTarget({ target_id, _deps } = {}) {
   const id = String(target_id || '').trim();
