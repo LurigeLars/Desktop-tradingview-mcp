@@ -95,7 +95,22 @@ export function registerWorkerTools(server) {
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
-    try { return jsonResult({ ...core.status(), mutation_lock: topologyMutationLockStatus() }); }
+    try {
+      const audit = workerUsageReport();
+      const reads = {}, consumers = {};
+      let requests = 0;
+      for (const day of Object.values(audit.days || {})) {
+        requests += day.requests || 0;
+        for (const [h,item] of Object.entries(day.handles || {}))
+          reads[h] = (reads[h] || 0) + (item.reads || 0);
+        for (const [k,item] of Object.entries(day.consumers || {}))
+          consumers[k] = (consumers[k] || 0) + (item.requests || 0);
+      }
+      return jsonResult({...core.status(), mutation_lock:topologyMutationLockStatus(),
+        usage_summary:{window_days:14, observed_request_count:requests,
+          pane_reads_by_handle:reads, declared_consumer_requests:consumers,
+          note:'Call worker_usage for per-day details; zero means not observed, not never needed.'}});
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
