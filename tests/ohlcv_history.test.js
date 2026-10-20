@@ -9,19 +9,20 @@ import { getOhlcvHistory } from '../src/core/history.js';
 const ORIGIN = 1700000000;
 function createHarness({
   total = 2500, initiallyLoaded = 120, symbol = 'BATS:NVDA', resolution = '1',
-  neverGrows = false, breakIdentity = false, duplicate = false,
+  neverGrows = false, breakIdentity = false, breakTarget = false, duplicate = false,
 } = {}) {
   const all = Array.from({length:total}, (_, i) => ({
     time:ORIGIN+i*60, open:100+i/10000, high:101+i/10000,
     low:99+i/10000, close:100+i/10000, volume:200+i%100
   }));
   if (duplicate) all[total-2].time = all[total-3].time;
-  let earliest = Math.max(0, total-initiallyLoaded), calls = 0, probes = 0, change = false;
+  let earliest = Math.max(0, total-initiallyLoaded), calls = 0, probes = 0, change = false, target = 'unit-test-chart';
   const evaluate = async js => {
     if (js.includes('.requestMoreData(1000)')) {
       calls++;
       if (!neverGrows) earliest = Math.max(0, earliest-1000);
       if (breakIdentity) change=true;
+      if (breakTarget) target = 'different-chart';
       return true;
     }
     if (js.includes('rows = []')) {
@@ -43,7 +44,7 @@ function createHarness({
     throw new Error('Unexpected evaluate call: '+js.slice(0,200));
   };
   return { expected_symbol:symbol, expected_resolution:resolution,
-    _deps:{evaluate,delay:async()=>{}},
+    _deps:{evaluate,delay:async()=>{},getTargetInfo:async()=>({id:target})},
     get calls(){return calls;},get probes(){return probes;},all };
 }
 
@@ -99,6 +100,10 @@ describe('DTV paginated OHLCV history', () => {
   it('fails closed when the attached symbol changes while loading',async()=>{
     const h=createHarness({breakIdentity:true});
     await assert.rejects(getOhlcvHistory({expected_symbol:h.expected_symbol,expected_resolution:'1',count:1000,_deps:h._deps}),/CHART_CHANGED/);
+  });
+  it('rejects a target switch even when symbol/timeframe are unchanged',async()=>{
+    const h=createHarness({breakTarget:true});
+    await assert.rejects(getOhlcvHistory({expected_symbol:h.expected_symbol,expected_resolution:'1',count:1000,_deps:h._deps}),/TARGET_CHANGED/);
   });
   it('fails closed on stalled historical loading',async()=>{
     const h=createHarness({neverGrows:true});
