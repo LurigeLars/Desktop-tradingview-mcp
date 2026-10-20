@@ -781,3 +781,43 @@ test('duplicate tabs without React layout name require exact visible suffix and 
   assert.equal(selected,true);
   assert.deepEqual(rows.map(x=>x.shell_tab_id),['keep','worker']);
 });
+
+
+test('exact unlabelled New tab may be closed safely by its physical shell id', async () => {
+  const tabs=[
+    {index:0,shell_tab_id:'original',layout_name:'Stocks',label:'CRWV Stocks'},
+    {index:1,shell_tab_id:'temporary',layout_name:null,label:'New tab'},
+    {index:2,shell_tab_id:'worker',layout_name:'DTV Market 01',label:'QQQ / DTV Market 01'},
+  ];
+  const shell=async fn=>fn(async expression=>{
+    if(expression.includes('Array.from(document.querySelectorAll')) return tabs;
+    if(expression.includes('return {name:')) return {name:null,label:'New tab'};
+    if(expression.includes('.tab.active')) return true;
+    if(expression.includes('tab.click()')) return true;
+    if(expression.includes('const close=tab.querySelector')){
+      assert.equal(expression.includes('"temporary"'),true);
+      tabs.splice(1,1); return true;
+    }
+    if(expression.startsWith('!!document.getElementById')) return tabs.some(x=>expression.includes(JSON.stringify(x.shell_tab_id)));
+    throw new Error('Unexpected expression: '+expression);
+  });
+  const result=await closeShellTabById({
+    shell_tab_id:'temporary',expected_layout_name:'New tab',
+    protected_layout_names:['DTV Market 01'],_deps:{withShell:shell,wait:async()=>{}},
+  });
+  assert.equal(result.success,true);
+  assert.deepEqual(tabs.map(x=>x.shell_tab_id),['original','worker']);
+});
+
+test('New tab label fallback rejects non-exact labels and protects workers', async () => {
+  for(const label of ['Another New tab','New tab loading','DTV Worker 06','CRWV Stocks']) {
+    const shell=async fn=>fn(async()=>[
+      {index:0,shell_tab_id:'temp',layout_name:null,label},
+      {index:1,shell_tab_id:'worker',layout_name:'DTV Market 01',label:'QQQ / DTV Market 01'},
+    ]);
+    await assert.rejects(closeShellTabById({
+      shell_tab_id:'temp',expected_layout_name:'New tab',
+      protected_layout_names:['DTV Market 01'],_deps:{withShell:shell},
+    }),/Layout name changed/);
+  }
+});
