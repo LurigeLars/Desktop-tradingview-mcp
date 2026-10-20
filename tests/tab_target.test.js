@@ -686,6 +686,7 @@ test('shell close selects one duplicate layout by physical ID and preserves its 
   let active=null;
   const shell=async fn=>fn(async expression=>{
     if(expression.includes('Array.from(document.querySelectorAll'))return tabs.map((x,i)=>({...x,index:i}));
+    if(expression.includes('return {name:'))return {name:'Stocks',label:'CRWV 62.20 Stocks'};
     if(expression.includes('const k=Object.keys(tab).find'))return tabs.find(x=>expression.includes(JSON.stringify(x.shell_tab_id)))?.layout_name || null;
     if(expression.includes("const close=tab.querySelector")) {
       const id=JSON.parse(expression.match(/getElementById\(("[^"]+")\)/)[1]);
