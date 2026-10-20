@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline } from '../src/core/tab.js';
+import { inspectShellTabMetadata, rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline } from '../src/core/tab.js';
 import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
@@ -877,4 +877,29 @@ test('shell renderer probe rotates physically identified tabs and restores origi
   assert.equal(result.witness.confirmed,true);
   assert.equal(active,'original');
   assert.deepEqual(operations,['shellA','shellB','shellA','shellB','original']);
+});
+
+
+test('shell metadata inspection is bounded to caller verified current shell IDs', async () => {
+  const tabs=[
+    {shell_tab_id:'valid',label:'BRN1! DTV Worker 06'},
+    {shell_tab_id:'keep',label:'NQ1! DTV Worker 06'},
+  ];
+  let expressionRead=null;
+  const result=await inspectShellTabMetadata({shell_tab_ids:['valid'],_deps:{
+    listShellTabs:async()=>tabs,
+    withShell:async fn=>fn(async expression=>{
+      expressionRead=expression;
+      return [{shell_tab_id:'valid',label:'BRN1! DTV Worker 06',attributes:[],react_ancestors:[]}];
+    }),
+  }});
+  assert.equal(result.length,1);
+  assert.equal(result[0].shell_tab_id,'valid');
+  assert.equal(expressionRead.includes('document.querySelectorAll'),true);
+  await assert.rejects(inspectShellTabMetadata({
+    shell_tab_ids:['absent'],_deps:{listShellTabs:async()=>tabs},
+  }),/Unknown shell tab identity/);
+  await assert.rejects(inspectShellTabMetadata({
+    shell_tab_ids:['a','b','c','d','e'],_deps:{listShellTabs:async()=>tabs},
+  }),/between 1 and 4/);
 });
