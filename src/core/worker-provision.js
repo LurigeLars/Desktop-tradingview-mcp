@@ -385,6 +385,95 @@ export async function retireNonmatchingWorkerRenderer({
   };
 }
 
+
+/** Retire a physical shell whose mismatching renderer has already been removed. */
+export async function cleanupRetiredWorkerShell({
+  slot,shell_tab_id,live_shell_tab_id,retired_target_id,retired_symbol,
+  dry_run=true,_deps,
+}={}) {
+  const deps=resolveDeps(_deps);
+  const state=deps.status();
+  const index=Number(slot);
+  const owned=(state.worker_tabs||[]).find(t=>Number(t.slot)===index);
+  if(!owned?.persistent_layout || !owned.chart_id || !owned.target_id) {
+    throw new Error('Registered persistent worker identity required.');
+  }
+  const retiredId=String(retired_target_id||'').trim();
+  if(!retiredId || retiredId===String(owned.target_id)) {
+    throw new Error('Retired target ID must be distinct from the registered worker.');
+  }
+  const targets=await deps.listTargets();
+  if(targets.some(t=>String(t.id)===retiredId)) {
+    throw new Error('Retired renderer is still alive; do not close its shell tab.');
+  }
+  const audit=await auditWorkerTargetCandidates({slot:index,_deps});
+  if(audit.candidate_count!==1 || audit.matching_count!==1 ||
+      audit.nonmatching_count!==0 ||
+      !audit.candidates[0].registered_target_id ||
+      String(audit.candidates[0].target_id)!==String(owned.target_id)) {
+    throw new Error('Expected one and only one live verified worker renderer.');
+  }
+  const verified=await rebindPersistentWorkers({dry_run:true,_deps});
+  if(!verified.success || verified.verified_slots.length!==state.topology_plan.tab_count ||
+     verified.missing_slots.length || verified.duplicate_slots.length ||
+     verified.conflicts.length) {
+    throw new Error('Worker fleet not fully verified.');
+  }
+  const registeredPaneSymbols=audit.candidates[0].panes
+    .map(x=>String(x.symbol||'').split(':').pop())
+    .filter(Boolean);
+  const retiredSymbol=String(retired_symbol||'').trim();
+  if(!retiredSymbol || registeredPaneSymbols.includes(retiredSymbol)) {
+    throw new Error('Stale tab symbol cannot match the active worker pane symbols.');
+  }
+  const readShell=_deps?.listShellTabs || (()=>tabCore.listShellTabs());
+  const shells=await readShell();
+  const same=shells.filter(x=>x.layout_name===String(owned.layout_name));
+  if(same.length!==2 || String(shell_tab_id)===String(live_shell_tab_id)) {
+    throw new Error('Exactly two different physical shell tabs for this worker required.');
+  }
+  const stale=same.find(x=>x.shell_tab_id===String(shell_tab_id));
+  const keep=same.find(x=>x.shell_tab_id===String(live_shell_tab_id));
+  const starts=(label,symbol)=>{
+    const val=String(label||'').trim();
+    return val.startsWith(symbol) && /^[▲▼↗↘ ]|^$/.test(val.slice(symbol.length,symbol.length+1));
+  };
+  const retainSymbol=registeredPaneSymbols.find(symbol=>keep && starts(keep.label,symbol));
+  if(!stale || stale.active || !starts(stale.label,retiredSymbol) || !retainSymbol ||
+      retiredSymbol===retainSymbol) {
+    throw new Error('Shell labels do not uniquely witness stale vs active worker.');
+  }
+  const report={success:true,dry_run:dry_run!==false,slot:index,
+    layout_name:owned.layout_name,chart_id:owned.chart_id,
+    retired_target_id:retiredId,stale_shell_tab_id:stale.shell_tab_id,
+    registered_target_id:owned.target_id,retained_shell_tab_id:keep.shell_tab_id,
+    retired_symbol:retiredSymbol,retained_symbol:retainSymbol,
+    verified_slots:verified.verified_slots};
+  if(dry_run!==false)return report;
+  const inspectedAgain=await auditWorkerTargetCandidates({slot:index,_deps});
+  if(inspectedAgain.candidate_count!==1 ||
+      inspectedAgain.candidates[0].target_id!==String(owned.target_id) ||
+      inspectedAgain.matching_count!==1 ||
+      (await deps.listTargets()).some(t=>String(t.id)===retiredId)) {
+    throw new Error('Worker target identity changed before shell close.');
+  }
+  const closer=_deps?.closeRetiredWorkerShell||tabCore.closeRetiredWorkerShell;
+  const closed=await closer({
+    shell_tab_id:stale.shell_tab_id,live_shell_tab_id:keep.shell_tab_id,
+    expected_layout_name:owned.layout_name,retired_symbol:retiredSymbol,
+    retained_symbol:retainSymbol,
+  });
+  const after=await rebindPersistentWorkers({dry_run:true,_deps});
+  const afterShell=await readShell();
+  return {...report,dry_run:false,closed,
+    remaining_shells:afterShell.filter(x=>x.layout_name===String(owned.layout_name)),
+    all_workers_verified:after.success &&
+       after.verified_slots.length===state.topology_plan.tab_count &&
+       !after.missing_slots.length && !after.duplicate_slots.length &&
+       !after.conflicts.length,
+    missing_slots_after:after.missing_slots,conflicts_after:after.conflicts};
+}
+
 /** Rebind restored persistent worker charts to NEW CDP IDs without creating,
  * modifying, saving or closing any chart. Refuse partial/ambiguous recovery. */
 export async function rebindPersistentWorkers({ dry_run = true, _deps } = {}) {
