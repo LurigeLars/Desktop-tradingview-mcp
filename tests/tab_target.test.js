@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline } from '../src/core/tab.js';
+import { rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline } from '../src/core/tab.js';
 import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
@@ -820,4 +820,61 @@ test('New tab label fallback rejects non-exact labels and protects workers', asy
       protected_layout_names:['DTV Market 01'],_deps:{withShell:shell},
     }),/Layout name changed/);
   }
+});
+
+
+test('shell renderer witness requires repeated exclusive focus in both shell tabs', () => {
+  const states = [
+    {shell_tab_id:'shellA',targets:[{target_id:'a',visibility:'visible',focused:true},{target_id:'b',visibility:'hidden',focused:false}]},
+    {shell_tab_id:'shellB',targets:[{target_id:'a',visibility:'hidden',focused:false},{target_id:'b',visibility:'visible',focused:true}]},
+    {shell_tab_id:'shellA',targets:[{target_id:'a',visibility:'visible',focused:true},{target_id:'b',visibility:'hidden',focused:false}]},
+    {shell_tab_id:'shellB',targets:[{target_id:'a',visibility:'hidden',focused:false},{target_id:'b',visibility:'visible',focused:true}]},
+  ];
+  const result=rankShellRendererWitnesses(states,['shellA','shellB'],['a','b']);
+  assert.equal(result.confirmed,true);
+  assert.deepEqual(result.by_shell,[
+    {shell_tab_id:'shellA',target_id:'a'},
+    {shell_tab_id:'shellB',target_id:'b'},
+  ]);
+  const ambiguous=states.map(x=>({ ...x,targets:x.targets.map(v=>({...v,focused:true,visibility:'visible'})) }));
+  assert.equal(rankShellRendererWitnesses(ambiguous,['shellA','shellB'],['a','b']).confirmed,false);
+  assert.equal(rankShellRendererWitnesses(states.slice(0,2),['shellA','shellB'],['a','b']).confirmed,false);
+});
+
+test('shell renderer probe rotates physically identified tabs and restores original', async () => {
+  let active='original';
+  const tabs=[
+    {shell_tab_id:'original',layout_name:'Stocks',active:true},
+    {shell_tab_id:'shellA',layout_name:'Worker',active:false},
+    {shell_tab_id:'shellB',layout_name:'Worker',active:false},
+  ];
+  const targets=[
+    {id:'a',type:'page',url:'https://www.tradingview.com/chart/w1/'},
+    {id:'b',type:'page',url:'https://www.tradingview.com/chart/w1/'},
+  ];
+  const operations=[];
+  const result=await probeShellRendererCorrespondence({
+    shell_tab_ids:['shellA','shellB'],target_ids:['a','b'],
+    _deps:{
+      listShellTabs:async()=>tabs,
+      listTargets:async()=>targets,
+      withShell:async fn=>fn(async expr=>{
+        if(expr.includes('tab.click()')){
+          const id=JSON.parse(expr.match(/getElementById\(("[^"]+")\)/)[1]);
+          active=id; operations.push(id); return true;
+        }
+        if(expr.includes('.tab.active')) return true;
+        throw new Error('Unexpected probe shell expression');
+      }),
+      probeTarget:async id=>({
+        visibility:((active==='shellA'&&id==='a')||(active==='shellB'&&id==='b'))?'visible':'hidden',
+        focused:(active==='shellA'&&id==='a')||(active==='shellB'&&id==='b'),
+      }),
+      wait:async()=>{},
+    },
+  });
+  assert.equal(result.restored,true);
+  assert.equal(result.witness.confirmed,true);
+  assert.equal(active,'original');
+  assert.deepEqual(operations,['shellA','shellB','shellA','shellB','original']);
 });
