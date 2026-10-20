@@ -264,6 +264,53 @@ export function persistentWorkerRecovery(state, topology, byHandle, inspectedTar
   return { bySlot, duplicatesBySlot, targetIds, pendingSlots, conflicts };
 }
 
+
+/** Read-only audit including worker-chart renderers that fail its pane signature. */
+export async function auditWorkerTargetCandidates({ slot, _deps } = {}) {
+  const deps = resolveDeps(_deps);
+  const state = deps.status();
+  const index = Number(slot);
+  if (!Number.isInteger(index) || index < 0 || index >= state.topology_plan.tab_count) {
+    throw new Error('Specify a registered non-negative worker slot.');
+  }
+  const owned = (state.worker_tabs || []).find(row => Number(row.slot) === index);
+  const plan = state.topology_plan.tabs.find(row => Number(row.tab_index) === index);
+  if (!owned?.chart_id || !plan) throw new Error('Registered worker slot has no saved chart identity.');
+  const targets = (await deps.listTargets()).filter(target =>
+    chartIdFromTarget(target) === String(owned.chart_id)
+  );
+  const inspected = await deps.inspectTargets(targets);
+  const byHandle = entryMap(state);
+  const entries = plan.handles.map(handle => byHandle.get(handle));
+  const candidates = inspected.map(item => {
+    const matches = Number(item.pane_count) === Number(plan.pane_count)
+      && entries.every((entry, paneIndex) => entry && paneMatchesEntry(entry, item.panes?.[paneIndex]));
+    return {
+      target_id:item.target_id,
+      chart_id:item.chart_id,
+      pane_count:item.pane_count,
+      registered_target_id:String(item.target_id) === String(owned.target_id),
+      worker_signature_matches:matches,
+      panes:(item.panes || []).map((pane,i)=>({
+        index:i,symbol:pane.resolved_symbol||null,resolution:pane.resolution||null,
+        error:pane.error||null,
+      })),
+    };
+  });
+  return {
+    success:true,read_only:true,slot:index,
+    layout_name:owned.layout_name,
+    chart_id:owned.chart_id,
+    registered_target_id:owned.target_id,
+    expected_pane_count:plan.pane_count,
+    candidate_count:candidates.length,
+    matching_count:candidates.filter(c=>c.worker_signature_matches).length,
+    nonmatching_count:candidates.filter(c=>!c.worker_signature_matches).length,
+    candidates,
+    note:'Nonmatching candidates are not proven orphan shell tabs. Correlate physical shell ownership before closing.',
+  };
+}
+
 /** Rebind restored persistent worker charts to NEW CDP IDs without creating,
  * modifying, saving or closing any chart. Refuse partial/ambiguous recovery. */
 export async function rebindPersistentWorkers({ dry_run = true, _deps } = {}) {
