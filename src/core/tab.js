@@ -290,6 +290,106 @@ export async function closeShellTabById({
 }
 
 
+
+/**
+ * Exact physical shell cleanup for a worker renderer which was already retired.
+ * Worker ownership and the retired renderer's original pane symbol must be
+ * independently validated by the higher-level worker reconciliation gate.
+ * This function NEVER permits a generic worker tab close.
+ */
+export async function closeRetiredWorkerShell({
+  shell_tab_id, live_shell_tab_id, expected_layout_name,
+  retired_symbol, retained_symbol, _deps,
+} = {}) {
+  const shell = _deps?.withShell || withShell;
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const list = _deps?.listShellTabs || (()=>listShellTabs({_deps:{withShell:shell}}));
+  const name = String(expected_layout_name || '').trim();
+  if (!/^DTV (?:Worker|Market) \d{2}$/i.test(name)) {
+    throw new Error('Expected a registered worker layout identity.');
+  }
+  const oldSymbol = String(retired_symbol||'').trim();
+  const keepSymbol = String(retained_symbol||'').trim();
+  if (!oldSymbol || !keepSymbol || oldSymbol===keepSymbol) {
+    throw new Error('Retired and retained symbol witnesses must be distinct.');
+  }
+  const oldId = String(shell_tab_id||'').trim();
+  const keepId = String(live_shell_tab_id||'').trim();
+  if (!oldId || !keepId || oldId===keepId) {
+    throw new Error('Two distinct exact physical shell IDs required.');
+  }
+  const tabs = await list();
+  const matching = tabs.filter(t=>t.layout_name===name);
+  if (matching.length !== 2) {
+    throw new Error('Expected exactly two physical tabs for worker layout.');
+  }
+  const gone = matching.find(t=>t.shell_tab_id===oldId);
+  const retained = matching.find(t=>t.shell_tab_id===keepId);
+  const begins = (label,symbol)=>{
+    const value=String(label||'').trim();
+    if (!value.startsWith(symbol)) return false;
+    const next=value.slice(symbol.length, symbol.length+1);
+    return next===''||next===' '||next==='▲'||next==='▼'||next==='↗'||next==='↘';
+  };
+  if (!gone || !retained || !begins(gone.label,oldSymbol) ||
+      !begins(retained.label,keepSymbol)) {
+    throw new Error('Physical worker shell symbol witness changed.');
+  }
+  if (gone.active) {
+    throw new Error('Refusing to close an active worker shell tab.');
+  }
+  const original = tabs.find(t=>t.active)?.shell_tab_id || null;
+  return shell(async evalIn => {
+    const id = JSON.stringify(oldId);
+    const other = JSON.stringify(keepId);
+    const found = await evalIn('(function(){' +
+      "const a=document.getElementById("+id+");" +
+      "const b=document.getElementById("+other+");" +
+      "if(!a||!b||!a.matches('.tabs-container .tab')||!b.matches('.tabs-container .tab'))return null;" +
+      "const title=tab=>{const k=Object.keys(tab).find(x=>x.indexOf('__reactFiber')===0);" +
+      "let f=k?tab[k]:null;for(let n=0;f&&n<8;n++,f=f.return){" +
+      "const x=f.stateNode?.state?.title?.name;if(typeof x==='string'&&x.trim())return x.trim();}" +
+      "return null;};" +
+      "return {oldLabel:String(a.textContent||'').trim(),liveLabel:String(b.textContent||'').trim()," +
+      "oldName:title(a),liveName:title(b),oldActive:a.classList.contains('active')};" +
+      '})()');
+    if (!found || found.oldName!==name || found.liveName!==name ||
+        found.oldActive || !begins(found.oldLabel,oldSymbol) ||
+        !begins(found.liveLabel,keepSymbol)) {
+      throw new Error('Worker shell proof changed during pre-close revalidation.');
+    }
+    const clicked = await evalIn('(function(){' +
+      "const tab=document.getElementById("+id+");" +
+      "if(!tab||tab.classList.contains('active'))return false;" +
+      "const close=tab.querySelector('.tab-close-button-container button, [class*=close] button, button[class*=close]');" +
+      'if(!close)return false;' +
+      "const key=Object.keys(close).find(x=>x.indexOf('__reactProps')===0);" +
+      'if(key&&typeof close[key]?.onClick==="function"){' +
+      'close[key].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:close,target:close});}' +
+      'else close.click(); return true;})()');
+    if (!clicked) throw new Error('Exact non-active orphan shell close control unavailable.');
+    let closed=false;
+    for(let i=0;i<20;i++){
+      if(!await evalIn("!!document.getElementById("+id+")")){closed=true;break;}
+      await wait(100);
+    }
+    if(!closed)throw new Error('Orphan physical shell tab remained open.');
+    const registeredRemains=await evalIn("!!document.getElementById("+other+")");
+    if(!registeredRemains)throw new Error('Registered worker physical shell disappeared unexpectedly.');
+    if(original && original!==oldId) {
+      const sameActive = await evalIn(
+        "document.querySelector('.tabs-container .tab.active')?.id === "+
+        JSON.stringify(original)
+      );
+      if(!sameActive && await evalIn("!!document.getElementById("+JSON.stringify(original)+")")) {
+        await selectShellTab(evalIn,original,wait);
+      }
+    }
+    return {success:true,action:'retired_worker_shell_closed',shell_tab_id:oldId,
+      registered_shell_tab_id:keepId,registered_shell_preserved:true};
+  });
+}
+
 /**
  * Inspect physical shell-to-CDP relationships without touching chart state.
  * The only UI action is visual tab selection; the original tab is restored.
