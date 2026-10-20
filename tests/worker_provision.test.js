@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   activePaneStates,
   auditWorkerTargetCandidates,
+  retireNonmatchingWorkerRenderer,
   buildWorkerLayoutName,
   closeTabByOwned,
   closeWorkerTargetGracefully,
@@ -1359,4 +1360,59 @@ test('worker audit exposes nonmatching identical-layout renderer without deletin
   assert.equal(report.candidate_count,2);
   assert.equal(report.candidates.find(t=>t.target_id==='extra').worker_signature_matches,false);
   assert.equal(report.candidates.find(t=>t.target_id==='extra').registered_target_id,false);
+});
+
+
+test('prune worker renderer requires full verified worker and an exact nonmatching target', async () => {
+  const state={
+    topology_plan:{tab_count:1,tabs:[{tab_index:0,pane_count:2,handles:['oil','nasdaq']}]},
+    worker_tabs:[{slot:0,target_id:'registered',chart_id:'same',persistent_layout:true,layout_name:'DTV Worker 06',pane_count:2}],
+    entries:[
+      {handle:'oil',symbol:'TVC:UKOIL',timeframe:'1',studies:[]},
+      {handle:'nasdaq',symbol:'CME_MINI:NQ1!',timeframe:'1',studies:[]},
+    ],
+  };
+  let targets=[
+    {id:'registered',url:'https://www.tradingview.com/chart/same/'},
+    {id:'extra',url:'https://www.tradingview.com/chart/same/'},
+  ];
+  const inspected=[
+    {target_id:'registered',chart_id:'same',pane_count:2,panes:[
+      {resolved_symbol:'TVC:UKOIL',resolution:'1',studies:[]},
+      {resolved_symbol:'CME_MINI:NQ1!',resolution:'1',studies:[]},
+    ]},
+    {target_id:'extra',chart_id:'same',pane_count:2,panes:[
+      {resolved_symbol:'ICEEUR_DLY:BRN1!',resolution:'30',studies:[]},
+      {resolved_symbol:'CME_MINI:NQ1!',resolution:'30',studies:[]},
+    ]},
+  ];
+  let closeCalls=0;
+  const deps={
+    status:()=>state,
+    listTargets:async()=>targets,
+    inspectTargets:async rows=>inspected.filter(x=>rows.some(r=>r.id===x.target_id)),
+    closeTabByOwned:async ({target_id})=>{
+      assert.equal(target_id,'extra');
+      closeCalls++;
+      targets=targets.filter(x=>x.id!==target_id);
+      return {success:true,closed:true,target_id};
+    },
+  };
+  await assert.rejects(retireNonmatchingWorkerRenderer({
+    slot:0,target_id:'registered',dry_run:false,_deps:deps,
+  }),/registered worker target/);
+  assert.equal(closeCalls,0);
+  const dry=await retireNonmatchingWorkerRenderer({
+    slot:0,target_id:'extra',dry_run:true,_deps:deps,
+  });
+  assert.equal(dry.success,true);
+  assert.equal(dry.dry_run,true);
+  assert.equal(closeCalls,0);
+  const completed=await retireNonmatchingWorkerRenderer({
+    slot:0,target_id:'extra',dry_run:false,_deps:deps,
+  });
+  assert.equal(completed.registered_worker_preserved,true);
+  assert.equal(completed.closed.closed,true);
+  assert.equal(closeCalls,1);
+  assert.deepEqual(targets.map(x=>x.id),['registered']);
 });
