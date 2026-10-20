@@ -203,10 +203,19 @@ export async function listShellTabs({ _deps } = {}) {
 function requireShellTab(tabs, shell_tab_id, expected_layout_name) {
   const id = String(shell_tab_id || '').trim();
   if (!id) throw new Error('shell_tab_id required; refresh tab_list.');
-  const tab = tabs.find(row => row.shell_tab_id === id);
-  if (!tab) throw new Error('Stale shell_tab_id; refresh tab_list after restart.');
-  if (expected_layout_name && tab.layout_name !== expected_layout_name) {
-    throw new Error('Layout name changed; refresh tab_list.');
+  const found = tabs.find(row => row.shell_tab_id === id);
+  if (!found) throw new Error('Stale shell_tab_id; refresh tab_list after restart.');
+  const tab = {...found};
+  const expected = String(expected_layout_name || '').trim();
+  if (expected && tab.layout_name !== expected) {
+    // TradingView Desktop sometimes omits React layout state on duplicated
+    // tabs. The exact shell-tab id is still available; allow an explicit
+    // expected layout only if the visible label ends with that full name.
+    const normalizedLabel = String(tab.label || '').replace(/\s+/g, ' ').trim();
+    if (tab.layout_name !== null || !normalizedLabel.endsWith(' ' + expected)) {
+      throw new Error('Layout name changed; refresh tab_list.');
+    }
+    tab.layout_name = expected;
   }
   return tab;
 }
@@ -247,7 +256,11 @@ export async function closeShellTabById({
       "let f=k?tab[k]:null;for(let n=0;f&&n<8;n++,f=f.return){" +
       "const v=f.stateNode?.state?.title?.name;if(typeof v==='string'&&v.trim())return v.trim();}" +
       "return null;}";
-    if (await evalIn("(" + readName + ")()") !== tab.layout_name) {
+    const fresh = await evalIn("(function(){const tab=document.getElementById("+id+");" +
+      "if(!tab||!tab.matches('.tabs-container .tab'))return null;" +
+      "return {name:("+readName+")(),label:String(tab.textContent||'').replace(/\\s+/g,' ').trim()};})()");
+    if (!fresh || !(fresh.name === tab.layout_name ||
+      (fresh.name === null && fresh.label.endsWith(' ' + tab.layout_name)))) {
       throw new Error('Shell layout identity changed before close.');
     }
     await selectShellTab(evalIn, tab.shell_tab_id, wait);
