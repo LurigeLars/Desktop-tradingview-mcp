@@ -68,7 +68,7 @@ export function selectRotatingPane(state) {
   const owner=(state?.worker_tabs||[]).find(t=>Number(t.slot)===slot);
   const topology=(state?.topology_plan?.tabs||[]).find(t=>Number(t.tab_index)===slot);
   const paneCount=Number(owner?.pane_count);
-  if (!owner?.persistent_layout || !/^DTV Market \\d{2}$/.test(String(owner.layout_name||'')) ||
+  if (!owner?.persistent_layout || !/^DTV Market \d{2}$/.test(String(owner.layout_name||'')) ||
       !owner.chart_id || !owner.target_id || !topology ||
       !Number.isInteger(paneCount) || paneCount<1 || paneCount>8 ||
       Number(topology.pane_count)!==paneCount || index>=paneCount ||
