@@ -179,6 +179,115 @@ export async function attachChart({ chart_id, _deps } = {}) {
   };
 }
 
+
+/** Shell-tab IDs identify physical Desktop tabs, not saved layouts or CDP targets.
+ * Rediscover them at every call, especially after a Desktop restart. */
+export async function listShellTabs({ _deps } = {}) {
+  const shell = _deps?.withShell || withShell;
+  const result = await shell(evalIn => evalIn(
+    "(function() { return Array.from(document.querySelectorAll('.tabs-container .tab')).map((tab,index) => {" +
+    "const k=Object.keys(tab).find(x=>x.indexOf('__reactFiber')===0);let f=k?tab[k]:null;let name=null;" +
+    "for(let n=0;f&&n<8;n++,f=f.return){const v=f.stateNode?.state?.title?.name;" +
+    "if(typeof v==='string'&&v.trim()){name=v.trim();break;}}" +
+    "return {index,shell_tab_id:tab.id||null,layout_name:name,active:tab.classList.contains('active')," +
+    "label:String(tab.textContent||'').trim().slice(0,120)};}); })()"
+  ));
+  if (!Array.isArray(result)) throw new Error('Desktop shell tab listing unavailable.');
+  const ids = result.map(x => x.shell_tab_id);
+  if (ids.some(id => !id) || new Set(ids).size !== ids.length) {
+    throw new Error('Desktop shell returned missing or duplicated tab identities.');
+  }
+  return result;
+}
+
+function requireShellTab(tabs, shell_tab_id, expected_layout_name) {
+  const id = String(shell_tab_id || '').trim();
+  if (!id) throw new Error('shell_tab_id required; refresh tab_list.');
+  const tab = tabs.find(row => row.shell_tab_id === id);
+  if (!tab) throw new Error('Stale shell_tab_id; refresh tab_list after restart.');
+  if (expected_layout_name && tab.layout_name !== expected_layout_name) {
+    throw new Error('Layout name changed; refresh tab_list.');
+  }
+  return tab;
+}
+
+export async function switchShellTab({ shell_tab_id, expected_layout_name, _deps } = {}) {
+  const shell = _deps?.withShell || withShell;
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const tab = requireShellTab(
+    await listShellTabs({ _deps: {withShell:shell} }), shell_tab_id, expected_layout_name
+  );
+  await shell(evalIn => selectShellTab(evalIn, tab.shell_tab_id, wait));
+  return {
+    success:true, action:'desktop_shell_tab_switched',
+    shell_tab_id:tab.shell_tab_id, layout_name:tab.layout_name, visually_switched:true,
+    attachment_required:true,
+    note:'Use tab_attach with current target_id from tab_list to select a chart for edits.',
+  };
+}
+
+export async function closeShellTabById({
+  shell_tab_id, expected_layout_name, protected_layout_names = [], _deps,
+} = {}) {
+  const shell = _deps?.withShell || withShell;
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const tabs = await listShellTabs({ _deps: {withShell:shell} });
+  if (tabs.length <= 1) throw new Error('Cannot close the last Desktop tab.');
+  const tab = requireShellTab(tabs, shell_tab_id, expected_layout_name);
+  if (!tab.layout_name) throw new Error('Layout identity missing; refusing shell-only close.');
+  const owned = new Set(protected_layout_names.map(x => String(x || '').trim()));
+  if (owned.has(tab.layout_name) || /^DTV (?:Market|Worker)\b/i.test(tab.layout_name)) {
+    throw new Error('Refusing to close a DTV worker-owned layout.');
+  }
+  return shell(async evalIn => {
+    const id = JSON.stringify(tab.shell_tab_id);
+    const readName = "()=>{const tab=document.getElementById("+id+");" +
+      "if(!tab||!tab.matches('.tabs-container .tab'))return null;" +
+      "const k=Object.keys(tab).find(x=>x.indexOf('__reactFiber')===0);" +
+      "let f=k?tab[k]:null;for(let n=0;f&&n<8;n++,f=f.return){" +
+      "const v=f.stateNode?.state?.title?.name;if(typeof v==='string'&&v.trim())return v.trim();}" +
+      "return null;}";
+    if (await evalIn("(" + readName + ")()") !== tab.layout_name) {
+      throw new Error('Shell layout identity changed before close.');
+    }
+    await selectShellTab(evalIn, tab.shell_tab_id, wait);
+    const clicked = await evalIn("(function(){const tab=document.getElementById("+id+");" +
+      "if(!tab||!tab.matches('.tabs-container .tab'))return false;" +
+      "const close=tab.querySelector('.tab-close-button-container button, [class*=close] button, button[class*=close]');" +
+      "if(!close)return false;" +
+      "const k=Object.keys(close).find(x=>x.indexOf('__reactProps')===0);" +
+      "if(k&&typeof close[k].onClick==='function'){" +
+      "close[k].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:close,target:close});" +
+      "}else close.click();return true;})()");
+    if (!clicked) throw new Error('Exact Desktop tab close button not available.');
+    for (let n=0;n<20;n++) {
+      if (!await evalIn("!!document.getElementById("+id+")")) {
+        return {success:true,action:'desktop_shell_tab_closed',
+          shell_tab_id:tab.shell_tab_id,layout_name:tab.layout_name};
+      }
+      await wait(100);
+    }
+    throw new Error('Desktop tab remains open (possible unsaved changes).');
+  });
+}
+
+/** Exact live CDP target attachment handles duplicate chart/layout IDs. */
+export async function attachChartTarget({ target_id, _deps } = {}) {
+  const id = String(target_id || '').trim();
+  const listTargets = _deps?.listTargets || listCdpTargets;
+  const reconnect = _deps?.reconnect || reconnectTo;
+  const current = _deps?.current || getTargetInfo;
+  const target = (await listTargets()).find(row => String(row.id) === id);
+  if (!isChartPageTarget(target)) throw new Error('Stale/non-chart target; refresh tab_list.');
+  await reconnect(id);
+  if (String((await current())?.id) !== id) {
+    throw new Error('CDP target attachment verification failed.');
+  }
+  return {success:true,action:'chart_target_attached',target_id:id,
+    chart_id:target.url.match(/\/chart\/([^/?]+)/i)?.[1] || null,
+    visually_switched:false,verified:true};
+}
+
 /**
  * List open chart tabs and any currently discoverable layout-picker tab.
  */
@@ -211,10 +320,17 @@ export async function list() {
       is_chart: isChartPageTarget(target),
     }));
 
+  let shellTabs = [], shellError = null;
+  try { shellTabs = await listShellTabs(); }
+  catch (error) { shellError = error?.message || String(error); }
   return {
     success: true,
     tab_count: tabs.length,
     tabs,
+    shell_tabs: shellTabs,
+    shell_tab_count: shellTabs.length,
+    shell_identity_note: 'Rediscover shell_tab_id and target_id after restart. chart_id is a shared saved layout.',
+    ...(shellError ? {shell_discovery_error:shellError} : {}),
     discovery: {
       candidate_count: candidates.length,
       landing_count: landingIds.size,
