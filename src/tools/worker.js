@@ -5,6 +5,7 @@ import * as core from '../core/worker.js';
 
 import { rotateWorkerSnapshot, recoverRotatingPane } from '../core/rotating-worker.js';
 import { topologyMutationLockStatus, withTopologyMutationLock } from '../core/topology-lock.js';
+import { workerUsageReport } from '../core/worker-usage.js';
 
 const studySchema = z.union([
   z.string(),
@@ -79,6 +80,15 @@ export function registerWorkerTools(server) {
       message:'No new TradingView Desktop windows allowed; use worker_rotate_snapshot instead.',
       opened_tabs:0,execution_quote:false},true));
 
+
+  server.registerTool('worker_usage', {
+    description: 'Read 14-day bounded evidence of per-handle successful resident pane reads. Consumer names are caller-declared, not authenticated. Zero reads are not evidence of no future need.',
+    inputSchema: {},
+    annotations: {readOnlyHint:true, destructiveHint:false, idempotentHint:true, openWorldHint:false},
+  }, async () => {
+    try { return jsonResult(workerUsageReport()); }
+    catch (err) { return jsonResult({success:false,error:err.message},true); }
+  });
 
   server.registerTool('worker_status', {
     description: 'Read the logical realtime worker registry, capacity, groups and current physical-assignment status.',
