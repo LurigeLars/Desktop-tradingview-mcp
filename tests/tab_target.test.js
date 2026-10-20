@@ -686,6 +686,7 @@ test('shell close selects one duplicate layout by physical ID and preserves its 
   let active=null;
   const shell=async fn=>fn(async expression=>{
     if(expression.includes('Array.from(document.querySelectorAll'))return tabs.map((x,i)=>({...x,index:i}));
+    if(expression.includes('return {name:'))return {name:'Stocks',label:'CRWV 62.20 Stocks'};
     if(expression.includes('const k=Object.keys(tab).find'))return tabs.find(x=>expression.includes(JSON.stringify(x.shell_tab_id)))?.layout_name || null;
     if(expression.includes("const close=tab.querySelector")) {
       const id=JSON.parse(expression.match(/getElementById\(("[^"]+")\)/)[1]);
@@ -742,4 +743,41 @@ test('exact chart target attachment disambiguates identical chart URLs', async (
   await assert.rejects(attachChartTarget({
     target_id:'old-session',_deps:{listTargets:async()=>charts},
   }),/Stale\/non-chart/);
+});
+
+
+test('duplicate tabs without React layout name require exact visible suffix and explicit name', async () => {
+  const rows=[
+    {shell_tab_id:'keep',layout_name:null,label:'CRWV 62.20 ▲ +1.77% Stocks'},
+    {shell_tab_id:'remove',layout_name:null,label:'MMM 171.08 ▲ +5.6% Stocks'},
+    {shell_tab_id:'worker',layout_name:null,label:'BRN1! 108.40 DTV Worker 06'},
+  ];
+  let selected=false;
+  const shell=async fn=>fn(async expression=>{
+    if(expression.includes('Array.from(document.querySelectorAll'))return rows.map((x,index)=>({...x,index}));
+    if(expression.includes('return {name:'))return {name:null,label:rows.find(x=>x.shell_tab_id==='remove')?.label||''};
+    if(expression.includes('const close=tab.querySelector')){
+      const target=JSON.parse(expression.match(/getElementById\(("[^"]+")\)/)[1]);
+      if(target!=='remove')throw new Error('Wrong physical tab targeted');
+      rows.splice(rows.findIndex(x=>x.shell_tab_id==='remove'),1);return true;
+    }
+    if(expression.includes('.tab.active'))return true;
+    if(expression.includes('tab.click()')){selected=true;return true}
+    if(expression.startsWith('!!document.getElementById'))return rows.some(x=>expression.includes(JSON.stringify(x.shell_tab_id)));
+    throw new Error('Unexpected shell eval '+expression);
+  });
+  await assert.rejects(closeShellTabById({
+    shell_tab_id:'remove',_deps:{withShell:shell},
+  }),/Layout identity missing/);
+  await assert.rejects(closeShellTabById({
+    shell_tab_id:'worker',expected_layout_name:'Stocks',_deps:{withShell:shell},
+  }),/Layout name changed/);
+  const result=await closeShellTabById({
+    shell_tab_id:'remove',expected_layout_name:'Stocks',
+    protected_layout_names:['DTV Worker 06'],
+    _deps:{withShell:shell,wait:async()=>{}},
+  });
+  assert.equal(result.success,true);
+  assert.equal(selected,true);
+  assert.deepEqual(rows.map(x=>x.shell_tab_id),['keep','worker']);
 });
