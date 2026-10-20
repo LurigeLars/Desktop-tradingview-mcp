@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
-import { provisionWorker, rebindPersistentWorkers, auditWorkerTargetCandidates, retireNonmatchingWorkerRenderer } from '../core/worker-provision.js';
+import { provisionWorker, rebindPersistentWorkers, auditWorkerTargetCandidates, retireNonmatchingWorkerRenderer, cleanupRetiredWorkerShell } from '../core/worker-provision.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerWorkerProvisionTools(server) {
@@ -30,6 +30,23 @@ export function registerWorkerProvisionTools(server) {
     catch(err){return jsonResult({success:false,error:err.message},true);}
   });
 
+  server.registerTool('worker_cleanup_retired_shell', {
+    description: 'Dry-run-first exact cleanup of a stale physical worker shell after its CDP renderer was already retired, requiring 6/6 verified workers and distinct symbol/title witnesses.',
+    inputSchema:{
+      slot:z.coerce.number().int().min(0).max(49),
+      shell_tab_id:z.string(),
+      live_shell_tab_id:z.string(),
+      retired_target_id:z.string(),
+      retired_symbol:z.string(),
+      dry_run:z.coerce.boolean().optional(),
+    },
+    annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:false},
+  },async args=>{
+    try{return jsonResult(await withTopologyMutationLock('worker_cleanup_retired_shell',()=>
+      cleanupRetiredWorkerShell({...args,dry_run:args.dry_run!==false})
+    ));}catch(err){return jsonResult({success:false,error:err.message},true);}
+  });
+
   server.registerTool('worker_rebind', {
     description: 'Verify all five persisted worker layouts by exact chart IDs and live pane signatures, then refresh rotated CDP IDs WITHOUT opening, closing, saving or changing any chart. Dry-run by default.',
     inputSchema: {
@@ -56,10 +73,27 @@ export function registerWorkerProvisionTools(server) {
       layout_prefix: z.string().optional().describe('Optional technical name prefix for DTV-owned saved layouts.'),
       orphan_slot: z.coerce.number().int().min(0).max(49).optional().describe('Technical cleanup: worker slot of one proven nonmatching renderer.'),
       orphan_target_id: z.string().optional().describe('Technical cleanup: exact CDP target from worker_target_audit, never the registered worker target.'),
+      stale_shell_slot: z.coerce.number().int().min(0).max(49).optional(),
+      stale_shell_tab_id: z.string().optional(),
+      retained_shell_tab_id: z.string().optional(),
+      retired_shell_target_id: z.string().optional(),
+      retired_shell_symbol: z.string().optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {
     try {
+      if (args?.stale_shell_tab_id) {
+        return jsonResult(await withTopologyMutationLock('worker_cleanup_retired_shell', () =>
+          cleanupRetiredWorkerShell({
+            slot:args.stale_shell_slot,
+            shell_tab_id:args.stale_shell_tab_id,
+            live_shell_tab_id:args.retained_shell_tab_id,
+            retired_target_id:args.retired_shell_target_id,
+            retired_symbol:args.retired_shell_symbol,
+            dry_run:args.dry_run!==false,
+          })
+        ));
+      }
       if (args?.orphan_target_id) {
         return jsonResult(await withTopologyMutationLock('worker_retire_nonmatching', () =>
           retireNonmatchingWorkerRenderer({
