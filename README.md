@@ -402,10 +402,10 @@ After applying the manifest, run `worker_provision` until it reports `complete: 
 
 ### Reversible in-place sampling in the existing five worker tabs
 
-`worker_rotate_snapshot({symbol, dry_run})` can sample a missing,
+`worker_rotate_snapshot({symbol, preferred_handle?, dry_run})` can sample a missing,
 exchange-qualified TradingView instrument without opening another tab, window,
-or extra connection. Under the shared topology lock it selects one
-lower-priority short-horizon tactical pane in the **fifth existing worker tab**,
+or extra connection. Under the shared topology lock it borrows one **registry-eligible
+unprotected resident worker pane** (defaulting to lower-priority tactical panes),
 verifies all eight original pane identities, journals its original symbol,
 temporarily switches that pane to the requested symbol, independently reads
 the qualified quote, and **restores the original symbol/timeframe before
@@ -413,7 +413,10 @@ returning**. The 40 logical worker entries and five chart layouts remain
 unchanged; a quote is not an Avanza executable broker bid/ask.
 
 If the quote is missing or stale the result exposes that fact and restores
-the original. If restoration fails, the durable pending-rotation journal
+the original. Trade Alert's `research:brent_nq_event` workers and explicitly
+retained/leased entries remain excluded from the borrowable pool. `worker_status`
+shows physical capacity separately from registry-eligible borrowable panes.
+If restoration fails, the durable pending-rotation journal
 blocks further swaps until `worker_rotation_recover` can verify a safe
 restoration. An unexpected third-party chart change is never overwritten.
 Concurrent realtime snapshots are serialized with the swap so they cannot
