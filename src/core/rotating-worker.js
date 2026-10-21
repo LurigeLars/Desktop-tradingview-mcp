@@ -79,7 +79,7 @@ export function rotationCandidates(state) {
     const owner = owners.find(tab => Number(tab.slot) === slot);
     const topology = tabs.find(tab => Number(tab.tab_index) === slot);
     const paneCount = Number(owner?.pane_count);
-    if (!owner?.persistent_layout || !/^DTV (?:Market|Worker) \\d{2}$/.test(String(owner.layout_name || ''))
+    if (!owner?.persistent_layout || !/^DTV (?:Market|Worker) \d{2}$/.test(String(owner.layout_name || ''))
       || !owner.chart_id || !owner.target_id || !topology ||
       !Number.isInteger(paneCount) || paneCount < 1 || paneCount > 8 ||
       topology.pane_count !== paneCount || index >= paneCount ||
