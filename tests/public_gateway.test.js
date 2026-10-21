@@ -74,7 +74,7 @@ describe('public gateway configuration', () => {
 
   it('preserves the full 96-tool TradingView surface by default', () => {
     const allowed = parseAllowedTools();
-    assert.equal(allowed.size, 96);
+    assert.equal(allowed.size, 99);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('pine_set_source'), true);
     assert.equal(allowed.has('replay_start'), true);
@@ -94,7 +94,7 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit operator-controlled core profile', () => {
     const allowed = parseAllowedTools('core');
-    assert.equal(allowed.size, 54);
+    assert.equal(allowed.size, 57);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('data_get_ohlcv'), true);
     assert.equal(allowed.has('news_flow_get'), true);
@@ -108,7 +108,7 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit full profile', () => {
     const allowed = parseAllowedTools('full');
-    assert.equal(allowed.size, 96);
+    assert.equal(allowed.size, 99);
     assert.equal(allowed.has('ui_evaluate'), true);
     assert.equal(allowed.has('tv_update'), true);
   });
@@ -116,7 +116,8 @@ describe('public gateway configuration', () => {
   it('advertises and permits safe tab attachment and worker recovery in both profiles', () => {
     for (const profile of ['full', 'core']) {
       const allowedTools = parseAllowedTools(profile);
-      const names = ['tab_attach', 'worker_rebind'];
+      const names = ['tab_attach', 'worker_rebind',
+        'worker_rotate_snapshot', 'worker_rotation_recover', 'worker_usage'];
       const response = rewriteResponse({
         result: { tools: names.map(name => ({ name, inputSchema: { type: 'object' } })) },
       }, { allowedTools });
@@ -127,6 +128,11 @@ describe('public gateway configuration', () => {
     }
     const restricted = parseAllowedTools('chart_get_state,tab_list');
     assert.match(checkRequest({ method: 'tools/call', params: { name: 'worker_rebind' } }, restricted).error, /not available/);
+    for (const profile of ['full', 'core']) {
+      const allowed = parseAllowedTools(profile);
+      assert.equal(allowed.has('worker_dynamic_ensure'), false);
+      assert.match(checkRequest({method: 'tools/call', params: {name: 'worker_dynamic_ensure'}}, allowed).error, /not available/);
+    }
   });
 
   it('still supports a stricter ALLOWED_TOOLS override', () => {
