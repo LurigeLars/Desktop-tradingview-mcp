@@ -72,7 +72,7 @@ describe('public gateway configuration', () => {
     assert.equal(headers['content-length'], '12');
   });
 
-  it('preserves the full 96-tool TradingView surface by default', () => {
+  it('preserves the full 99-tool TradingView surface by default', () => {
     const allowed = parseAllowedTools();
     assert.equal(allowed.size, 99);
     assert.equal(allowed.has('chart_get_state'), true);
