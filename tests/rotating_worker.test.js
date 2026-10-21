@@ -124,13 +124,15 @@ test('rotating sampler remains operational after shrinking to one three-pane mar
  assert.equal(panes[1].resolved_symbol,'NASDAQ:QQQ');
  assert.ok(seenCounts.every(x=>x===3));
 });
-test('rotation refuses missing pane witnesses, non-market workers and protected handles',()=>{
+test('rotation accepts owned Worker layouts but rejects personal layouts and invalid pane signatures',()=>{
  const initial=setup(), state=initial.state;
  state.worker_tabs[4].layout_name='DTV Worker 06';
+ assert.equal(selectRotatingPane(state,{preferred_handle:'qqq-5m'}).entry.handle,'qqq-5m');
+ state.worker_tabs[4].layout_name='Stocks';
  assert.throws(()=>selectRotatingPane(state,{preferred_handle:'qqq-5m'}),/not safely borrowable/);
  state.worker_tabs[4].layout_name='DTV Market 05';
  state.entries[38].assignment.target_id='wrong';
- assert.throws(()=>selectRotatingPane(state),/No safely replaceable pane/);
+ assert.throws(()=>selectRotatingPane(state,{preferred_handle:'qqq-5m'}),/not safely borrowable/);
 });
 
 test('resident is not a permanent lock, while Trade Alert and user-retained handles are exclusive',()=>{
