@@ -4,6 +4,9 @@ TradingView Desktop MCP. The authenticated connector preserves the full TradingV
 - Read chart state once with chart_get_state and reuse returned entity IDs.
 - For OHLCV, prefer data_get_ohlcv with summary=true unless individual bars are required.
 - For low-latency reads across already-open chart panes, use realtime_snapshot instead of serial symbol switching.
+- For a one-off nonresident qualified symbol, prefer worker_rotate_snapshot; it borrows one lower-priority worker pane and restores the original before returning. Never manually switch a worker pane or alter a personal layout to sample a symbol.
+- If rotation reports RESTORATION_PENDING, call worker_rotation_recover and fail closed until restoration is verified. worker_usage can audit observed reads; unused capacity and unused read history are not the same thing.
+- The deprecated worker_dynamic_ensure must remain unavailable: no sixth worker window should be opened.
 - Prefer watch_manifest_apply for the canonical market-regime universe; add only current trade/WATCH entries as bounded dynamic extras. Use worker_set_universe only for lower-level manual configuration. Reconcile DTV-owned tabs with worker_provision and inspect state with worker_status; tabs/panes are backend details.
 - For a daily session scan, use morning_brief (compact evidence by default) to collect resident evidence plus configured rules. Keep evidence separate from interpretation; use session_save only after the completed brief is ready, and session_get for comparisons.
 - For custom Pine drawings, use the data_get_pine_* tools with a study filter when known.
