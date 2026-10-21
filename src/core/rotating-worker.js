@@ -41,53 +41,73 @@ function exactSymbol(symbol) {
   if (!QUALIFIED.test(s)) throw new Error('Rotation needs one simple exchange-qualified symbol');
   return s;
 }
-export function selectRotatingPane(state) {
-  // One explicitly nominated, lower-priority temporary sample pane.
-  // This must remain safe after the resident pool is right-sized: no reliance
-  // on the old 40-entry / five-eight-pane topology.
-  const entries = state?.entries || [];
-  const eligible = entries.filter(e =>
-    e.handle === 'qqq-5m'
-    && e.symbol === 'NASDAQ:QQQ'
-    && normalizeWorkerTimeframe(e.timeframe) === '5'
-    && (e.groups || []).includes('watch:tactical_current')
-    && (e.groups || []).includes('watch:resident')
-    && !(e.groups || []).some(g => [
-      'watch:user_retained','watch:core_regime','watch:energy',
-      'watch:rates_fx','watch:vol_credit','watch:refiners',
-      'watch:ai_semis','watch:gold_macro','research:brent_nq_event',
-    ].includes(g))
-    && Array.isArray(e.studies) && e.studies.length===0
+
+/** A resident assignment is not an exclusive lease. Only named consumers or
+ * explicitly retained panes are protected. Never treat watch:resident itself as
+ * a global write lock: short-lived sampling is serialized and restored.
+ *
+ * A candidate remains a plan, not permission to mutate. rotateWorkerSnapshot
+ * independently validates the *entire* live owned layout before every swap.
+ */
+const EXCLUSIVE_GROUPS = new Set([
+  'watch:user_retained', 'watch:protected', 'worker:exclusive',
+  'research:brent_nq_event',
+]);
+function isExclusive(entry) {
+  return (entry.groups || []).some(group =>
+    EXCLUSIVE_GROUPS.has(group) || group.startsWith('lease:exclusive:')
   );
-  if (eligible.length!==1) throw new Error('No safely replaceable pane in registered market workers');
-  const entry=eligible[0];
-  const slot=entry.assignment?.worker_slot;
-  const index=entry.assignment?.pane_index;
-  if (!Number.isInteger(slot) || slot<0 || !Number.isInteger(index) || index<0)
-    throw new Error('Rotating worker has no exact slot and pane assignment');
-  const owner=(state?.worker_tabs||[]).find(t=>Number(t.slot)===slot);
-  const topology=(state?.topology_plan?.tabs||[]).find(t=>Number(t.tab_index)===slot);
-  const paneCount=Number(owner?.pane_count);
-  if (!owner?.persistent_layout || !/^DTV Market \d{2}$/.test(String(owner.layout_name||'')) ||
-      !owner.chart_id || !owner.target_id || !topology ||
-      !Number.isInteger(paneCount) || paneCount<1 || paneCount>8 ||
-      Number(topology.pane_count)!==paneCount || index>=paneCount ||
-      String(entry.assignment.chart_id)!==String(owner.chart_id) ||
-      String(entry.assignment.target_id)!==String(owner.target_id)) {
-    throw new Error('No safely replaceable pane in registered market workers');
-  }
-  const assigned = entries.filter(e=>Number(e.assignment?.worker_slot)===slot);
-  const indices=assigned.map(e=>e.assignment?.pane_index);
-  if(assigned.length!==paneCount ||
-     new Set(indices).size!==paneCount ||
-     indices.some(i=>!Number.isInteger(i)||i<0||i>=paneCount) ||
-     assigned.some(e=>String(e.assignment?.chart_id)!==String(owner.chart_id) ||
-                      String(e.assignment?.target_id)!==String(owner.target_id))) {
-    throw new Error('Rotating market layout has incomplete or conflicting pane registry');
-  }
-  return {entry,slot,chart_id:String(owner.chart_id),
-    target_id:String(owner.target_id),pane_index:index,pane_count:paneCount};
 }
+function candidatePriority(entry) {
+  if (entry.handle === 'qqq-5m') return 0;
+  if ((entry.groups || []).includes('watch:tactical_current')) return 1;
+  if ((entry.groups || []).includes('watch:intraday')) return 2;
+  if ((entry.groups || []).includes('context:daily')) return 3;
+  return 4;
+}
+/** Registry-only pool inventory; protected Trade Alert consumers are excluded. */
+export function rotationCandidates(state) {
+  const entries = state?.entries || [];
+  const tabs = state?.topology_plan?.tabs || [];
+  const owners = state?.worker_tabs || [];
+  const result = [];
+  for (const entry of entries) {
+    if (isExclusive(entry) || !Array.isArray(entry.studies) || entry.studies.length) continue;
+    const slot = entry.assignment?.worker_slot;
+    const index = entry.assignment?.pane_index;
+    if (!Number.isInteger(slot) || slot < 0 || !Number.isInteger(index) || index < 0) continue;
+    const owner = owners.find(tab => Number(tab.slot) === slot);
+    const topology = tabs.find(tab => Number(tab.tab_index) === slot);
+    const paneCount = Number(owner?.pane_count);
+    if (!owner?.persistent_layout || !/^DTV (?:Market|Worker) \\d{2}$/.test(String(owner.layout_name || ''))
+      || !owner.chart_id || !owner.target_id || !topology ||
+      !Number.isInteger(paneCount) || paneCount < 1 || paneCount > 8 ||
+      topology.pane_count !== paneCount || index >= paneCount ||
+      String(entry.assignment.chart_id) !== String(owner.chart_id) ||
+      String(entry.assignment.target_id) !== String(owner.target_id)) continue;
+    const assigned = entries.filter(e => Number(e.assignment?.worker_slot) === slot);
+    const indices = assigned.map(e => e.assignment?.pane_index);
+    if (assigned.length !== paneCount || new Set(indices).size !== paneCount ||
+      indices.some(i => !Number.isInteger(i) || i < 0 || i >= paneCount) ||
+      assigned.some(e => String(e.assignment?.chart_id) !== String(owner.chart_id)
+        || String(e.assignment?.target_id) !== String(owner.target_id))) continue;
+    result.push({entry,slot,chart_id:String(owner.chart_id),target_id:String(owner.target_id),
+      pane_index:index,pane_count:paneCount});
+  }
+  return result.sort((a,b)=>candidatePriority(a.entry)-candidatePriority(b.entry)
+    || a.slot-b.slot || a.pane_index-b.pane_index);
+}
+export function selectRotatingPane(state, { preferred_handle } = {}) {
+  const candidates = rotationCandidates(state);
+  if (preferred_handle) {
+    const selected = candidates.find(c => c.entry.handle === preferred_handle);
+    if (!selected) throw new Error('Requested worker is protected, unknown or not safely borrowable');
+    return selected;
+  }
+  if (!candidates.length) throw new Error('No safely replaceable pane in registered market workers');
+  return candidates[0];
+}
+
 function loadJournal() {
   if (!existsSync(JOURNAL)) return null;
   return JSON.parse(readFileSync(JOURNAL, 'utf8'));
@@ -192,7 +212,7 @@ export async function recoverRotatingPane({ dry_run = false, _deps } = {}) {
     || !journal.original?.symbol || !journal.temporary)
     throw new Error('Invalid rotation journal; refusing any mutation');
   const state = d.status();
-  const chosen = selectRotatingPane(state);
+  const chosen = selectRotatingPane(state, { preferred_handle: journal.handle });
   if (chosen.chart_id !== journal.chart_id || chosen.pane_index !== journal.pane_index
     || chosen.entry.handle !== journal.handle || chosen.entry.symbol !== journal.original.symbol)
     throw new Error('Worker ownership changed; rotation recovery blocked');
@@ -211,17 +231,29 @@ export async function recoverRotatingPane({ dry_run = false, _deps } = {}) {
   d.clearJournal();
   return {success:true,pending:true,restored:true};
 }
-export async function rotateWorkerSnapshot({ symbol, dry_run = false, _deps } = {}) {
+export async function rotateWorkerSnapshot({ symbol, preferred_handle, dry_run = false, _deps } = {}) {
   const requested = exactSymbol(symbol), d = deps(_deps);
   if (d.getJournal()) {
     const recovery = await recoverRotatingPane({dry_run,_deps});
     if (!recovery.restored) return {success:false,error_code:'RESTORATION_PENDING',recovery};
   }
-  const state = d.status(), chosen = selectRotatingPane(state);
-  if (chosen.entry.symbol.toUpperCase()===requested)
+  const state = d.status();
+  if (state.entries.some(e => String(e.symbol).toUpperCase() === requested))
     return {success:false,error_code:'ALREADY_RESIDENT',requested};
-  const original = await d.read(chosen.chart_id,chosen.pane_index, chosen.pane_count);
-  assertBaseline(state,chosen,original.all);
+  const candidates = preferred_handle
+    ? [selectRotatingPane(state, {preferred_handle})] : rotationCandidates(state);
+  if (!candidates.length) throw new Error('No safely replaceable pane in registered market workers');
+  let chosen = null, baselineError = null;
+  for (const candidate of candidates) {
+    try {
+      const original = await d.read(candidate.chart_id,candidate.pane_index,candidate.pane_count);
+      assertBaseline(state,candidate,original.all);
+      chosen = candidate;
+      break;
+    } catch (error) { baselineError = error; }
+  }
+  if (!chosen) throw new Error('Worker pane identities not aligned; no mutation made: '
+    + String(baselineError?.message || 'no matching live layout').slice(0,120));
   const safe = {requested,slot:chosen.slot,pane_index:chosen.pane_index,
     displaced_handle:chosen.entry.handle,displaced_symbol:chosen.entry.symbol,
     baseline_preserved:true,opened_tabs:0,execution_quote:false};
