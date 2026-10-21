@@ -179,6 +179,374 @@ export async function attachChart({ chart_id, _deps } = {}) {
   };
 }
 
+
+/** Shell-tab IDs identify physical Desktop tabs, not saved layouts or CDP targets.
+ * Rediscover them at every call, especially after a Desktop restart. */
+export async function listShellTabs({ _deps } = {}) {
+  const shell = _deps?.withShell || withShell;
+  const result = await shell(evalIn => evalIn(
+    "(function() { return Array.from(document.querySelectorAll('.tabs-container .tab')).map((tab,index) => {" +
+    "const k=Object.keys(tab).find(x=>x.indexOf('__reactFiber')===0);let f=k?tab[k]:null;let name=null;" +
+    "for(let n=0;f&&n<8;n++,f=f.return){const v=f.stateNode?.state?.title?.name;" +
+    "if(typeof v==='string'&&v.trim()){name=v.trim();break;}}" +
+    "return {index,shell_tab_id:tab.id||null,layout_name:name,active:tab.classList.contains('active')," +
+    "label:String(tab.textContent||'').trim().slice(0,120)};}); })()"
+  ));
+  if (!Array.isArray(result)) throw new Error('Desktop shell tab listing unavailable.');
+  const ids = result.map(x => x.shell_tab_id);
+  if (ids.some(id => !id) || new Set(ids).size !== ids.length) {
+    throw new Error('Desktop shell returned missing or duplicated tab identities.');
+  }
+  return result;
+}
+
+function requireShellTab(tabs, shell_tab_id, expected_layout_name) {
+  const id = String(shell_tab_id || '').trim();
+  if (!id) throw new Error('shell_tab_id required; refresh tab_list.');
+  const found = tabs.find(row => row.shell_tab_id === id);
+  if (!found) throw new Error('Stale shell_tab_id; refresh tab_list after restart.');
+  const tab = {...found};
+  const expected = String(expected_layout_name || '').trim();
+  if (expected && tab.layout_name !== expected) {
+    // TradingView Desktop sometimes omits React layout state on duplicated
+    // tabs. The exact shell-tab id is still available; allow an explicit
+    // expected layout only if the visible label ends with that full name.
+    const normalizedLabel = String(tab.label || '').replace(/\s+/g, ' ').trim();
+    const labelMatches = expected === 'New tab'
+      ? normalizedLabel === 'New tab'
+      : normalizedLabel.endsWith(' ' + expected);
+    if (tab.layout_name !== null || !labelMatches) {
+      throw new Error('Layout name changed; refresh tab_list.');
+    }
+    tab.layout_name = expected;
+  }
+  return tab;
+}
+
+export async function switchShellTab({ shell_tab_id, expected_layout_name, _deps } = {}) {
+  const shell = _deps?.withShell || withShell;
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const tab = requireShellTab(
+    await listShellTabs({ _deps: {withShell:shell} }), shell_tab_id, expected_layout_name
+  );
+  await shell(evalIn => selectShellTab(evalIn, tab.shell_tab_id, wait));
+  return {
+    success:true, action:'desktop_shell_tab_switched',
+    shell_tab_id:tab.shell_tab_id, layout_name:tab.layout_name, visually_switched:true,
+    attachment_required:true,
+    note:'Use tab_attach with current target_id from tab_list to select a chart for edits.',
+  };
+}
+
+export async function closeShellTabById({
+  shell_tab_id, expected_layout_name, protected_layout_names = [], _deps,
+} = {}) {
+  const shell = _deps?.withShell || withShell;
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const tabs = await listShellTabs({ _deps: {withShell:shell} });
+  if (tabs.length <= 1) throw new Error('Cannot close the last Desktop tab.');
+  const tab = requireShellTab(tabs, shell_tab_id, expected_layout_name);
+  if (!tab.layout_name) throw new Error('Layout identity missing; refusing shell-only close.');
+  const owned = new Set(protected_layout_names.map(x => String(x || '').trim()));
+  if (owned.has(tab.layout_name) || /^DTV (?:Market|Worker)\b/i.test(tab.layout_name)) {
+    throw new Error('Refusing to close a DTV worker-owned layout.');
+  }
+  return shell(async evalIn => {
+    const id = JSON.stringify(tab.shell_tab_id);
+    const readName = "()=>{const tab=document.getElementById("+id+");" +
+      "if(!tab||!tab.matches('.tabs-container .tab'))return null;" +
+      "const k=Object.keys(tab).find(x=>x.indexOf('__reactFiber')===0);" +
+      "let f=k?tab[k]:null;for(let n=0;f&&n<8;n++,f=f.return){" +
+      "const v=f.stateNode?.state?.title?.name;if(typeof v==='string'&&v.trim())return v.trim();}" +
+      "return null;}";
+    const fresh = await evalIn("(function(){const tab=document.getElementById("+id+");" +
+      "if(!tab||!tab.matches('.tabs-container .tab'))return null;" +
+      "return {name:("+readName+")(),label:String(tab.textContent||'').replace(/\\s+/g,' ').trim()};})()");
+    if (!fresh || !(fresh.name === tab.layout_name ||
+      (fresh.name === null &&
+        (fresh.label.endsWith(' ' + tab.layout_name) ||
+          (tab.layout_name === 'New tab' && fresh.label === 'New tab'))))) {
+      throw new Error('Shell layout identity changed before close.');
+    }
+    await selectShellTab(evalIn, tab.shell_tab_id, wait);
+    const clicked = await evalIn("(function(){const tab=document.getElementById("+id+");" +
+      "if(!tab||!tab.matches('.tabs-container .tab'))return false;" +
+      "const close=tab.querySelector('.tab-close-button-container button, [class*=close] button, button[class*=close]');" +
+      "if(!close)return false;" +
+      "const k=Object.keys(close).find(x=>x.indexOf('__reactProps')===0);" +
+      "if(k&&typeof close[k].onClick==='function'){" +
+      "close[k].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:close,target:close});" +
+      "}else close.click();return true;})()");
+    if (!clicked) throw new Error('Exact Desktop tab close button not available.');
+    for (let n=0;n<20;n++) {
+      if (!await evalIn("!!document.getElementById("+id+")")) {
+        return {success:true,action:'desktop_shell_tab_closed',
+          shell_tab_id:tab.shell_tab_id,layout_name:tab.layout_name};
+      }
+      await wait(100);
+    }
+    throw new Error('Desktop tab remains open (possible unsaved changes).');
+  });
+}
+
+
+
+/**
+ * Exact physical shell cleanup for a worker renderer which was already retired.
+ * Worker ownership and the retired renderer's original pane symbol must be
+ * independently validated by the higher-level worker reconciliation gate.
+ * This function NEVER permits a generic worker tab close.
+ */
+export async function closeRetiredWorkerShell({
+  shell_tab_id, live_shell_tab_id, expected_layout_name,
+  retired_symbol, retained_symbol, _deps,
+} = {}) {
+  const shell = _deps?.withShell || withShell;
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const list = _deps?.listShellTabs || (()=>listShellTabs({_deps:{withShell:shell}}));
+  const name = String(expected_layout_name || '').trim();
+  if (!/^DTV (?:Worker|Market) \d{2}$/i.test(name)) {
+    throw new Error('Expected a registered worker layout identity.');
+  }
+  const oldSymbol = String(retired_symbol||'').trim();
+  const keepSymbol = String(retained_symbol||'').trim();
+  if (!oldSymbol || !keepSymbol || oldSymbol===keepSymbol) {
+    throw new Error('Retired and retained symbol witnesses must be distinct.');
+  }
+  const oldId = String(shell_tab_id||'').trim();
+  const keepId = String(live_shell_tab_id||'').trim();
+  if (!oldId || !keepId || oldId===keepId) {
+    throw new Error('Two distinct exact physical shell IDs required.');
+  }
+  const tabs = await list();
+  const matching = tabs.filter(t=>t.layout_name===name);
+  if (matching.length !== 2) {
+    throw new Error('Expected exactly two physical tabs for worker layout.');
+  }
+  const gone = matching.find(t=>t.shell_tab_id===oldId);
+  const retained = matching.find(t=>t.shell_tab_id===keepId);
+  const begins = (label,symbol)=>{
+    const value=String(label||'').trim();
+    if (!value.startsWith(symbol)) return false;
+    const next=value.slice(symbol.length, symbol.length+1);
+    return next===''||next===' '||next==='▲'||next==='▼'||next==='↗'||next==='↘';
+  };
+  if (!gone || !retained || !begins(gone.label,oldSymbol) ||
+      !begins(retained.label,keepSymbol)) {
+    throw new Error('Physical worker shell symbol witness changed.');
+  }
+  if (gone.active) {
+    throw new Error('Refusing to close an active worker shell tab.');
+  }
+  const original = tabs.find(t=>t.active)?.shell_tab_id || null;
+  return shell(async evalIn => {
+    const id = JSON.stringify(oldId);
+    const other = JSON.stringify(keepId);
+    const found = await evalIn('(function(){' +
+      "const a=document.getElementById("+id+");" +
+      "const b=document.getElementById("+other+");" +
+      "if(!a||!b||!a.matches('.tabs-container .tab')||!b.matches('.tabs-container .tab'))return null;" +
+      "const title=tab=>{const k=Object.keys(tab).find(x=>x.indexOf('__reactFiber')===0);" +
+      "let f=k?tab[k]:null;for(let n=0;f&&n<8;n++,f=f.return){" +
+      "const x=f.stateNode?.state?.title?.name;if(typeof x==='string'&&x.trim())return x.trim();}" +
+      "return null;};" +
+      "return {oldLabel:String(a.textContent||'').trim(),liveLabel:String(b.textContent||'').trim()," +
+      "oldName:title(a),liveName:title(b),oldActive:a.classList.contains('active')};" +
+      '})()');
+    if (!found || found.oldName!==name || found.liveName!==name ||
+        found.oldActive || !begins(found.oldLabel,oldSymbol) ||
+        !begins(found.liveLabel,keepSymbol)) {
+      throw new Error('Worker shell proof changed during pre-close revalidation.');
+    }
+    const clicked = await evalIn('(function(){' +
+      "const tab=document.getElementById("+id+");" +
+      "if(!tab||tab.classList.contains('active'))return false;" +
+      "const close=tab.querySelector('.tab-close-button-container button, [class*=close] button, button[class*=close]');" +
+      'if(!close)return false;' +
+      "const key=Object.keys(close).find(x=>x.indexOf('__reactProps')===0);" +
+      'if(key&&typeof close[key]?.onClick==="function"){' +
+      'close[key].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:close,target:close});}' +
+      'else close.click(); return true;})()');
+    if (!clicked) throw new Error('Exact non-active orphan shell close control unavailable.');
+    let closed=false;
+    for(let i=0;i<20;i++){
+      if(!await evalIn("!!document.getElementById("+id+")")){closed=true;break;}
+      await wait(100);
+    }
+    if(!closed)throw new Error('Orphan physical shell tab remained open.');
+    const registeredRemains=await evalIn("!!document.getElementById("+other+")");
+    if(!registeredRemains)throw new Error('Registered worker physical shell disappeared unexpectedly.');
+    if(original && original!==oldId) {
+      const sameActive = await evalIn(
+        "document.querySelector('.tabs-container .tab.active')?.id === "+
+        JSON.stringify(original)
+      );
+      if(!sameActive && await evalIn("!!document.getElementById("+JSON.stringify(original)+")")) {
+        await selectShellTab(evalIn,original,wait);
+      }
+    }
+    return {success:true,action:'retired_worker_shell_closed',shell_tab_id:oldId,
+      registered_shell_tab_id:keepId,registered_shell_preserved:true};
+  });
+}
+
+/**
+ * Inspect physical shell-to-CDP relationships without touching chart state.
+ * The only UI action is visual tab selection; the original tab is restored.
+ * Electron can report unreliable background visibility, so never claim a
+ * mapping unless every repeated observation distinguishes exactly one target.
+ */
+export function rankShellRendererWitnesses(samples, shellIds, targetIds) {
+  const observations = new Map();
+  for (const shellId of shellIds) {
+    const found = samples.filter(sample => sample.shell_tab_id === shellId);
+    if (found.length < 2) return {confirmed:false, reason:'insufficient_repeated_samples', by_shell:[]};
+    const candidates = targetIds.filter(id => found.every(sample => {
+      const state = sample.targets.find(row => row.target_id === id);
+      return state?.visibility === 'visible' && state.focused === true;
+    }));
+    if (candidates.length !== 1) {
+      return {confirmed:false,reason:'no_unique_focused_renderer',by_shell:[]};
+    }
+    observations.set(shellId, candidates[0]);
+  }
+  if (new Set(observations.values()).size !== shellIds.length) {
+    return {confirmed:false,reason:'renderer_not_distinct_per_shell',by_shell:[]};
+  }
+  // Any renderer claimed by one shell must not also look focused on another.
+  for (const [shellId,targetId] of observations) {
+    for (const sample of samples) {
+      if (sample.shell_tab_id === shellId) continue;
+      const other = sample.targets.find(row => row.target_id === targetId);
+      if (other?.visibility === 'visible' && other.focused === true) {
+        return {confirmed:false,reason:'ambiguous_cross_shell_focus',by_shell:[]};
+      }
+    }
+  }
+  return {
+    confirmed:true,reason:'repeated_unique_focus_visibility',
+    by_shell:[...observations.entries()].map(([shell_tab_id,target_id])=>({shell_tab_id,target_id})),
+  };
+}
+
+export async function probeShellRendererCorrespondence({
+  shell_tab_ids = [], target_ids = [], _deps,
+} = {}) {
+  const ids = [...new Set(shell_tab_ids.map(String))];
+  const targetsWanted = [...new Set(target_ids.map(String))];
+  if (ids.length < 2 || ids.length > 4 || targetsWanted.length < 2 || targetsWanted.length > 8) {
+    throw new Error('Probe requires 2-4 physical shell IDs and 2-8 renderer IDs.');
+  }
+  const tabs = await (_deps?.listShellTabs || listShellTabs)();
+  const current = await (_deps?.listTargets || listCdpTargets)();
+  const active = tabs.find(tab => tab.active)?.shell_tab_id;
+  if (!active) throw new Error('No unique active Desktop shell tab to restore.');
+  for (const id of ids) {
+    if (!tabs.some(tab => tab.shell_tab_id === id)) {
+      throw new Error('Unknown shell_tab_id: refresh tab_list.');
+    }
+  }
+  for (const id of targetsWanted) {
+    if (!current.some(row => row.id === id && isChartPageTarget(row))) {
+      throw new Error('Unknown or stale chart target_id: refresh tab_list.');
+    }
+  }
+  const shell = _deps?.withShell || withShell;
+  const probeTarget = _deps?.probeTarget || (id => withTarget(id, evalIn => evalIn(
+    "({visibility:document.visibilityState,focused:document.hasFocus()," +
+    "title:String(document.title||'').slice(0,100),url:location.href})"
+  ), 1500));
+  const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve,ms)));
+  const samples = [];
+  let restoreError = null;
+  try {
+    // Two full cycles, verifying repeatability without relying on cached IDs.
+    for (let pass=0;pass<2;pass++) {
+      for (const id of ids) {
+        await shell(evalIn => selectShellTab(evalIn, id, wait));
+        await wait(180);
+        const targetStates = await Promise.all(targetsWanted.map(async target_id => {
+          try { return {target_id,...await probeTarget(target_id)}; }
+          catch(error){return {target_id,error:String(error?.message || error).slice(0,100)};}
+        }));
+        samples.push({pass,shell_tab_id:id,targets:targetStates});
+      }
+    }
+  } finally {
+    try { await shell(evalIn => selectShellTab(evalIn, active, wait)); }
+    catch(error){restoreError = String(error?.message || error);}
+  }
+  const witness = restoreError
+    ? {confirmed:false,reason:'could_not_restore_active_shell',by_shell:[]}
+    : rankShellRendererWitnesses(samples,ids,targetsWanted);
+  return {
+    success:true,read_only_chart_state:true,
+    original_active_shell_tab_id:active,restored:!restoreError,
+    restore_error:restoreError,
+    witness,samples,
+    caution:'A single visibility or title result does not prove identity; never close a worker by guessing.',
+  };
+}
+
+
+/** Strictly read-only inspection of Electron shell tab metadata for stale-tab troubleshooting. */
+export async function inspectShellTabMetadata({ shell_tab_ids = [], _deps } = {}) {
+  const ids = [...new Set((shell_tab_ids || []).map(String))];
+  if (!ids.length || ids.length > 4) throw new Error('Choose between 1 and 4 exact shell tab IDs.');
+  const shellTabs = await (_deps?.listShellTabs || listShellTabs)();
+  if (ids.some(id => !shellTabs.some(t => t.shell_tab_id === id))) {
+    throw new Error('Unknown shell tab identity; refresh tab_list.');
+  }
+  const shell = _deps?.withShell || withShell;
+  return shell(evalIn => evalIn('(function(){const wanted=new Set(' + JSON.stringify(ids) + ');' +
+    "const tabs=Array.from(document.querySelectorAll('.tabs-container .tab'));" +
+    'return tabs.filter(t=>wanted.has(t.id)).map(tab=>{' +
+    "const reactPropsKey=Object.keys(tab).find(k=>k.indexOf('__reactProps')===0);" +
+    "const props=reactPropsKey?tab[reactPropsKey]||{}:{};" +
+    "const fiberKey=Object.keys(tab).find(k=>k.indexOf('__reactFiber')===0);" +
+    'let fiber=fiberKey?tab[fiberKey]:null;const ancestors=[];' +
+    'const describe=obj=>{if(!obj||typeof obj!=="object")return null;' +
+    "const keys=Object.keys(obj).slice(0,65);" +
+    'const primitive={};for(const key of keys){' +
+    'if(!/^(id|tabId|viewId|webContentsId|name|title|url|label|active|isActive|isReady|isLoading|status|loading|symbol|key|type)$/i.test(key))continue;' +
+    'try{const v=obj[key];if(["string","number","boolean"].includes(typeof v))primitive[key]=String(v).slice(0,100);}catch{}}' +
+    'return {keys,primitive};};' +
+    'for(let i=0;fiber&&i<7;i++,fiber=fiber.return){' +
+    'const node=fiber.stateNode;ancestors.push({' +
+    'elementType:String(fiber.elementType?.displayName||fiber.elementType?.name||fiber.elementType||"").slice(0,70),' +
+    'tag:fiber.tag,props:describe(fiber.memoizedProps),state:describe(node?.state),' +
+    'memoizedState:describe(fiber.memoizedState),' +
+    'title:describe(node?.state?.title),' +
+    'tabStoreKind:Array.isArray(node?.state?.tabs)?"array":typeof node?.state?.tabs,' +
+    'tabStoreEntries:Array.isArray(node?.state?.tabs)?node.state.tabs.filter(entry=>' +
+    'wanted.has(String(entry?.id||entry?.tabId||entry?.tab_id||""))).slice(0,4).map(entry=>({' +
+    'fields:describe(entry),keyFields:describe(entry?.data),' +
+    'title:describe(entry?.title),location:describe(entry?.location)' +
+    '})):[],' +
+    '});}' +
+    'return {shell_tab_id:tab.id,label:String(tab.textContent||"").slice(0,100),' +
+    'attributes:Array.from(tab.attributes||[]).map(a=>[a.name,String(a.value).slice(0,90)]).slice(0,12),' +
+    'dom_props:describe(props),react_ancestors:ancestors};' +
+    '});})()'));
+}
+
+/** Exact live CDP target attachment handles duplicate chart/layout IDs. */
+export async function attachChartTarget({ target_id, _deps } = {}) {
+  const id = String(target_id || '').trim();
+  const listTargets = _deps?.listTargets || listCdpTargets;
+  const reconnect = _deps?.reconnect || reconnectTo;
+  const current = _deps?.current || getTargetInfo;
+  const target = (await listTargets()).find(row => String(row.id) === id);
+  if (!isChartPageTarget(target)) throw new Error('Stale/non-chart target; refresh tab_list.');
+  await reconnect(id);
+  if (String((await current())?.id) !== id) {
+    throw new Error('CDP target attachment verification failed.');
+  }
+  return {success:true,action:'chart_target_attached',target_id:id,
+    chart_id:target.url.match(/\/chart\/([^/?]+)/i)?.[1] || null,
+    visually_switched:false,verified:true};
+}
+
 /**
  * List open chart tabs and any currently discoverable layout-picker tab.
  */
@@ -211,10 +579,17 @@ export async function list() {
       is_chart: isChartPageTarget(target),
     }));
 
+  let shellTabs = [], shellError = null;
+  try { shellTabs = await listShellTabs(); }
+  catch (error) { shellError = error?.message || String(error); }
   return {
     success: true,
     tab_count: tabs.length,
     tabs,
+    shell_tabs: shellTabs,
+    shell_tab_count: shellTabs.length,
+    shell_identity_note: 'Rediscover shell_tab_id and target_id after restart. chart_id is a shared saved layout.',
+    ...(shellError ? {shell_discovery_error:shellError} : {}),
     discovery: {
       candidate_count: candidates.length,
       landing_count: landingIds.size,
