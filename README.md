@@ -400,16 +400,16 @@ Use `watch_manifest_apply` with no theme arguments to load the defaults. Optiona
 
 After applying the manifest, run `worker_provision` until it reports `complete: true`.
 
-### Reversible in-place sampling in the existing five worker tabs
+### Reversible in-place sampling from explicitly unprotected resident workers
 
 `worker_rotate_snapshot({symbol, preferred_handle?, dry_run})` can sample a missing,
 exchange-qualified TradingView instrument without opening another tab, window,
 or extra connection. Under the shared topology lock it borrows one **registry-eligible
 unprotected resident worker pane** (defaulting to lower-priority tactical panes),
-verifies all eight original pane identities, journals its original symbol,
+verifies every original pane identity in the selected owned layout, journals its original symbol,
 temporarily switches that pane to the requested symbol, independently reads
 the qualified quote, and **restores the original symbol/timeframe before
-returning**. The 40 logical worker entries and five chart layouts remain
+returning**. The resident registry and physical chart topology remain
 unchanged; a quote is not an Avanza executable broker bid/ask.
 
 If the quote is missing or stale the result exposes that fact and restores
@@ -421,8 +421,8 @@ blocks further swaps until `worker_rotation_recover` can verify a safe
 restoration. An unexpected third-party chart change is never overwritten.
 Concurrent realtime snapshots are serialized with the swap so they cannot
 mistake a temporary quote for a resident assigned worker. Sampling only
-occurs for missing symbols confirmed by the fresh broker-backed Trade Spine
-run, not free-form headlines or context panes; one symbol per invocation.
+is limited to qualified symbols identified by an authorized market-analysis
+workflow, not unverified headlines; one symbol per invocation.
 
 The previous `worker_dynamic_ensure` API, which created a sixth worker
 tab/window, now explicitly returns `SIXTH_TAB_DISABLED`. It must not be used
