@@ -6,10 +6,10 @@ function setup() {
   const entries = Array.from({length:40},(_,i)=>({
     handle: i === 38 ? 'qqq-5m' : 'h'+i, symbol: i === 38 ? 'NASDAQ:QQQ' : 'NASDAQ:BASE'+i, timeframe:i>=37?'5':'60',
     studies:[], groups:i>=37?['watch:resident','watch:tactical_current']:['watch:resident','morning'],
-    assignment:{worker_slot:Math.floor(i/8),pane_index:i%8,chart_id:'chart'+Math.floor(i/8)},
+    assignment:{worker_slot:Math.floor(i/8),pane_index:i%8,chart_id:'chart'+Math.floor(i/8),target_id:'runtime'+Math.floor(i/8)},
   }));
   const state={entries,topology_plan:{tabs:Array.from({length:5},(_,i)=>({tab_index:i,pane_count:8}))},
-    worker_tabs:Array.from({length:5},(_,i)=>({slot:i,chart_id:'chart'+i}))};
+    worker_tabs:Array.from({length:5},(_,i)=>({slot:i,chart_id:'chart'+i,target_id:'runtime'+i,layout_name:'DTV Market 0'+(i+1),pane_count:8,persistent_layout:true}))};
   const panes=entries.slice(32).map(e=>({
     resolved_symbol:e.symbol,resolution:e.timeframe,symbol_identity:{},studies:[],
   }));
@@ -86,4 +86,48 @@ test('preflight refuses changed resident layouts and already-resident symbols',a
   await assert.rejects(()=>rotateWorkerSnapshot({symbol:'ADBE',_deps:x.deps}),/exchange-qualified/);
   const already=await rotateWorkerSnapshot({symbol:'NASDAQ:QQQ',_deps:x.deps});
   assert.equal(already.error_code,'ALREADY_RESIDENT');
+});
+
+test('rotating sampler remains operational after shrinking to one three-pane market worker',async()=>{
+ const initial=setup();
+ const subset=initial.state.entries.slice(37);
+ const entries=subset.map((entry,index)=>({...entry,assignment:{
+  worker_slot:0,pane_index:index,chart_id:'compact',target_id:'live-compact'
+ }}));
+ const state={entries,topology_plan:{tabs:[{tab_index:0,pane_count:3}]},
+  worker_tabs:[{slot:0,chart_id:'compact',target_id:'live-compact',
+    layout_name:'DTV Market 01',pane_count:3,persistent_layout:true}]};
+ const chosen=selectRotatingPane(state);
+ assert.equal(chosen.pane_count,3);
+ assert.equal(chosen.slot,0);
+ assert.equal(chosen.pane_index,1);
+ const panes=entries.map(e=>({resolved_symbol:e.symbol,resolution:e.timeframe,symbol_identity:{},studies:[]}));
+ let journal=null,seenCounts=[],mutated=[];
+ const overrides={
+  status:()=>state,
+  read:async(_chart,index,count)=>{seenCounts.push(count);return {pane:panes[index],all:panes};},
+  set:async(_chart,index,symbol,tf,count)=>{seenCounts.push(count);mutated.push(symbol);
+    panes[index]={resolved_symbol:symbol,resolution:tf,symbol_identity:{},studies:[]};},
+  wait:async()=>null,
+  snapshot:async symbol=>({requested_symbols:[symbol],missing:[],ambiguous_symbols:[],
+    snapshots:[{chart_id:'compact',target_id:'live-compact',pane_index:1,
+      success:true,resolved_symbol:symbol,quote:{source_timestamp_ms:1000}}]}),
+  getJournal:()=>journal,putJournal:v=>{journal=v;},clearJournal:()=>{journal=null;},
+ };
+ const result=await rotateWorkerSnapshot({symbol:'NASDAQ:ADBE',_deps:overrides});
+ assert.equal(result.success,true);
+ assert.equal(result.restored,true);
+ assert.equal(result.opened_tabs,0);
+ assert.deepEqual(mutated,['NASDAQ:ADBE','NASDAQ:QQQ']);
+ assert.equal(journal,null);
+ assert.equal(panes[1].resolved_symbol,'NASDAQ:QQQ');
+ assert.ok(seenCounts.every(x=>x===3));
+});
+test('rotation refuses missing pane witnesses, non-market workers and protected handles',()=>{
+ const initial=setup(), state=initial.state;
+ state.worker_tabs[4].layout_name='DTV Worker 06';
+ assert.throws(()=>selectRotatingPane(state),/No safely replaceable pane/);
+ state.worker_tabs[4].layout_name='DTV Market 05';
+ state.entries[38].assignment.target_id='wrong';
+ assert.throws(()=>selectRotatingPane(state),/No safely replaceable pane/);
 });

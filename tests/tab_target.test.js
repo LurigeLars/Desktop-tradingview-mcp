@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attachChart, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline } from '../src/core/tab.js';
+import { inspectShellTabMetadata, rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline } from '../src/core/tab.js';
 import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
@@ -634,3 +634,272 @@ test('saved-layout attachment uses URL token and never silently discards unsaved
   assert.deepEqual(calls, ['eh2ouJQ6']);
 });
 
+
+
+test('physical shell tab listing distinguishes duplicate layout instances', async () => {
+  const tabs = [
+    {index:0,shell_tab_id:'desktop-a',layout_name:'Stocks',active:false},
+    {index:1,shell_tab_id:'desktop-b',layout_name:'Stocks',active:true},
+    {index:2,shell_tab_id:'desktop-c',layout_name:'Stocks',active:false},
+  ];
+  const shell = async fn => fn(async () => tabs.map(row => ({...row})));
+  const result = await listShellTabs({_deps:{withShell:shell}});
+  assert.equal(result.length, 3);
+  assert.deepEqual(result.map(row => row.shell_tab_id), ['desktop-a','desktop-b','desktop-c']);
+  assert.deepEqual(result.map(row => row.layout_name), ['Stocks','Stocks','Stocks']);
+  await assert.rejects(
+    listShellTabs({_deps:{withShell:async fn=>fn(async()=>[tabs[0],tabs[0]])}}),
+    /missing or duplicated/
+  );
+});
+
+test('physical shell identity refreshes after a Desktop restart without cached CDP IDs', async () => {
+  const snapshot = shellId => ({
+    shell_tab_id:shellId,layout_name:'Stocks',index:0,active:false,
+  });
+  let current = snapshot('previous-session');
+  let selected = false;
+  const shell = async fn => fn(async expression => {
+    if (expression.includes('Array.from(document.querySelectorAll')) return [current];
+    if (expression.includes('.tab.active')) return true;
+    if (expression.includes('tab.click()')) {selected=true;return true;}
+    throw new Error('Unexpected shell expression: '+expression);
+  });
+  current = snapshot('new-session');
+  const switched = await switchShellTab({
+    shell_tab_id:'new-session',expected_layout_name:'Stocks',
+    _deps:{withShell:shell,wait:async()=>{}},
+  });
+  assert.equal(switched.success,true);
+  assert.equal(selected,true);
+  await assert.rejects(switchShellTab({
+    shell_tab_id:'previous-session',_deps:{withShell:shell},
+  }),/Stale shell_tab_id/);
+});
+
+test('shell close selects one duplicate layout by physical ID and preserves its peers', async () => {
+  const tabs=[
+    {shell_tab_id:'keep',layout_name:'Stocks'},
+    {shell_tab_id:'close-this',layout_name:'Stocks'},
+    {shell_tab_id:'other',layout_name:'Futures'},
+  ];
+  let active=null;
+  const shell=async fn=>fn(async expression=>{
+    if(expression.includes('Array.from(document.querySelectorAll'))return tabs.map((x,i)=>({...x,index:i}));
+    if(expression.includes('return {name:'))return {name:'Stocks',label:'CRWV 62.20 Stocks'};
+    if(expression.includes('const k=Object.keys(tab).find'))return tabs.find(x=>expression.includes(JSON.stringify(x.shell_tab_id)))?.layout_name || null;
+    if(expression.includes("const close=tab.querySelector")) {
+      const id=JSON.parse(expression.match(/getElementById\(("[^"]+")\)/)[1]);
+      assert.equal(id,'close-this');const index=tabs.findIndex(x=>x.shell_tab_id===id);
+      if(index<0)return false; tabs.splice(index,1);return true;
+    }
+    if(expression.includes('.tab.active'))return true;
+    if(expression.includes('tab.click()')){active='close-this';return true;}
+    if(expression.startsWith('!!document.getElementById'))return tabs.some(x=>expression.includes(JSON.stringify(x.shell_tab_id)));
+    throw new Error('Unexpected shell expression: '+expression);
+  });
+  const result=await closeShellTabById({
+    shell_tab_id:'close-this', expected_layout_name:'Stocks',
+    protected_layout_names:['DTV Market 01'],
+    _deps:{withShell:shell,wait:async()=>{}},
+  });
+  assert.equal(result.success,true);
+  assert.equal(active,'close-this');
+  assert.deepEqual(tabs.map(x=>x.shell_tab_id),['keep','other']);
+});
+
+test('shell close fails closed for workers, unknown layouts and mismatched stale identities', async () => {
+  for (const row of [
+    {shell_tab_id:'a',layout_name:'DTV Market 01'},
+    {shell_tab_id:'a',layout_name:'Private Worker'},
+    {shell_tab_id:'a',layout_name:null},
+    {shell_tab_id:'a',layout_name:'Stocks'},
+  ]) {
+    const shell=async fn=>fn(async()=>[row,{shell_tab_id:'b',layout_name:'Stocks'}]);
+    await assert.rejects(closeShellTabById({
+      shell_tab_id:'a',expected_layout_name:row.layout_name==='Stocks'?'Something Else':undefined,
+      protected_layout_names:['Private Worker'],
+      _deps:{withShell:shell},
+    }),/worker-owned|missing|changed/);
+  }
+});
+
+test('exact chart target attachment disambiguates identical chart URLs', async () => {
+  const charts=[
+    {id:'first',type:'page',url:'https://www.tradingview.com/chart/same/'},
+    {id:'second',type:'page',url:'https://www.tradingview.com/chart/same/'},
+  ];
+  let attached=null;
+  const result=await attachChartTarget({
+    target_id:'second',
+    _deps:{
+      listTargets:async()=>charts,
+      reconnect:async id=>{attached=id},
+      current:async()=>({id:attached}),
+    },
+  });
+  assert.equal(result.target_id,'second');
+  assert.equal(result.chart_id,'same');
+  await assert.rejects(attachChartTarget({
+    target_id:'old-session',_deps:{listTargets:async()=>charts},
+  }),/Stale\/non-chart/);
+});
+
+
+test('duplicate tabs without React layout name require exact visible suffix and explicit name', async () => {
+  const rows=[
+    {shell_tab_id:'keep',layout_name:null,label:'CRWV 62.20 ▲ +1.77% Stocks'},
+    {shell_tab_id:'remove',layout_name:null,label:'MMM 171.08 ▲ +5.6% Stocks'},
+    {shell_tab_id:'worker',layout_name:null,label:'BRN1! 108.40 DTV Worker 06'},
+  ];
+  let selected=false;
+  const shell=async fn=>fn(async expression=>{
+    if(expression.includes('Array.from(document.querySelectorAll'))return rows.map((x,index)=>({...x,index}));
+    if(expression.includes('return {name:'))return {name:null,label:rows.find(x=>x.shell_tab_id==='remove')?.label||''};
+    if(expression.includes('const close=tab.querySelector')){
+      const target=JSON.parse(expression.match(/getElementById\(("[^"]+")\)/)[1]);
+      if(target!=='remove')throw new Error('Wrong physical tab targeted');
+      rows.splice(rows.findIndex(x=>x.shell_tab_id==='remove'),1);return true;
+    }
+    if(expression.includes('.tab.active'))return true;
+    if(expression.includes('tab.click()')){selected=true;return true}
+    if(expression.startsWith('!!document.getElementById'))return rows.some(x=>expression.includes(JSON.stringify(x.shell_tab_id)));
+    throw new Error('Unexpected shell eval '+expression);
+  });
+  await assert.rejects(closeShellTabById({
+    shell_tab_id:'remove',_deps:{withShell:shell},
+  }),/Layout identity missing/);
+  await assert.rejects(closeShellTabById({
+    shell_tab_id:'worker',expected_layout_name:'Stocks',_deps:{withShell:shell},
+  }),/Layout name changed/);
+  const result=await closeShellTabById({
+    shell_tab_id:'remove',expected_layout_name:'Stocks',
+    protected_layout_names:['DTV Worker 06'],
+    _deps:{withShell:shell,wait:async()=>{}},
+  });
+  assert.equal(result.success,true);
+  assert.equal(selected,true);
+  assert.deepEqual(rows.map(x=>x.shell_tab_id),['keep','worker']);
+});
+
+
+test('exact unlabelled New tab may be closed safely by its physical shell id', async () => {
+  const tabs=[
+    {index:0,shell_tab_id:'original',layout_name:'Stocks',label:'CRWV Stocks'},
+    {index:1,shell_tab_id:'temporary',layout_name:null,label:'New tab'},
+    {index:2,shell_tab_id:'worker',layout_name:'DTV Market 01',label:'QQQ / DTV Market 01'},
+  ];
+  const shell=async fn=>fn(async expression=>{
+    if(expression.includes('Array.from(document.querySelectorAll')) return tabs;
+    if(expression.includes('return {name:')) return {name:null,label:'New tab'};
+    if(expression.includes('.tab.active')) return true;
+    if(expression.includes('tab.click()')) return true;
+    if(expression.includes('const close=tab.querySelector')){
+      assert.equal(expression.includes('"temporary"'),true);
+      tabs.splice(1,1); return true;
+    }
+    if(expression.startsWith('!!document.getElementById')) return tabs.some(x=>expression.includes(JSON.stringify(x.shell_tab_id)));
+    throw new Error('Unexpected expression: '+expression);
+  });
+  const result=await closeShellTabById({
+    shell_tab_id:'temporary',expected_layout_name:'New tab',
+    protected_layout_names:['DTV Market 01'],_deps:{withShell:shell,wait:async()=>{}},
+  });
+  assert.equal(result.success,true);
+  assert.deepEqual(tabs.map(x=>x.shell_tab_id),['original','worker']);
+});
+
+test('New tab label fallback rejects non-exact labels and protects workers', async () => {
+  for(const label of ['Another New tab','New tab loading','DTV Worker 06','CRWV Stocks']) {
+    const shell=async fn=>fn(async()=>[
+      {index:0,shell_tab_id:'temp',layout_name:null,label},
+      {index:1,shell_tab_id:'worker',layout_name:'DTV Market 01',label:'QQQ / DTV Market 01'},
+    ]);
+    await assert.rejects(closeShellTabById({
+      shell_tab_id:'temp',expected_layout_name:'New tab',
+      protected_layout_names:['DTV Market 01'],_deps:{withShell:shell},
+    }),/Layout name changed/);
+  }
+});
+
+
+test('shell renderer witness requires repeated exclusive focus in both shell tabs', () => {
+  const states = [
+    {shell_tab_id:'shellA',targets:[{target_id:'a',visibility:'visible',focused:true},{target_id:'b',visibility:'hidden',focused:false}]},
+    {shell_tab_id:'shellB',targets:[{target_id:'a',visibility:'hidden',focused:false},{target_id:'b',visibility:'visible',focused:true}]},
+    {shell_tab_id:'shellA',targets:[{target_id:'a',visibility:'visible',focused:true},{target_id:'b',visibility:'hidden',focused:false}]},
+    {shell_tab_id:'shellB',targets:[{target_id:'a',visibility:'hidden',focused:false},{target_id:'b',visibility:'visible',focused:true}]},
+  ];
+  const result=rankShellRendererWitnesses(states,['shellA','shellB'],['a','b']);
+  assert.equal(result.confirmed,true);
+  assert.deepEqual(result.by_shell,[
+    {shell_tab_id:'shellA',target_id:'a'},
+    {shell_tab_id:'shellB',target_id:'b'},
+  ]);
+  const ambiguous=states.map(x=>({ ...x,targets:x.targets.map(v=>({...v,focused:true,visibility:'visible'})) }));
+  assert.equal(rankShellRendererWitnesses(ambiguous,['shellA','shellB'],['a','b']).confirmed,false);
+  assert.equal(rankShellRendererWitnesses(states.slice(0,2),['shellA','shellB'],['a','b']).confirmed,false);
+});
+
+test('shell renderer probe rotates physically identified tabs and restores original', async () => {
+  let active='original';
+  const tabs=[
+    {shell_tab_id:'original',layout_name:'Stocks',active:true},
+    {shell_tab_id:'shellA',layout_name:'Worker',active:false},
+    {shell_tab_id:'shellB',layout_name:'Worker',active:false},
+  ];
+  const targets=[
+    {id:'a',type:'page',url:'https://www.tradingview.com/chart/w1/'},
+    {id:'b',type:'page',url:'https://www.tradingview.com/chart/w1/'},
+  ];
+  const operations=[];
+  const result=await probeShellRendererCorrespondence({
+    shell_tab_ids:['shellA','shellB'],target_ids:['a','b'],
+    _deps:{
+      listShellTabs:async()=>tabs,
+      listTargets:async()=>targets,
+      withShell:async fn=>fn(async expr=>{
+        if(expr.includes('tab.click()')){
+          const id=JSON.parse(expr.match(/getElementById\(("[^"]+")\)/)[1]);
+          active=id; operations.push(id); return true;
+        }
+        if(expr.includes('.tab.active')) return true;
+        throw new Error('Unexpected probe shell expression');
+      }),
+      probeTarget:async id=>({
+        visibility:((active==='shellA'&&id==='a')||(active==='shellB'&&id==='b'))?'visible':'hidden',
+        focused:(active==='shellA'&&id==='a')||(active==='shellB'&&id==='b'),
+      }),
+      wait:async()=>{},
+    },
+  });
+  assert.equal(result.restored,true);
+  assert.equal(result.witness.confirmed,true);
+  assert.equal(active,'original');
+  assert.deepEqual(operations,['shellA','shellB','shellA','shellB','original']);
+});
+
+
+test('shell metadata inspection is bounded to caller verified current shell IDs', async () => {
+  const tabs=[
+    {shell_tab_id:'valid',label:'BRN1! DTV Worker 06'},
+    {shell_tab_id:'keep',label:'NQ1! DTV Worker 06'},
+  ];
+  let expressionRead=null;
+  const result=await inspectShellTabMetadata({shell_tab_ids:['valid'],_deps:{
+    listShellTabs:async()=>tabs,
+    withShell:async fn=>fn(async expression=>{
+      expressionRead=expression;
+      return [{shell_tab_id:'valid',label:'BRN1! DTV Worker 06',attributes:[],react_ancestors:[]}];
+    }),
+  }});
+  assert.equal(result.length,1);
+  assert.equal(result[0].shell_tab_id,'valid');
+  assert.equal(expressionRead.includes('document.querySelectorAll'),true);
+  await assert.rejects(inspectShellTabMetadata({
+    shell_tab_ids:['absent'],_deps:{listShellTabs:async()=>tabs},
+  }),/Unknown shell tab identity/);
+  await assert.rejects(inspectShellTabMetadata({
+    shell_tab_ids:['a','b','c','d','e'],_deps:{listShellTabs:async()=>tabs},
+  }),/between 1 and 4/);
+});

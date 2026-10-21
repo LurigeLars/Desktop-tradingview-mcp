@@ -264,6 +264,216 @@ export function persistentWorkerRecovery(state, topology, byHandle, inspectedTar
   return { bySlot, duplicatesBySlot, targetIds, pendingSlots, conflicts };
 }
 
+
+/** Read-only audit including worker-chart renderers that fail its pane signature. */
+export async function auditWorkerTargetCandidates({ slot, _deps } = {}) {
+  const deps = resolveDeps(_deps);
+  const state = deps.status();
+  const index = Number(slot);
+  if (!Number.isInteger(index) || index < 0 || index >= state.topology_plan.tab_count) {
+    throw new Error('Specify a registered non-negative worker slot.');
+  }
+  const owned = (state.worker_tabs || []).find(row => Number(row.slot) === index);
+  const plan = state.topology_plan.tabs.find(row => Number(row.tab_index) === index);
+  if (!owned?.chart_id || !plan) throw new Error('Registered worker slot has no saved chart identity.');
+  const targets = (await deps.listTargets()).filter(target =>
+    chartIdFromTarget(target) === String(owned.chart_id)
+  );
+  const inspected = await deps.inspectTargets(targets);
+  const byHandle = entryMap(state);
+  const entries = plan.handles.map(handle => byHandle.get(handle));
+  const candidates = inspected.map(item => {
+    const matches = Number(item.pane_count) === Number(plan.pane_count)
+      && entries.every((entry, paneIndex) => entry && paneMatchesEntry(entry, item.panes?.[paneIndex]));
+    return {
+      target_id:item.target_id,
+      chart_id:item.chart_id,
+      pane_count:item.pane_count,
+      registered_target_id:String(item.target_id) === String(owned.target_id),
+      worker_signature_matches:matches,
+      panes:(item.panes || []).map((pane,i)=>({
+        index:i,symbol:pane.resolved_symbol||null,resolution:pane.resolution||null,
+        error:pane.error||null,
+      })),
+    };
+  });
+  return {
+    success:true,read_only:true,slot:index,
+    layout_name:owned.layout_name,
+    chart_id:owned.chart_id,
+    registered_target_id:owned.target_id,
+    expected_pane_count:plan.pane_count,
+    candidate_count:candidates.length,
+    matching_count:candidates.filter(c=>c.worker_signature_matches).length,
+    nonmatching_count:candidates.filter(c=>!c.worker_signature_matches).length,
+    candidates,
+    note:'Nonmatching candidates are not proven orphan shell tabs. Correlate physical shell ownership before closing.',
+  };
+}
+
+
+/**
+ * Retire exactly one proven nonmatching renderer of a registered worker layout.
+ * This targets the CDP renderer, never guesses a corresponding Desktop shell ID.
+ * Dry-run is default; mutating calls require topology lock at the tool layer.
+ */
+export async function retireNonmatchingWorkerRenderer({
+  slot, target_id, dry_run = true, _deps,
+} = {}) {
+  const deps = resolveDeps(_deps);
+  const targetId = String(target_id || '').trim();
+  if (!targetId || !/^[a-zA-Z0-9-]+$/.test(targetId)) {
+    throw new Error('Provide the exact live CDP target_id from worker_target_audit.');
+  }
+  const state = deps.status();
+  const index = Number(slot);
+  const registered = (state.worker_tabs || []).find(x => Number(x.slot) === index);
+  if (!registered?.target_id || !registered.chart_id) {
+    throw new Error('Registered worker slot has no verified live identity.');
+  }
+  if (String(registered.target_id) === targetId) {
+    throw new Error('Refusing to retire the registered worker target.');
+  }
+  const audit = await auditWorkerTargetCandidates({slot:index,_deps});
+  const matching = audit.candidates.filter(x=>x.worker_signature_matches);
+  const extraneous = audit.candidates.filter(x=>!x.worker_signature_matches);
+  if (audit.candidate_count !== 2
+    || matching.length !== 1
+    || matching[0].target_id !== String(registered.target_id)
+    || !matching[0].registered_target_id
+    || extraneous.length !== 1
+    || extraneous[0].target_id !== targetId
+    || extraneous[0].registered_target_id) {
+    throw new Error('Worker renderer candidate set is not uniquely proven safe to prune.');
+  }
+  const rebind = await rebindPersistentWorkers({dry_run:true,_deps});
+  if (!rebind.success || rebind.verified_slots.length !== state.topology_plan.tab_count ||
+      rebind.missing_slots.length || rebind.duplicate_slots.length || rebind.conflicts.length) {
+    throw new Error('Full worker rebind verification failed; refusing orphan cleanup.');
+  }
+  const plan = {
+    success:true,dry_run:dry_run !== false,
+    slot:index,chart_id:String(registered.chart_id),
+    registered_target_id:String(registered.target_id),
+    orphan_target_id:targetId,orphan_panels:extraneous[0].panes,
+    verified_worker_slots:rebind.verified_slots,
+    decision:'retire_one_nonmatching_renderer',
+  };
+  if (dry_run !== false) return plan;
+  // A second bounded read immediately before the irreversible renderer close.
+  const latest = await auditWorkerTargetCandidates({slot:index,_deps});
+  if (latest.candidate_count !== 2
+    || latest.matching_count !== 1
+    || latest.nonmatching_count !== 1
+    || latest.candidates.find(x=>x.registered_target_id)?.target_id !== String(registered.target_id)
+    || latest.candidates.find(x=>!x.worker_signature_matches)?.target_id !== targetId) {
+    throw new Error('Renderer identities changed during pre-close revalidation.');
+  }
+  const closed = await deps.closeTabByOwned({target_id:targetId,chart_id:String(registered.chart_id)});
+  const afterAudit = await auditWorkerTargetCandidates({slot:index,_deps});
+  const afterRebind = await rebindPersistentWorkers({dry_run:true,_deps});
+  return {
+    ...plan,dry_run:false,
+    closed,
+    registered_worker_preserved:afterRebind.success &&
+      afterAudit.candidate_count===1 &&
+      afterAudit.matching_count===1 &&
+      afterAudit.candidates[0].target_id===String(registered.target_id),
+    remaining_candidates:afterAudit.candidates,
+    verified_worker_slots_after:afterRebind.verified_slots,
+    conflicts_after:afterRebind.conflicts,
+  };
+}
+
+
+/** Retire a physical shell whose mismatching renderer has already been removed. */
+export async function cleanupRetiredWorkerShell({
+  slot,shell_tab_id,live_shell_tab_id,retired_target_id,retired_symbol,
+  dry_run=true,_deps,
+}={}) {
+  const deps=resolveDeps(_deps);
+  const state=deps.status();
+  const index=Number(slot);
+  const owned=(state.worker_tabs||[]).find(t=>Number(t.slot)===index);
+  if(!owned?.persistent_layout || !owned.chart_id || !owned.target_id) {
+    throw new Error('Registered persistent worker identity required.');
+  }
+  const retiredId=String(retired_target_id||'').trim();
+  if(!retiredId || retiredId===String(owned.target_id)) {
+    throw new Error('Retired target ID must be distinct from the registered worker.');
+  }
+  const targets=await deps.listTargets();
+  if(targets.some(t=>String(t.id)===retiredId)) {
+    throw new Error('Retired renderer is still alive; do not close its shell tab.');
+  }
+  const audit=await auditWorkerTargetCandidates({slot:index,_deps});
+  if(audit.candidate_count!==1 || audit.matching_count!==1 ||
+      audit.nonmatching_count!==0 ||
+      !audit.candidates[0].registered_target_id ||
+      String(audit.candidates[0].target_id)!==String(owned.target_id)) {
+    throw new Error('Expected one and only one live verified worker renderer.');
+  }
+  const verified=await rebindPersistentWorkers({dry_run:true,_deps});
+  if(!verified.success || verified.verified_slots.length!==state.topology_plan.tab_count ||
+     verified.missing_slots.length || verified.duplicate_slots.length ||
+     verified.conflicts.length) {
+    throw new Error('Worker fleet not fully verified.');
+  }
+  const registeredPaneSymbols=audit.candidates[0].panes
+    .map(x=>String(x.symbol||'').split(':').pop())
+    .filter(Boolean);
+  const retiredSymbol=String(retired_symbol||'').trim();
+  if(!retiredSymbol || registeredPaneSymbols.includes(retiredSymbol)) {
+    throw new Error('Stale tab symbol cannot match the active worker pane symbols.');
+  }
+  const readShell=_deps?.listShellTabs || (()=>tabCore.listShellTabs());
+  const shells=await readShell();
+  const same=shells.filter(x=>x.layout_name===String(owned.layout_name));
+  if(same.length!==2 || String(shell_tab_id)===String(live_shell_tab_id)) {
+    throw new Error('Exactly two different physical shell tabs for this worker required.');
+  }
+  const stale=same.find(x=>x.shell_tab_id===String(shell_tab_id));
+  const keep=same.find(x=>x.shell_tab_id===String(live_shell_tab_id));
+  const starts=(label,symbol)=>{
+    const val=String(label||'').trim();
+    return val.startsWith(symbol) && /^[▲▼↗↘ ]|^$/.test(val.slice(symbol.length,symbol.length+1));
+  };
+  const retainSymbol=registeredPaneSymbols.find(symbol=>keep && starts(keep.label,symbol));
+  if(!stale || stale.active || !starts(stale.label,retiredSymbol) || !retainSymbol ||
+      retiredSymbol===retainSymbol) {
+    throw new Error('Shell labels do not uniquely witness stale vs active worker.');
+  }
+  const report={success:true,dry_run:dry_run!==false,slot:index,
+    layout_name:owned.layout_name,chart_id:owned.chart_id,
+    retired_target_id:retiredId,stale_shell_tab_id:stale.shell_tab_id,
+    registered_target_id:owned.target_id,retained_shell_tab_id:keep.shell_tab_id,
+    retired_symbol:retiredSymbol,retained_symbol:retainSymbol,
+    verified_slots:verified.verified_slots};
+  if(dry_run!==false)return report;
+  const inspectedAgain=await auditWorkerTargetCandidates({slot:index,_deps});
+  if(inspectedAgain.candidate_count!==1 ||
+      inspectedAgain.candidates[0].target_id!==String(owned.target_id) ||
+      inspectedAgain.matching_count!==1 ||
+      (await deps.listTargets()).some(t=>String(t.id)===retiredId)) {
+    throw new Error('Worker target identity changed before shell close.');
+  }
+  const closer=_deps?.closeRetiredWorkerShell||tabCore.closeRetiredWorkerShell;
+  const closed=await closer({
+    shell_tab_id:stale.shell_tab_id,live_shell_tab_id:keep.shell_tab_id,
+    expected_layout_name:owned.layout_name,retired_symbol:retiredSymbol,
+    retained_symbol:retainSymbol,
+  });
+  const after=await rebindPersistentWorkers({dry_run:true,_deps});
+  const afterShell=await readShell();
+  return {...report,dry_run:false,closed,
+    remaining_shells:afterShell.filter(x=>x.layout_name===String(owned.layout_name)),
+    all_workers_verified:after.success &&
+       after.verified_slots.length===state.topology_plan.tab_count &&
+       !after.missing_slots.length && !after.duplicate_slots.length &&
+       !after.conflicts.length,
+    missing_slots_after:after.missing_slots,conflicts_after:after.conflicts};
+}
+
 /** Rebind restored persistent worker charts to NEW CDP IDs without creating,
  * modifying, saving or closing any chart. Refuse partial/ambiguous recovery. */
 export async function rebindPersistentWorkers({ dry_run = true, _deps } = {}) {

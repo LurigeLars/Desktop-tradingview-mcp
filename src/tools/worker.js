@@ -5,6 +5,7 @@ import * as core from '../core/worker.js';
 
 import { rotateWorkerSnapshot, recoverRotatingPane } from '../core/rotating-worker.js';
 import { topologyMutationLockStatus, withTopologyMutationLock } from '../core/topology-lock.js';
+import { workerUsageReport } from '../core/worker-usage.js';
 
 const studySchema = z.union([
   z.string(),
@@ -80,12 +81,36 @@ export function registerWorkerTools(server) {
       opened_tabs:0,execution_quote:false},true));
 
 
+  server.registerTool('worker_usage', {
+    description: 'Read 14-day bounded evidence of per-handle successful resident pane reads. Consumer names are caller-declared, not authenticated. Zero reads are not evidence of no future need.',
+    inputSchema: {},
+    annotations: {readOnlyHint:true, destructiveHint:false, idempotentHint:true, openWorldHint:false},
+  }, async () => {
+    try { return jsonResult(workerUsageReport()); }
+    catch (err) { return jsonResult({success:false,error:err.message},true); }
+  });
+
   server.registerTool('worker_status', {
     description: 'Read the logical realtime worker registry, capacity, groups and current physical-assignment status.',
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
-    try { return jsonResult({ ...core.status(), mutation_lock: topologyMutationLockStatus() }); }
+    try {
+      const audit = workerUsageReport();
+      const reads = {}, consumers = {};
+      let requests = 0;
+      for (const day of Object.values(audit.days || {})) {
+        requests += day.requests || 0;
+        for (const [h,item] of Object.entries(day.handles || {}))
+          reads[h] = (reads[h] || 0) + (item.reads || 0);
+        for (const [k,item] of Object.entries(day.consumers || {}))
+          consumers[k] = (consumers[k] || 0) + (item.requests || 0);
+      }
+      return jsonResult({...core.status(), mutation_lock:topologyMutationLockStatus(),
+        usage_summary:{window_days:14, observed_request_count:requests,
+          pane_reads_by_handle:reads, declared_consumer_requests:consumers,
+          note:'Call worker_usage for per-day details; zero means not observed, not never needed.'}});
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
