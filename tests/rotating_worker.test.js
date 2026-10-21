@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rotateWorkerSnapshot, recoverRotatingPane, selectRotatingPane } from '../src/core/rotating-worker.js';
+import { rotateWorkerSnapshot, recoverRotatingPane, selectRotatingPane, rotationCandidates } from '../src/core/rotating-worker.js';
 
 function setup() {
   const entries = Array.from({length:40},(_,i)=>({
@@ -38,7 +38,8 @@ test('one low-priority pane in fifth existing tab, never a sixth',()=>{
   assert.equal(v.slot,4);assert.equal(v.pane_index,6);
   assert.equal(v.chart_id,'chart4');
   x.state.entries[38].groups.push('watch:user_retained');
-  assert.throws(() => selectRotatingPane(x.state), /No safely replaceable pane/);
+  assert.notEqual(selectRotatingPane(x.state).entry.handle,'qqq-5m');
+  assert.equal(rotationCandidates(x.state).some(c => c.entry.handle==='qqq-5m'),false);
 });
 test('sample and restore original in the same worker tab with no new tabs',async()=>{
   const x=setup();
@@ -126,8 +127,36 @@ test('rotating sampler remains operational after shrinking to one three-pane mar
 test('rotation refuses missing pane witnesses, non-market workers and protected handles',()=>{
  const initial=setup(), state=initial.state;
  state.worker_tabs[4].layout_name='DTV Worker 06';
- assert.throws(()=>selectRotatingPane(state),/No safely replaceable pane/);
+ assert.throws(()=>selectRotatingPane(state,{preferred_handle:'qqq-5m'}),/not safely borrowable/);
  state.worker_tabs[4].layout_name='DTV Market 05';
  state.entries[38].assignment.target_id='wrong';
  assert.throws(()=>selectRotatingPane(state),/No safely replaceable pane/);
+});
+
+test('resident is not a permanent lock, while Trade Alert and user-retained handles are exclusive',()=>{
+ const x=setup(),state=x.state;
+ const first=state.entries[0];
+ first.groups=['morning','watch:resident'];
+ assert.equal(rotationCandidates(state).some(c=>c.entry.handle===first.handle),true);
+ first.groups.push('watch:user_retained');
+ assert.equal(rotationCandidates(state).some(c=>c.entry.handle===first.handle),false);
+ first.groups=['research:brent_nq_event'];
+ assert.equal(rotationCandidates(state).some(c=>c.entry.handle===first.handle),false);
+ first.groups=['worker:exclusive'];
+ assert.equal(rotationCandidates(state).some(c=>c.entry.handle===first.handle),false);
+ first.groups=['lease:exclusive:trade_alert'];
+ assert.equal(rotationCandidates(state).some(c=>c.entry.handle===first.handle),false);
+ first.groups=['watch:resident'];
+ assert.equal(selectRotatingPane(state,{preferred_handle:first.handle}).entry.handle,first.handle);
+});
+test('temporary trading workers may be borrowed, but exact protected Brent/Nasdaq remain untouched',()=>{
+ const x=setup(),state=x.state;
+ const original=state.entries[0];
+ original.groups=['watch:intraday','trade:adbe_crwv'];
+ const brent=state.entries[1];
+ brent.groups=['research:brent_nq_event'];
+ const candidates=rotationCandidates(state);
+ assert.ok(candidates.some(c=>c.entry.handle===original.handle));
+ assert.ok(!candidates.some(c=>c.entry.handle===brent.handle));
+ assert.throws(()=>selectRotatingPane(state,{preferred_handle:brent.handle}),/protected/);
 });
