@@ -85,7 +85,7 @@ export function registerTabTools(server) {
   });
 
   server.registerTool('tab_new', {
-    description: 'Open or reuse a personal TradingView Desktop chart. Named saved layouts reuse one already-open non-worker tab by default. Requires force_new_tab=true for an intentional duplicate; worker layouts are never reusable or editable.',
+    description: 'Open or reuse a personal TradingView Desktop chart. layout=new with name and symbol creates the named layout first, then changes its symbol; existing saved layouts reuse a non-worker tab by default. Worker layouts are protected.',
     inputSchema: {
       layout: z.string().optional().describe('"new" for a blank new layout, or a saved layout name (substring match). Omit to leave the tab on the new-tab page.'),
       name: z.string().optional().describe('Name for the new layout (used with layout: "new"; default "New layout")'),
@@ -160,14 +160,15 @@ export function registerTabTools(server) {
   });
 
   server.registerTool('tab_close', {
-    description: 'Close one non-worker TradingView Desktop tab. In multi-tab runtimes target_id is required so concurrent MCP clients cannot close whichever tab happens to be active. DTV-owned worker tabs are protected; worker lifecycle changes must go through worker_provision.',
+    description: 'Close one verified non-worker Desktop tab. Unsaved changes are preserved unless discard_unsaved_changes=true is explicitly requested; ambiguous confirmations always fail closed. Worker layouts are protected.',
     inputSchema: {
       target_id: z.string().optional().describe('Exact live CDP target ID from tab_list, for uniquely mappable shell tabs.'),
       shell_tab_id: z.string().optional().describe('Physical Desktop shell_tab_id from a fresh tab_list. Supports duplicate layouts.'),
       expected_layout_name: z.string().optional().describe('Expected layout name from shell_tabs to prevent stale-identity mistakes.'),
+      discard_unsaved_changes: z.coerce.boolean().optional().describe('Explicitly discard unsaved changes ONLY in the exact identified tab, when TradingView presents its matching close confirmation (default false).'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  }, async ({ target_id, shell_tab_id, expected_layout_name }) => {
+  }, async ({ target_id, shell_tab_id, expected_layout_name, discard_unsaved_changes = false }) => {
     try {
       return jsonResult(await withTopologyMutationLock('tab_close', async () => {
         if (target_id && shell_tab_id) throw new Error('Use either target_id or shell_tab_id, not both.');
@@ -187,6 +188,7 @@ export function registerTabTools(server) {
           return core.closeShellTabById({
             shell_tab_id, expected_layout_name: expected,
             protected_layout_names: workerNames,
+            discard_unsaved_changes,
           });
         }
         let target = null;
@@ -211,6 +213,9 @@ export function registerTabTools(server) {
           );
         }
 
+        if (discard_unsaved_changes) {
+          throw new Error('discard_unsaved_changes requires a verified physical shell_tab_id and expected_layout_name; target-only mapping is ambiguous.');
+        }
         return core.closeTabByTargetId({ target_id: target.id });
       }));
     }

@@ -1,7 +1,86 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inspectShellTabMetadata, rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline } from '../src/core/tab.js';
+import { inspectShellTabMetadata, rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline, withShell, shouldDirectNavigate } from '../src/core/tab.js';
 import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
+
+test('named new layout never bypasses the picker even if symbol/as_chart are supplied', () => {
+  assert.equal(shouldDirectNavigate({layout:'new',name:'MRNA scratch',symbol:'NASDAQ:MRNA',as_chart:true}), false);
+  assert.equal(shouldDirectNavigate({layout:'new',symbol:'NASDAQ:MRNA'}), false);
+  assert.equal(shouldDirectNavigate({symbol:'NASDAQ:MRNA',as_chart:true}), true);
+  assert.equal(shouldDirectNavigate({layout:'Existing',symbol:'NASDAQ:MRNA'}), true);
+});
+
+test('verified shell operation errors are not disguised as missing tabbed-window', async () => {
+  const shellTarget={id:'shell',type:'page',title:'tabbed-window',url:'file:///app/window/index.html'};
+  const deps={
+    listTargets:async()=>[shellTarget],
+    connectTarget:async(_id,fn)=>fn(async() => true),
+  };
+  await assert.rejects(withShell(async()=>{throw new Error('unsaved confirmation pending')},deps),/unsaved confirmation pending/);
+  assert.equal(await withShell(async()=>42,deps),42);
+});
+
+test('unsaved confirmation preserves changes by default and discards only when explicitly requested', async () => {
+  for(const explicit of [false,true]){
+    let closed=false;
+    let discards=0;
+    const tabs=[
+      {shell_tab_id:'keep',layout_name:'User chart',label:'SPY User chart',active:false},
+      {shell_tab_id:'scratch',layout_name:'Scratch',label:'MRNA Scratch',active:true}
+    ];
+    const shell=async fn=>fn(async expression=>{
+      if(expression.includes('Array.from(document.querySelectorAll') &&
+         !expression.includes('const dialogs=Array.from'))return tabs.map((v,index)=>({...v,index}));
+      if(expression.includes('return {name:'))return {name:'Scratch',label:'MRNA Scratch'};
+      if(expression.includes('const close=tab.querySelector'))return true;
+      if(expression.includes('const dialogs=Array.from')){
+        if(!explicit)return {kind:'unsaved_confirmation'};
+        discards++;closed=true;return {kind:'discard_clicked'};
+      }
+      if(expression.startsWith('!!document.getElementById'))return !closed;
+      if(expression.includes('tab.click()'))return true;
+      if(expression.includes('.tab.active'))return true;
+      throw new Error('Unexpected shell eval: '+expression);
+    });
+    const args={
+      shell_tab_id:'scratch',expected_layout_name:'Scratch',discard_unsaved_changes:explicit,
+      protected_layout_names:['DTV Market 01'],_deps:{withShell:shell,wait:async()=>{}}
+    };
+    if(explicit){
+      const result=await closeShellTabById(args);
+      assert.equal(result.success,true);
+      assert.equal(result.discarded_unsaved_changes,true);
+      assert.equal(discards,1);
+    }else{
+      await assert.rejects(closeShellTabById(args),/unsaved chart changes/);
+      assert.equal(closed,false);
+      assert.equal(discards,0);
+    }
+  }
+});
+
+test('close refuses confirmation if the active physical tab changes', async () => {
+  const tabs=[
+    {shell_tab_id:'other',layout_name:'User',label:'User chart'},
+    {shell_tab_id:'scratch',layout_name:'Scratch',label:'MRNA Scratch'}
+  ];
+  const shell=async fn=>fn(async expression=>{
+    if(expression.includes('Array.from(document.querySelectorAll') &&
+       !expression.includes('const dialogs=Array.from'))return tabs;
+    if(expression.includes('return {name:'))return {name:'Scratch',label:'MRNA Scratch'};
+    if(expression.includes('const close=tab.querySelector'))return true;
+    if(expression.includes('const dialogs=Array.from'))return {kind:'active_tab_changed'};
+    if(expression.startsWith('!!document.getElementById'))return true;
+    if(expression.includes('tab.click()'))return true;
+    if(expression.includes('.tab.active'))return true;
+    throw new Error('Unexpected shell eval');
+  });
+  await assert.rejects(closeShellTabById({
+    shell_tab_id:'scratch',expected_layout_name:'Scratch',discard_unsaved_changes:true,
+    _deps:{withShell:shell,wait:async()=>{}},
+  }),/Active Desktop tab changed/);
+});
+
 
 test('chart target detection validates TradingView hostname and /chart path', () => {
   assert.equal(isChartPageTarget({
