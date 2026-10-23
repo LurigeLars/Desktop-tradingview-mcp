@@ -810,6 +810,73 @@ async function clickDesktopCloseDialog(id,{_deps}={}) {
   return evaluate(id,closeDialogExpression({click:true}));
 }
 
+
+/** Read-only bounded diagnostics for new-layout naming. No form values read. */
+export function layoutCreateProbeExpression() {
+  return `(function(){
+    const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};
+    const buttons=Array.from(document.querySelectorAll('button,[role="button"]'));
+    const exact=buttons.filter(b=>visible(b)&&
+      /^(Create new layout|Create|New layout)$/i.test(String(b.textContent||'').trim()));
+    const inputs=Array.from(document.querySelectorAll('input')).map(e=>({
+      placeholder:String(e.getAttribute('placeholder')||'').slice(0,80),
+      aria_label:String(e.getAttribute('aria-label')||'').slice(0,80),
+      visible:visible(e),
+      type:String(e.getAttribute('type')||'').slice(0,30),
+    }));
+    const dialogs=Array.from(document.querySelectorAll(
+      '[role="dialog"],[aria-modal="true"],[class*="dialog"],[class*="modal"]'))
+      .filter(visible);
+    const text=String(document.body?.innerText||'');
+    const b=document.querySelector('.create-new-layout-button');
+    return {
+      is_landing:!!(b||document.querySelector('.layout-list-item')||
+        document.querySelector('.layout-list-expand-button')),
+      create_new_layout_selector:!!b,
+      create_new_layout_visible:!!(b&&visible(b)),
+      exact_create_buttons:exact.map(b=>({
+        text:String(b.textContent||'').trim().slice(0,50),
+        disabled:!!b.disabled,
+      })).slice(0,8),
+      inputs:inputs.slice(0,12),
+      modal_count:dialogs.length,
+      naming_input_visible:Array.from(document.querySelectorAll(
+        'input[placeholder="My layout"],input[aria-label="Layout name"]')).some(visible),
+      has_create_heading:/create new layout/i.test(text),
+      body_has_unsaved_warning:/unsaved changes/i.test(text),
+    };
+  })()`;
+}
+
+export async function probeLayoutCreateUi({_deps}={}) {
+  const listTargets=_deps?.listTargets||listCdpTargets;
+  const inspect=_deps?.evaluateTarget||((target,expression)=>
+    withTarget(target,evalIn=>evalIn(expression),1200));
+  const targets=await listTargets();
+  const candidates=targets.filter(t=>
+    isDesktopUiTarget(t)||isNewTabPageTarget(t)).slice(0,20);
+  const inspected=await Promise.all(candidates.map(async t=>{
+    try{
+      const summary=await inspect(t.id,layoutCreateProbeExpression());
+      return {target_id:t.id,
+        target_type:isNewTabPageTarget(t)?'new-tab':'desktop-ui',
+        ...summary};
+    }catch(e){
+      return {target_id:t.id,
+        target_type:isNewTabPageTarget(t)?'new-tab':'desktop-ui',
+        error:String(e?.message||e).slice(0,180)};
+    }
+  }));
+  return {
+    success:true,
+    desktop_target_count:candidates.length,
+    chart_target_count:targets.filter(isChartPageTarget).length,
+    create_surface_candidates:inspected.filter(x=>x.create_new_layout_selector||
+      x.naming_input_visible||x.exact_create_buttons?.length),
+    inspected,
+  };
+}
+
 async function findLandingTarget({ beforeIds = [], timeoutMs = 1000, requireNew = false } = {}) {
   const deadline = Date.now() + timeoutMs;
   const before = beforeIds instanceof Set ? beforeIds : new Set(beforeIds);

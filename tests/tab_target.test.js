@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { inspectShellTabMetadata, rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline, withShell, shouldDirectNavigate, isDesktopUiTarget, closeDialogExpression, probeDesktopCloseDialogs } from '../src/core/tab.js';
+import { inspectShellTabMetadata, rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline, withShell, shouldDirectNavigate, isDesktopUiTarget, closeDialogExpression, probeDesktopCloseDialogs, layoutCreateProbeExpression, probeLayoutCreateUi } from '../src/core/tab.js';
 import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
 
 test('classless Desktop unsaved-close popover is recognized only for an exact tab and opt-in', async () => {
@@ -52,6 +52,45 @@ test('classless Desktop unsaved-close popover is recognized only for an exact ta
       assert.equal(closed,false);
     }
   }
+});
+
+
+test('read-only landing probe reports actual selectors without disclosing values', async()=>{
+  const btn={textContent:'Create new layout',disabled:false,
+    getBoundingClientRect:()=>({width:100,height:35})};
+  const input={getAttribute:key=>key==='placeholder'?'My layout':
+    key==='type'?'text':key==='aria-label'?'Layout name':null,
+    getBoundingClientRect:()=>({width:100,height:30})};
+  const document={
+    body:{innerText:'Create new layout'},
+    querySelector:q=>q==='.create-new-layout-button'?btn:null,
+    querySelectorAll:q=>{
+      if(q==='button,[role="button"]')return [btn];
+      if(q==='input')return [input];
+      if(q.includes('input[placeholder="My layout"]'))return [input];
+      return [];
+    }
+  };
+  const expr=layoutCreateProbeExpression();
+  const state=runInNewContext(expr,{document});
+  assert.equal(state.create_new_layout_visible,true);
+  assert.equal(state.naming_input_visible,true);
+  assert.equal(state.inputs[0].placeholder,'My layout');
+  const targets=[
+    {id:'newtab',type:'page',url:'file:///C:/TradingView/resources/app.asar/app/new-tab/index.html'},
+    {id:'chart',type:'page',url:'https://www.tradingview.com/chart/abc/'},
+    {id:'other',type:'page',url:'https://example.org/private'},
+  ];
+  let examined=[];
+  const result=await probeLayoutCreateUi({_deps:{
+    listTargets:async()=>targets,
+    evaluateTarget:async(id,x)=>{examined.push(id);return runInNewContext(x,{document});},
+  }});
+  assert.equal(result.success,true);
+  assert.deepEqual(examined,['newtab']);
+  assert.equal(result.chart_target_count,1);
+  assert.equal(result.create_surface_candidates.length,1);
+  assert.equal(result.create_surface_candidates[0].target_id,'newtab');
 });
 
 test('Desktop confirmation discovery excludes arbitrary webpages and reports only exact local modal', async()=>{
