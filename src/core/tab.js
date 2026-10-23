@@ -239,12 +239,18 @@ export async function switchShellTab({ shell_tab_id, expected_layout_name, _deps
   };
 }
 
+// Ephemeral, bounded link between a protected close attempt and an explicitly
+// approved retry. No persistent state and no permission to close any other tab.
+const pendingUnsavedClose = new Map();
+const UNSAVED_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
+
 export async function closeShellTabById({
   shell_tab_id, expected_layout_name, protected_layout_names = [],
   discard_unsaved_changes = false, _deps,
 } = {}) {
   const shell = _deps?.withShell || withShell;
   const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const pendingStore = _deps?.pendingStore || pendingUnsavedClose;
   const tabs = await listShellTabs({ _deps: {withShell:shell} });
   if (tabs.length <= 1) throw new Error('Cannot close the last Desktop tab.');
   const tab = requireShellTab(tabs, shell_tab_id, expected_layout_name);
@@ -278,7 +284,36 @@ export async function closeShellTabById({
       (_deps?.withShell ? null : probeDesktopCloseDialogs);
     const externalClick=_deps?.clickExternalDialog ||
       (_deps?.withShell ? null : clickDesktopCloseDialog);
-    const clicked = await evalIn("(function(){const tab=document.getElementById("+id+");" +
+    const pending = pendingStore.get(tab.shell_tab_id);
+    let confirmationHandled = false;
+    let resumedDialog = false;
+    if (pending) {
+      if (pending.layout !== tab.layout_name ||
+          pending.expires_at < Date.now() ||
+          !baselineIds.includes(pending.target_id)) {
+        pendingStore.delete(tab.shell_tab_id);
+      } else {
+        if (!discard_unsaved_changes)
+          throw new Error('Unsaved confirmation is already open for the exact tab; explicit discard required.');
+        if (!externalProbe || !externalClick)
+          throw new Error('Cannot verify previous Electron confirmation target.');
+        const snapshotDialog=await externalProbe({baseline_ids:[],include_existing:true});
+        if(snapshotDialog.matches.length!==1 ||
+           snapshotDialog.matches[0].target_id!==pending.target_id)
+          throw new Error('Previous Electron confirmation changed or became ambiguous.');
+        const exactActive=await evalIn(
+          "document.querySelector('.tabs-container .tab.active')?.id==="+id+
+          " && !!document.getElementById("+id+")");
+        if(!exactActive)throw new Error('Physical tab changed before explicit confirmation.');
+        const result=await externalClick(pending.target_id);
+        if(!result?.matched||!result?.clicked)
+          throw new Error('Electron confirmation changed before explicit click.');
+        pendingStore.delete(tab.shell_tab_id);
+        confirmationHandled=true;
+        resumedDialog=true;
+      }
+    }
+    const clicked = resumedDialog || await evalIn("(function(){const tab=document.getElementById("+id+");" +
       "if(!tab||!tab.matches('.tabs-container .tab'))return false;" +
       "const close=tab.querySelector('.tab-close-button-container button, [class*=close] button, button[class*=close]');" +
       "if(!close)return false;" +
@@ -287,10 +322,10 @@ export async function closeShellTabById({
       "close[k].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:close,target:close});" +
       "}else close.click();return true;})()");
     if (!clicked) throw new Error('Exact Desktop tab close button not available.');
-    let confirmationHandled = false;
     let lastDialogProbe = null;
     for (let n=0;n<30;n++) {
       if (!await evalIn("!!document.getElementById("+id+")")) {
+        pendingStore.delete(tab.shell_tab_id);
         return {success:true,action:'desktop_shell_tab_closed',
           shell_tab_id:tab.shell_tab_id,layout_name:tab.layout_name,
           discarded_unsaved_changes:confirmationHandled};
@@ -350,11 +385,17 @@ export async function closeShellTabById({
             "document.querySelector('.tabs-container .tab.active')?.id==="+id+
             " && !!document.getElementById("+id+")");
           if(!stillActive)throw new Error('Physical tab changed during dialog discovery.');
-          if(!discard_unsaved_changes)
+          if(!discard_unsaved_changes){
+            pendingStore.set(tab.shell_tab_id,{
+              layout:tab.layout_name,target_id:match.target_id,
+              expires_at:Date.now()+UNSAVED_CONFIRMATION_TTL_MS,
+            });
             throw new Error('Unsaved chart confirmation is in a separate Electron target. Explicit discard required.');
+          }
           const acted=await externalClick(match.target_id);
           if(!acted?.matched||!acted?.clicked)
             throw new Error('Desktop dialog changed before the explicit click.');
+          pendingStore.delete(tab.shell_tab_id);
           confirmationHandled=true;
         }
       }
@@ -1351,8 +1392,43 @@ export async function newTab({
       // "Create new layout" opens a naming dialog; the Create button stays
       // disabled until the name input is filled (React controlled input, so
       // the native value setter + input event are required).
-      await evalIn(`(function(){ var b = document.querySelector('.create-new-layout-button'); if (b) b.click(); })()`);
-      await new Promise(r => setTimeout(r, 700));
+      // A new-tab CDP target can exist before the layout picker mounts its
+      // React handlers. Wait for visible controls rather than assuming readiness.
+      let pickerReady = false;
+      for (let attempt=0;attempt<24;attempt++){
+        pickerReady = await evalIn(`(function(){
+          const b=document.querySelector('.create-new-layout-button');
+          if(!b)return false;
+          const r=b.getBoundingClientRect();
+          return r.width>0&&r.height>0&&!b.disabled;
+        })()`);
+        if(pickerReady)break;
+        await new Promise(r=>setTimeout(r,125));
+      }
+      if(!pickerReady)throw new Error('Layout picker Create new layout button did not become ready.');
+      const triggered=await evalIn(`(function(){
+        const b=document.querySelector('.create-new-layout-button');
+        if(!b)return false;
+        const k=Object.keys(b).find(x=>x.startsWith('__reactProps'));
+        if(k&&typeof b[k].onClick==='function')
+          b[k].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:b,target:b});
+        else b.click();
+        return true;
+      })()`);
+      if(!triggered)throw new Error('Layout picker Create new layout click failed.');
+      // Dialog creation may be asynchronous on a newly initialized tab.
+      let hasNamingInput = false;
+      for(let attempt=0;attempt<24;attempt++){
+        hasNamingInput=await evalIn(`(function(){
+          const el=document.querySelector('input[placeholder="My layout"]');
+          if(!el)return false;
+          const r=el.getBoundingClientRect();return r.width>0&&r.height>0;
+        })()`);
+        if(hasNamingInput)break;
+        await new Promise(r=>setTimeout(r,125));
+      }
+      if(!hasNamingInput)
+        throw new Error('Create-layout dialog name input did not appear after verified picker click.');
       const filled = await evalIn(`
         (function() {
           // The dialog's name field (not the landing page's Search box).
@@ -1412,7 +1488,7 @@ export async function newTab({
       foundTitle = await evalIn(clickByTitle);
     }
     return foundTitle;
-  }, 3500);
+  }, wantNew ? 7500 : 3500);
 
   if (!picked) throw new Error(`Layout matching "${layout}" not found in the layout list.`);
 

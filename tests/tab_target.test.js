@@ -177,7 +177,7 @@ test('cross-target unsaved confirmation requires opt-in and exact active physica
     });
     const args={shell_tab_id:'scratch',expected_layout_name:'Scratch',
       discard_unsaved_changes:mode!=='no-opt-in',_deps:{
-        withShell:shell,wait:async()=>{},
+        withShell:shell,wait:async()=>{},pendingStore:new Map(),
         closeTargetSnapshot:async()=>[{id:'old-modal'}],
         probeExternalDialogs:async()=>{scans++;return {inspected:1,desktop_target_count:1,
           matches:[{target_id:'new-modal',new_since_close:true}],other_target_types:[]}},
@@ -197,6 +197,53 @@ test('cross-target unsaved confirmation requires opt-in and exact active physica
     }
     assert.equal(scans,1);
   }
+});
+
+
+test('explicit second close resumes only the same pending Electron dialog and exact physical tab',async()=>{
+  const pendingStore=new Map();
+  let modalOpen=false,closed=false,clicks=0;
+  const tabs=[
+    {shell_tab_id:'keep',layout_name:'GEX Research Pilot',label:'SPY GEX Research Pilot'},
+    {shell_tab_id:'scratch',layout_name:'Scratch QA',label:'MRNA Scratch QA'},
+  ];
+  const shell=async fn=>fn(async expr=>{
+    if(expr.includes('Array.from(document.querySelectorAll')&&!expr.includes('const discard='))return tabs;
+    if(expr.includes('return {name:'))return {name:'Scratch QA',label:'MRNA Scratch QA'};
+    if(expr.includes('const close=tab.querySelector'))return true;
+    if(expr.includes('const discard=Array.from'))return {kind:'none'};
+    if(expr.includes('&& !!document.getElementById'))return true;
+    if(expr.startsWith('!!document.getElementById'))return !closed;
+    if(expr.includes('tab.click()')||expr.includes('.tab.active'))return true;
+    throw new Error('unexpected shell eval: '+expr);
+  });
+  const deps={
+    withShell:shell,wait:async()=>{},pendingStore,
+    closeTargetSnapshot:async()=>modalOpen?[{id:'modal1'}]:[],
+    probeExternalDialogs:async ({baseline_ids})=>{
+      modalOpen=true;
+      return {desktop_target_count:1,inspected:1,other_target_types:[],
+        matches:[{target_id:'modal1',new_since_close:!baseline_ids.includes('modal1')}]};
+    },
+    clickExternalDialog:async id=>{
+      assert.equal(id,'modal1');
+      clicks++;modalOpen=false;closed=true;return {matched:true,clicked:true};
+    },
+  };
+  const call=discard_unsaved_changes=>closeShellTabById({
+    shell_tab_id:'scratch',expected_layout_name:'Scratch QA',
+    discard_unsaved_changes,_deps:deps,
+  });
+  await assert.rejects(call(false),/Explicit discard required/);
+  assert.equal(pendingStore.has('scratch'),true);
+  assert.equal(closed,false);
+  assert.equal(clicks,0);
+  const result=await call(true);
+  assert.equal(result.success,true);
+  assert.equal(result.discarded_unsaved_changes,true);
+  assert.equal(pendingStore.has('scratch'),false);
+  assert.equal(clicks,1);
+  assert.equal(closed,true);
 });
 
 test('named new layout never bypasses the picker even if symbol/as_chart are supplied', () => {
