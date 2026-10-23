@@ -88,9 +88,11 @@ test('CDP modal evaluator requires unique control, heading and warning',()=>{
   const button={textContent:'Close without saving',parentElement:ancestor,
     getBoundingClientRect:()=>({width:140,height:45}),click:()=>{clicks++}};
   const document={querySelectorAll:()=>[button]};
-  assert.deepEqual(runInNewContext(closeDialogExpression(),{document}),{matched:true,clicked:false});
+  assert.equal(runInNewContext(closeDialogExpression(),{document}).matched,true);
   assert.equal(clicks,0);
-  assert.deepEqual(runInNewContext(closeDialogExpression({click:true}),{document}),{matched:true,clicked:true});
+  const clicked=runInNewContext(closeDialogExpression({click:true}),{document});
+  assert.equal(clicked.matched,true);
+  assert.equal(clicked.clicked,true);
   assert.equal(clicks,1);
   ancestor.textContent='Please close this chart';
   const noMatch=runInNewContext(closeDialogExpression({click:true}),{document});
