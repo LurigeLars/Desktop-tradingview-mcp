@@ -10,6 +10,7 @@
  * (Approach from issue #155 and PR #163, verified on Desktop 3.1.0.)
  */
 import CDP from 'chrome-remote-interface';
+import { setSymbol as setChartSymbol } from './chart.js';
 import { getClient, getTargetInfo, reconnectTo, CDP_HOST, CDP_PORT, listCdpTargets } from '../connection.js';
 
 const LANDING_PROBE_TIMEOUT_MS = 500;
@@ -238,11 +239,18 @@ export async function switchShellTab({ shell_tab_id, expected_layout_name, _deps
   };
 }
 
+// Ephemeral, bounded link between a protected close attempt and an explicitly
+// approved retry. No persistent state and no permission to close any other tab.
+const pendingUnsavedClose = new Map();
+const UNSAVED_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
+
 export async function closeShellTabById({
-  shell_tab_id, expected_layout_name, protected_layout_names = [], _deps,
+  shell_tab_id, expected_layout_name, protected_layout_names = [],
+  discard_unsaved_changes = false, _deps,
 } = {}) {
   const shell = _deps?.withShell || withShell;
   const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const pendingStore = _deps?.pendingStore || pendingUnsavedClose;
   const tabs = await listShellTabs({ _deps: {withShell:shell} });
   if (tabs.length <= 1) throw new Error('Cannot close the last Desktop tab.');
   const tab = requireShellTab(tabs, shell_tab_id, expected_layout_name);
@@ -269,7 +277,43 @@ export async function closeShellTabById({
       throw new Error('Shell layout identity changed before close.');
     }
     await selectShellTab(evalIn, tab.shell_tab_id, wait);
-    const clicked = await evalIn("(function(){const tab=document.getElementById("+id+");" +
+    const snapshot=_deps?.closeTargetSnapshot
+      ? await _deps.closeTargetSnapshot() : _deps?.withShell ? [] : await listCdpTargets();
+    const baselineIds=snapshot.map(t=>String(t.id));
+    const externalProbe=_deps?.probeExternalDialogs ||
+      (_deps?.withShell ? null : probeDesktopCloseDialogs);
+    const externalClick=_deps?.clickExternalDialog ||
+      (_deps?.withShell ? null : clickDesktopCloseDialog);
+    const pending = pendingStore.get(tab.shell_tab_id);
+    let confirmationHandled = false;
+    let resumedDialog = false;
+    if (pending) {
+      if (pending.layout !== tab.layout_name ||
+          pending.expires_at < Date.now() ||
+          !baselineIds.includes(pending.target_id)) {
+        pendingStore.delete(tab.shell_tab_id);
+      } else {
+        if (!discard_unsaved_changes)
+          throw new Error('Unsaved confirmation is already open for the exact tab; explicit discard required.');
+        if (!externalProbe || !externalClick)
+          throw new Error('Cannot verify previous Electron confirmation target.');
+        const snapshotDialog=await externalProbe({baseline_ids:[],include_existing:true});
+        if(snapshotDialog.matches.length!==1 ||
+           snapshotDialog.matches[0].target_id!==pending.target_id)
+          throw new Error('Previous Electron confirmation changed or became ambiguous.');
+        const exactActive=await evalIn(
+          "document.querySelector('.tabs-container .tab.active')?.id==="+id+
+          " && !!document.getElementById("+id+")");
+        if(!exactActive)throw new Error('Physical tab changed before explicit confirmation.');
+        const result=await externalClick(pending.target_id);
+        if(!result?.matched||!result?.clicked)
+          throw new Error('Electron confirmation changed before explicit click.');
+        pendingStore.delete(tab.shell_tab_id);
+        confirmationHandled=true;
+        resumedDialog=true;
+      }
+    }
+    const clicked = resumedDialog || await evalIn("(function(){const tab=document.getElementById("+id+");" +
       "if(!tab||!tab.matches('.tabs-container .tab'))return false;" +
       "const close=tab.querySelector('.tab-close-button-container button, [class*=close] button, button[class*=close]');" +
       "if(!close)return false;" +
@@ -278,14 +322,94 @@ export async function closeShellTabById({
       "close[k].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:close,target:close});" +
       "}else close.click();return true;})()");
     if (!clicked) throw new Error('Exact Desktop tab close button not available.');
-    for (let n=0;n<20;n++) {
+    let lastDialogProbe = null;
+    for (let n=0;n<30;n++) {
       if (!await evalIn("!!document.getElementById("+id+")")) {
+        pendingStore.delete(tab.shell_tab_id);
         return {success:true,action:'desktop_shell_tab_closed',
-          shell_tab_id:tab.shell_tab_id,layout_name:tab.layout_name};
+          shell_tab_id:tab.shell_tab_id,layout_name:tab.layout_name,
+          discarded_unsaved_changes:confirmationHandled};
       }
+      // An explicit opt-in is necessary to discard unsaved chart changes.
+      const confirmation = await evalIn(`(function(){
+        if(document.querySelector('.tabs-container .tab.active')?.id!==${id})
+          return {kind:'active_tab_changed'};
+        const visible=el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0};
+        const dialogs=Array.from(document.querySelectorAll(
+          '[role="dialog"],[aria-modal="true"],[class*="dialog"],[class*="modal"]'
+        )).filter(visible);
+        // Visible Desktop popovers need not have a dialog/modal class.
+        // Verify the exact discard control within a local confirmation ancestor.
+        const discard=Array.from(document.querySelectorAll('button,[role="button"]'))
+          .filter(el=>visible(el)&&String(el.textContent||'').trim()==='Close without saving');
+        if(discard.length>1)return {kind:'ambiguous'};
+        const hasText=el=>/close tab\\?/i.test(String(el.textContent||'')) &&
+          /unsaved changes/i.test(String(el.textContent||''));
+        let verified=null;
+        if(discard.length===1){
+          let ancestor=discard[0].parentElement;
+          for(let depth=0;ancestor&&depth<12;depth++,ancestor=ancestor.parentElement){
+            const text=String(ancestor.textContent||'');
+            if(text.length>3000)break;
+            if(hasText(ancestor)){verified=discard[0];break;}
+          }
+        }
+        if(!verified){
+          const exactDialogs=dialogs.filter(hasText);
+          return {kind:exactDialogs.length>1?'ambiguous':'none',
+            visible_discard_button:discard.length===1,
+            shell_has_heading:/close tab\\?/i.test(String(document.body?.innerText||'')),
+            shell_has_warning:/unsaved changes/i.test(String(document.body?.innerText||''))};
+        }
+        if(!${discard_unsaved_changes ? 'true' : 'false'})return {kind:'unsaved_confirmation'};
+        const button=verified,key=Object.keys(button).find(k=>k.startsWith('__reactProps'));
+        if(key&&typeof button[key].onClick==='function'){
+          button[key].onClick({button:0,preventDefault(){},stopPropagation(){},
+            currentTarget:button,target:button});
+        }else button.click();
+        return {kind:'discard_clicked'};
+      })()`);
+      lastDialogProbe = confirmation;
+      if(confirmation?.kind==='none' && externalProbe && (n===3 || n===11 || n===21)){
+        const external=await externalProbe({baseline_ids:baselineIds});
+        lastDialogProbe={...confirmation,external:{
+          inspected:external.inspected,matches:external.matches.length,
+          desktop_target_count:external.desktop_target_count,
+          other_target_types:external.other_target_types}};
+        if(external.matches.length>1)
+          throw new Error('Multiple Electron confirmation targets; refusing ambiguous close.');
+        if(external.matches.length===1){
+          const match=external.matches[0];
+          if(!match.new_since_close)throw new Error('Stale Desktop dialog target; refusing close.');
+          const stillActive=await evalIn(
+            "document.querySelector('.tabs-container .tab.active')?.id==="+id+
+            " && !!document.getElementById("+id+")");
+          if(!stillActive)throw new Error('Physical tab changed during dialog discovery.');
+          if(!discard_unsaved_changes){
+            pendingStore.set(tab.shell_tab_id,{
+              layout:tab.layout_name,target_id:match.target_id,
+              expires_at:Date.now()+UNSAVED_CONFIRMATION_TTL_MS,
+            });
+            throw new Error('Unsaved chart confirmation is in a separate Electron target. Explicit discard required.');
+          }
+          const acted=await externalClick(match.target_id);
+          if(!acted?.matched||!acted?.clicked)
+            throw new Error('Desktop dialog changed before the explicit click.');
+          pendingStore.delete(tab.shell_tab_id);
+          confirmationHandled=true;
+        }
+      }
+      if (confirmation?.kind==='active_tab_changed')
+        throw new Error('Active Desktop tab changed during close; refusing to proceed.');
+      if (confirmation?.kind==='unsaved_confirmation')
+        throw new Error('TradingView has unsaved chart changes. Set discard_unsaved_changes=true only to discard the exact tab.');
+      if (confirmation?.kind==='ambiguous' ||
+          confirmation?.kind==='confirmation_without_exact_button')
+        throw new Error('Ambiguous unsaved-changes confirmation; manual close required.');
+      if (confirmation?.kind==='discard_clicked') confirmationHandled=true;
       await wait(100);
     }
-    throw new Error('Desktop tab remains open (possible unsaved changes).');
+    throw new Error('Exact Desktop tab remains open after close request; dialog probe: '+JSON.stringify(lastDialogProbe));
   });
 }
 
@@ -603,25 +727,25 @@ export async function list() {
  * the tab bar. There can be several app/window/index.html targets; the shell
  * is the one whose DOM actually contains `.tabs-container .tab`.
  */
-async function withShell(fn) {
-  const targets = await listCdpTargets();
+export async function withShell(fn, { listTargets = listCdpTargets, connectTarget = withTarget } = {}) {
+  const targets = await listTargets();
   const candidates = rankShellCandidates(targets);
 
   const failures = [];
   for (const cand of candidates) {
+    let shellVerified = false;
     try {
-      const result = await withTarget(cand.id, async evalIn => {
+      const result = await connectTarget(cand.id, async evalIn => {
         const hasTabs = await evalIn(`!!document.querySelector('.tabs-container .tab')`);
         if (!hasTabs) return { matched: false, value: null };
+        shellVerified = true;
         return { matched: true, value: await fn(evalIn) };
       }, SHELL_OPERATION_TIMEOUT_MS);
-
       if (result?.matched) return result.value;
     } catch (error) {
-      failures.push({
-        target_id: cand.id,
-        error: error?.message || String(error),
-      });
+      // Surface the real operation error once the tabbed shell is verified.
+      if (shellVerified) throw error;
+      failures.push({target_id:cand.id,error:error?.message || String(error)});
     }
   }
 
@@ -670,6 +794,130 @@ async function probeLandingTarget(target, timeoutMs = LANDING_PROBE_TIMEOUT_MS) 
  * Discover a layout-picker target by DOM capability, not by a single title.
  * Newly-created page targets are checked first, then existing candidates.
  */
+
+/** Scan only local TradingView Desktop Electron UI targets. Never inspect
+ * arbitrary web pages for a privileged close confirmation. */
+export function isDesktopUiTarget(t) {
+  if(!t || !['page','other'].includes(t.type))return false;
+  try {
+    const u=new URL(String(t.url||''));
+    return u.protocol==='file:' &&
+      /(?:\/app\.asar\/app\/|\/app\/(?:window|dialog|modal|popup)\/)/i.test(u.pathname);
+  }catch{return false;}
+}
+export function closeDialogExpression({click=false}={}) {
+  return '(function(){'+
+    "const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};"+
+    "const buttons=Array.from(document.querySelectorAll('button,[role=\"button\"]'))"+
+      ".filter(e=>visible(e)&&String(e.textContent||'').trim()==='Close without saving');"+
+    "if(buttons.length!==1)return {matched:false,buttons:buttons.length};"+
+    "let p=buttons[0].parentElement,ok=false;"+
+    "for(let i=0;p&&i<12;i++,p=p.parentElement){const t=String(p.textContent||'');"+
+      "if(t.length>3000)break;"+
+      "if(/close tab\\?/i.test(t)&&/unsaved changes/i.test(t)){ok=true;break;}}"+
+    "if(!ok)return {matched:false,buttons:1};"+
+    (click?
+      "const b=buttons[0],k=Object.keys(b).find(x=>x.startsWith('__reactProps'));"+
+      "if(k&&typeof b[k].onClick==='function')b[k].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:b,target:b});"+
+      "else b.click();return {matched:true,clicked:true};":
+      "return {matched:true,clicked:false};")+
+    '})()';
+}
+export async function probeDesktopCloseDialogs({baseline_ids=[],include_existing=false,_deps}={}) {
+  const list=_deps?.listTargets||listCdpTargets;
+  const evaluate=_deps?.evaluateTarget||((id,expr)=>withTarget(id,fn=>fn(expr),900));
+  const previous=new Set(baseline_ids.map(String));
+  const all=await list();
+  const own=all.filter(isDesktopUiTarget);
+  const candidates=(include_existing?own:own.filter(t=>!previous.has(String(t.id)))).slice(0,16);
+  const inspected=await Promise.all(candidates.map(async t=>{
+    try{
+      const result=await evaluate(t.id,closeDialogExpression());
+      return {target_id:t.id,new_since_close:!previous.has(String(t.id)),
+        matched:result?.matched===true,buttons:result?.buttons??null};
+    }catch(e){
+      return {target_id:t.id,new_since_close:!previous.has(String(t.id)),
+        matched:false,error:String(e?.message||e).slice(0,120)};
+    }
+  }));
+  return {desktop_target_count:own.length,inspected:inspected.length,
+    matches:inspected.filter(x=>x.matched),candidates:inspected,
+    other_target_types:all.filter(t=>!isDesktopUiTarget(t)&&!isChartPageTarget(t))
+      .slice(0,15).map(t=>({type:t.type,
+        scheme:(()=>{try{return new URL(String(t.url||'')).protocol}catch{return 'unknown'}})()}))};
+}
+async function clickDesktopCloseDialog(id,{_deps}={}) {
+  const evaluate=_deps?.evaluateTarget||((target,expr)=>withTarget(target,fn=>fn(expr),1200));
+  return evaluate(id,closeDialogExpression({click:true}));
+}
+
+
+/** Read-only bounded diagnostics for new-layout naming. No form values read. */
+export function layoutCreateProbeExpression() {
+  return `(function(){
+    const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};
+    const buttons=Array.from(document.querySelectorAll('button,[role="button"]'));
+    const exact=buttons.filter(b=>visible(b)&&
+      /^(Create new layout|Create|New layout)$/i.test(String(b.textContent||'').trim()));
+    const inputs=Array.from(document.querySelectorAll('input')).map(e=>({
+      placeholder:String(e.getAttribute('placeholder')||'').slice(0,80),
+      aria_label:String(e.getAttribute('aria-label')||'').slice(0,80),
+      visible:visible(e),
+      type:String(e.getAttribute('type')||'').slice(0,30),
+    }));
+    const dialogs=Array.from(document.querySelectorAll(
+      '[role="dialog"],[aria-modal="true"],[class*="dialog"],[class*="modal"]'))
+      .filter(visible);
+    const text=String(document.body?.innerText||'');
+    const b=document.querySelector('.create-new-layout-button');
+    return {
+      is_landing:!!(b||document.querySelector('.layout-list-item')||
+        document.querySelector('.layout-list-expand-button')),
+      create_new_layout_selector:!!b,
+      create_new_layout_visible:!!(b&&visible(b)),
+      exact_create_buttons:exact.map(b=>({
+        text:String(b.textContent||'').trim().slice(0,50),
+        disabled:!!b.disabled,
+      })).slice(0,8),
+      inputs:inputs.slice(0,12),
+      modal_count:dialogs.length,
+      naming_input_visible:Array.from(document.querySelectorAll(
+        'input[placeholder="My layout"],input[aria-label="Layout name"]')).some(visible),
+      has_create_heading:/create new layout/i.test(text),
+      body_has_unsaved_warning:/unsaved changes/i.test(text),
+    };
+  })()`;
+}
+
+export async function probeLayoutCreateUi({_deps}={}) {
+  const listTargets=_deps?.listTargets||listCdpTargets;
+  const inspect=_deps?.evaluateTarget||((target,expression)=>
+    withTarget(target,evalIn=>evalIn(expression),1200));
+  const targets=await listTargets();
+  const candidates=targets.filter(t=>
+    isDesktopUiTarget(t)||isNewTabPageTarget(t)).slice(0,20);
+  const inspected=await Promise.all(candidates.map(async t=>{
+    try{
+      const summary=await inspect(t.id,layoutCreateProbeExpression());
+      return {target_id:t.id,
+        target_type:isNewTabPageTarget(t)?'new-tab':'desktop-ui',
+        ...summary};
+    }catch(e){
+      return {target_id:t.id,
+        target_type:isNewTabPageTarget(t)?'new-tab':'desktop-ui',
+        error:String(e?.message||e).slice(0,180)};
+    }
+  }));
+  return {
+    success:true,
+    desktop_target_count:candidates.length,
+    chart_target_count:targets.filter(isChartPageTarget).length,
+    create_surface_candidates:inspected.filter(x=>x.create_new_layout_selector||
+      x.naming_input_visible||x.exact_create_buttons?.length),
+    inspected,
+  };
+}
+
 async function findLandingTarget({ beforeIds = [], timeoutMs = 1000, requireNew = false } = {}) {
   const deadline = Date.now() + timeoutMs;
   const before = beforeIds instanceof Set ? beforeIds : new Set(beforeIds);
@@ -889,6 +1137,12 @@ async function navigateTarget(targetId, url, timeoutMs = 2500) {
   return withDeadline(task, timeoutMs, 'CDP Page.navigate for target ' + targetId);
 }
 
+/** Named new layouts must be created in the layout picker before any symbol changes. */
+export function shouldDirectNavigate({layout, symbol, as_chart, chart_id} = {}) {
+  if (String(layout || '').trim().toLowerCase() === 'new') return false;
+  return Boolean(symbol) || Boolean(as_chart) || Boolean(chart_id);
+}
+
 /**
  * Open a new chart tab by clicking the shell window's new-tab button.
  * With `layout`, also picks from the landing page's layout list:
@@ -915,7 +1169,7 @@ export async function newTab({
   if (requestedChartId && !/^[A-Za-z0-9_-]+$/.test(requestedChartId)) {
     throw new Error('chart_id must be a TradingView chart URL token');
   }
-  const wantsDirectChart = Boolean(symbol) || Boolean(as_chart) || Boolean(requestedChartId);
+  const wantsDirectChart = shouldDirectNavigate({layout,symbol,as_chart,chart_id:requestedChartId});
   const forceNewTab = Boolean(force_new_tab);
   if (!Number.isFinite(landingTimeoutMs) || landingTimeoutMs < 0) {
     throw new Error('landing_timeout_ms must be a non-negative number');
@@ -1138,8 +1392,43 @@ export async function newTab({
       // "Create new layout" opens a naming dialog; the Create button stays
       // disabled until the name input is filled (React controlled input, so
       // the native value setter + input event are required).
-      await evalIn(`(function(){ var b = document.querySelector('.create-new-layout-button'); if (b) b.click(); })()`);
-      await new Promise(r => setTimeout(r, 700));
+      // A new-tab CDP target can exist before the layout picker mounts its
+      // React handlers. Wait for visible controls rather than assuming readiness.
+      let pickerReady = false;
+      for (let attempt=0;attempt<24;attempt++){
+        pickerReady = await evalIn(`(function(){
+          const b=document.querySelector('.create-new-layout-button');
+          if(!b)return false;
+          const r=b.getBoundingClientRect();
+          return r.width>0&&r.height>0&&!b.disabled;
+        })()`);
+        if(pickerReady)break;
+        await new Promise(r=>setTimeout(r,125));
+      }
+      if(!pickerReady)throw new Error('Layout picker Create new layout button did not become ready.');
+      const triggered=await evalIn(`(function(){
+        const b=document.querySelector('.create-new-layout-button');
+        if(!b)return false;
+        const k=Object.keys(b).find(x=>x.startsWith('__reactProps'));
+        if(k&&typeof b[k].onClick==='function')
+          b[k].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:b,target:b});
+        else b.click();
+        return true;
+      })()`);
+      if(!triggered)throw new Error('Layout picker Create new layout click failed.');
+      // Dialog creation may be asynchronous on a newly initialized tab.
+      let hasNamingInput = false;
+      for(let attempt=0;attempt<24;attempt++){
+        hasNamingInput=await evalIn(`(function(){
+          const el=document.querySelector('input[placeholder="My layout"]');
+          if(!el)return false;
+          const r=el.getBoundingClientRect();return r.width>0&&r.height>0;
+        })()`);
+        if(hasNamingInput)break;
+        await new Promise(r=>setTimeout(r,125));
+      }
+      if(!hasNamingInput)
+        throw new Error('Create-layout dialog name input did not appear after verified picker click.');
       const filled = await evalIn(`
         (function() {
           // The dialog's name field (not the landing page's Search box).
@@ -1199,7 +1488,7 @@ export async function newTab({
       foundTitle = await evalIn(clickByTitle);
     }
     return foundTitle;
-  }, 3500);
+  }, wantNew ? 7500 : 3500);
 
   if (!picked) throw new Error(`Layout matching "${layout}" not found in the layout list.`);
 
@@ -1216,10 +1505,15 @@ export async function newTab({
   }
 
   await reconnectTo(chartTarget.id);
+  // Apply the requested symbol only AFTER creating and attaching the new layout.
+  const symbolResult = wantNew && symbol ? await setChartSymbol({symbol:String(symbol)}) : null;
+  if (symbolResult && (!symbolResult.success || !symbolResult.chart_ready))
+    throw new Error('New layout created but requested symbol did not become ready; tab left open for inspection.');
   return {
     success: true,
     action: wantNew ? 'new_layout_created' : 'layout_opened_in_new_tab',
     layout: picked,
+    ...(symbolResult ? {symbol:symbolResult.symbol,chart_ready:true} : {}),
     target_id: chartTarget.id,
     chart_id: chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
   };
