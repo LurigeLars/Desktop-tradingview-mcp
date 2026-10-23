@@ -39,6 +39,15 @@ export function registerTabTools(server) {
     } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.registerTool('tab_layout_create_probe', {
+    description:'Read-only bounded selector/target diagnostics for TradingView Desktop Create new layout dialog. Returns UI element metadata only; never clicks, types or saves.',
+    inputSchema:{},
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},
+  }, async()=>{
+    try{return jsonResult(await core.probeLayoutCreateUi());}
+    catch(err){return jsonResult({success:false,error:err.message},true);}
+  });
+
   server.registerTool('tab_dialog_probe', {
     description:'Read-only bounded CDP scan for an exact unsaved-chart confirmation in separate TradingView Desktop Electron targets. Never clicks or closes anything.',
     inputSchema:{},
