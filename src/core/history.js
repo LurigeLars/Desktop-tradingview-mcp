@@ -27,8 +27,9 @@ function requireId(value, name) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(name + ' is required; use chart_get_state first');
   return value.trim();
 }
-function encodeCursor(symbol, resolution, before) {
-  return Buffer.from(JSON.stringify({ v: 1, symbol, resolution, before }), 'utf8').toString('base64url');
+function encodeCursor(symbol, resolution, before, targetId) {
+  return Buffer.from(JSON.stringify({ v: 2, symbol, resolution, before,
+    target_id:targetId }), 'utf8').toString('base64url');
 }
 function decodeCursor(cursor) {
   if (typeof cursor !== 'string' || cursor.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(cursor)) {
@@ -37,7 +38,8 @@ function decodeCursor(cursor) {
   let parsed;
   try { parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); }
   catch { throw new Error('Invalid cursor'); }
-  if (!parsed || parsed.v !== 1 || typeof parsed.symbol !== 'string' || typeof parsed.resolution !== 'string') {
+  if (!parsed || parsed.v !== 2 || typeof parsed.symbol !== 'string' || typeof parsed.resolution !== 'string'
+      || typeof parsed.target_id !== 'string' || !/^[A-Za-z0-9_-]+$/.test(parsed.target_id)) {
     throw new Error('Invalid cursor version or identity');
   }
   parsed.before = parseSeconds(parsed.before, 'cursor.before');
@@ -76,7 +78,7 @@ function makeRead(before, count) {
       for (var i = last; i >= first && rows.length < ${count}; i--) {
         var v = b.valueAt(i);
         if (v && (${before === null ? 'true' : 'v[0] < ' + before})) {
-          rows.push({time:v[0], open:v[1], high:v[2], low:v[3], close:v[4], volume:v[5] || 0});
+          rows.push({time:v[0], open:v[1], high:v[2], low:v[3], close:v[4], volume:v[5] == null ? 0 : v[5]});
         }
       }
       rows.reverse();
@@ -98,14 +100,17 @@ async function fetchHistory({ count = 500, before_time, cursor, expected_symbol,
     throw new Error('Specify cursor OR before_time, not both');
   }
   let before = parseSeconds(before_time, 'before_time');
+  let decoded = null;
   if (cursor !== undefined && cursor !== null) {
-    const decoded = decodeCursor(cursor);
+    decoded = decodeCursor(cursor);
     if (decoded.symbol !== symbol || decoded.resolution !== resolution) throw new Error('CURSOR_IDENTITY_MISMATCH');
     before = decoded.before;
   }
 
   const originalTarget = await readTarget();
   if (!originalTarget?.id) throw new Error('TARGET_UNAVAILABLE: attach an explicit TradingView chart');
+  if (decoded && decoded.target_id !== originalTarget.id)
+    throw new Error('CURSOR_TARGET_MISMATCH: reattach the original exact chart target or restart pagination');
   async function assertTarget() {
     const current = await readTarget();
     if (current?.id !== originalTarget.id) throw new Error('TARGET_CHANGED: chart attachment changed during history read');
@@ -114,6 +119,20 @@ async function fetchHistory({ count = 500, before_time, cursor, expected_symbol,
   await assertTarget();
   validateIdentity(state, symbol, resolution);
   if (state.loaded === 0) throw new Error('HISTORY_EMPTY: chart has no loaded bars');
+  // During a pending TradingView requestMoreData, availability may flicker
+  // false even though older bars are still being received. Stabilize before
+  // treating false as a final exhaustion witness.
+  if (state.eligible < rows && !state.more) {
+    for (let settled=0;settled<3;settled++) {
+      await delay(POLL_DELAY_MS);
+      const next=await run(makeProbe(before));
+      await assertTarget();
+      validateIdentity(next,symbol,resolution);
+      const changed=next.loaded!==state.loaded || next.first_time!==state.first_time;
+      state=next;
+      if (state.more || changed) break;
+    }
+  }
   let loads = 0;
   while (state.eligible < rows && state.more) {
     if (loads >= MAX_LOADS) throw new Error('HISTORY_PAGE_LIMIT: unable to load enough candles within guard');
@@ -154,6 +173,7 @@ async function fetchHistory({ count = 500, before_time, cursor, expected_symbol,
     const bar = final.bars[i];
     if (!Number.isSafeInteger(bar.time) || !['open','high','low','close','volume'].every(k => Number.isFinite(bar[k]))
       || bar.high < bar.low || bar.high < Math.max(bar.open, bar.close) || bar.low > Math.min(bar.open, bar.close)
+      || bar.volume < 0
       || (i > 0 && bar.time <= final.bars[i - 1].time)) {
       throw new Error('HISTORY_INVALID: non-finite, duplicate, unordered, or inconsistent OHLCV');
     }
@@ -168,7 +188,7 @@ async function fetchHistory({ count = 500, before_time, cursor, expected_symbol,
     success:true, source:'tradingview_desktop_chart_series', target_id:originalTarget.id, symbol, resolution,
     requested:rows, returned:final.bars.length, first_time:firstTime, last_time:lastTime,
     total_loaded:final.loaded, pages_loaded:loads,
-    has_more:hasMore, next_cursor:hasMore ? encodeCursor(symbol, resolution, firstTime) : null,
+    has_more:hasMore, next_cursor:hasMore ? encodeCursor(symbol, resolution, firstTime, originalTarget.id) : null,
     feed_may_have_more:state.more, bars:final.bars
   };
 }

@@ -6,7 +6,8 @@
  */
 import CDP from 'chrome-remote-interface';
 import { CDP_HOST, CDP_PORT, listTradingViewChartTargets } from '../connection.js';
-import { normalizeWorkerTimeframe, resolveWorkerSelection } from './worker.js';
+import { normalizeWorkerTimeframe, resolveWorkerSelection, status as workerStatus } from './worker.js';
+import { recordWorkerUsage } from './worker-usage.js';
 import { matchTradingViewResolvedSymbol, matchWatchlistSymbol } from './watchlist.js';
 
 const MAX_BARS = 100;
@@ -586,7 +587,9 @@ export async function realtimeSnapshot({
   include_studies,
   study_filters,
   stale_after_ms = 5000,
+  consumer = 'unattributed',
   _worker_deps,
+  _usage_deps,
 } = {}) {
   const options = normalizeSnapshotOptions({ mode, bars, include_studies, study_filters });
   const staleAfterMs = Number(stale_after_ms);
@@ -657,7 +660,7 @@ export async function realtimeSnapshot({
       && unmatchedWorkerEntries.length === 0
       && filtered.snapshots.length === workerSelection.entries.length);
 
-  return {
+  const response = {
     success: targets.length > 0
       && filtered.missing.length === 0
       && (filtered.ambiguous?.length || 0) === 0
@@ -689,4 +692,12 @@ export async function realtimeSnapshot({
     snapshots: publicSnapshots,
     errors,
   };
+  // Instrumentation never affects a trading decision or snapshot availability.
+  // The worker registry is only a mapping witness, not proof of a requesting client.
+  try {
+    const record = _usage_deps?.record || recordWorkerUsage;
+    record({response, workerState:workerStatus({_deps:_worker_deps}), consumer,
+      ...(_usage_deps ? {_deps:_usage_deps}: {})});
+  } catch { /* telemetry is best-effort and always fail-open for data reads */ }
+  return response;
 }

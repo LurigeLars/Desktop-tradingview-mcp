@@ -3,8 +3,9 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/worker.js';
 // The legacy six-tab dynamic provisioner is intentionally disabled.
 
-import { rotateWorkerSnapshot, recoverRotatingPane } from '../core/rotating-worker.js';
+import { rotateWorkerSnapshot, recoverRotatingPane, rotationCandidates } from '../core/rotating-worker.js';
 import { topologyMutationLockStatus, withTopologyMutationLock } from '../core/topology-lock.js';
+import { workerUsageReport } from '../core/worker-usage.js';
 
 const studySchema = z.union([
   z.string(),
@@ -39,9 +40,10 @@ export function registerWorkerTools(server) {
   });
 
   server.registerTool('worker_rotate_snapshot', {
-    description: 'Reversibly sample exactly one missing qualified symbol inside the fifth EXISTING DTV worker tab. No new tabs/windows, no persistent worker universe change. The lower-priority tactical pane is restored before reply. This is never an execution-grade broker quote.',
+    description: 'Reversibly borrow an unprotected, verified resident worker pane for one missing qualified symbol, then restore it. Trade Alert and explicitly protected panes cannot be borrowed. No new tabs or permanent universe mutation.',
     inputSchema: {
       symbol: z.string().describe('One verified, exchange-qualified nonresident symbol.'),
+      preferred_handle: z.string().optional().describe('Optional exact handle selected from the borrowable pool; never bypasses protection.'),
       dry_run: z.coerce.boolean().optional().describe('Plan and verify original worker layout without mutation.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -80,12 +82,43 @@ export function registerWorkerTools(server) {
       opened_tabs:0,execution_quote:false},true));
 
 
+  server.registerTool('worker_usage', {
+    description: 'Read 14-day bounded evidence of per-handle successful resident pane reads. Consumer names are caller-declared, not authenticated. Zero reads are not evidence of no future need.',
+    inputSchema: {},
+    annotations: {readOnlyHint:true, destructiveHint:false, idempotentHint:true, openWorldHint:false},
+  }, async () => {
+    try { return jsonResult(workerUsageReport()); }
+    catch (err) { return jsonResult({success:false,error:err.message},true); }
+  });
+
   server.registerTool('worker_status', {
     description: 'Read the logical realtime worker registry, capacity, groups and current physical-assignment status.',
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
-    try { return jsonResult({ ...core.status(), mutation_lock: topologyMutationLockStatus() }); }
+    try {
+      const audit = workerUsageReport();
+      const reads = {}, consumers = {};
+      let requests = 0;
+      for (const day of Object.values(audit.days || {})) {
+        requests += day.requests || 0;
+        for (const [h,item] of Object.entries(day.handles || {}))
+          reads[h] = (reads[h] || 0) + (item.reads || 0);
+        for (const [k,item] of Object.entries(day.consumers || {}))
+          consumers[k] = (consumers[k] || 0) + (item.requests || 0);
+      }
+      const registry = core.status();
+      const borrowable = rotationCandidates(registry);
+      return jsonResult({...registry, borrowable_pool:{
+        registry_eligible:borrowable.length,
+        protected_or_ineligible:registry.configured-borrowable.length,
+        candidate_handles:borrowable.map(c=>c.entry.handle),
+        note:'Eligibility is registry-only. Every borrow independently verifies all live panes and restores the original.'
+      }, mutation_lock:topologyMutationLockStatus(),
+        usage_summary:{window_days:14, observed_request_count:requests,
+          pane_reads_by_handle:reads, declared_consumer_requests:consumers,
+          note:'Call worker_usage for per-day details; zero means not observed, not never needed.'}});
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }

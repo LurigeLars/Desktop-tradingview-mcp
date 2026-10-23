@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   activePaneStates,
   auditWorkerTargetCandidates,
+  cleanupRetiredWorkerShell,
   retireNonmatchingWorkerRenderer,
   buildWorkerLayoutName,
   closeTabByOwned,
@@ -1415,4 +1416,61 @@ test('prune worker renderer requires full verified worker and an exact nonmatchi
   assert.equal(completed.closed.closed,true);
   assert.equal(closeCalls,1);
   assert.deepEqual(targets.map(x=>x.id),['registered']);
+});
+
+
+test('retired worker shell cleanup requires exact obsolete symbol and preserves the sole registered renderer', async () => {
+  const worker={
+    topology_plan:{tab_count:1,tabs:[{tab_index:0,pane_count:2,handles:['oil','nq']}]},
+    worker_tabs:[{slot:0,chart_id:'AnV8F8oS',target_id:'registered',layout_name:'DTV Worker 06',pane_count:2,persistent_layout:true}],
+    entries:[
+      {handle:'oil',symbol:'NYMEX:BZZ2026',timeframe:'1',studies:[]},
+      {handle:'nq',symbol:'CME_MINI:NQ1!',timeframe:'1',studies:[]},
+    ],
+  };
+  const targets=[{id:'registered',url:'https://www.tradingview.com/chart/AnV8F8oS/'}];
+  let shell=[
+    {shell_tab_id:'stale',layout_name:'DTV Worker 06',label:'BRN1!▼ 108.79 / DTV Worker 06',active:false},
+    {shell_tab_id:'live',layout_name:'DTV Worker 06',label:'NQ1!▲ 29896 / DTV Worker 06',active:false},
+    {shell_tab_id:'personal',layout_name:'Stocks',label:'CRWV Stocks',active:true},
+  ];
+  let closes=0;
+  const deps={
+    status:()=>worker,
+    listTargets:async()=>targets,
+    inspectTargets:async entries=>entries.map(t=>({
+      target_id:t.id,chart_id:'AnV8F8oS',pane_count:2,panes:[
+        {resolved_symbol:'NYMEX:BZZ2026',resolution:'1',studies:[]},
+        {resolved_symbol:'CME_MINI:NQ1!',resolution:'1',studies:[]},
+      ],
+    })),
+    listShellTabs:async()=>shell,
+    closeRetiredWorkerShell:async args=>{
+      closes++;
+      assert.equal(args.shell_tab_id,'stale');
+      assert.equal(args.live_shell_tab_id,'live');
+      shell=shell.filter(t=>t.shell_tab_id!=='stale');
+      return {success:true,shell_tab_id:'stale'};
+    },
+  };
+  await assert.rejects(cleanupRetiredWorkerShell({
+    slot:0,shell_tab_id:'stale',live_shell_tab_id:'live',
+    retired_target_id:'registered',retired_symbol:'BRN1!',dry_run:false,_deps:deps,
+  }),/distinct/);
+  await assert.rejects(cleanupRetiredWorkerShell({
+    slot:0,shell_tab_id:'stale',live_shell_tab_id:'live',
+    retired_target_id:'absent',retired_symbol:'NQ1!',dry_run:false,_deps:deps,
+  }),/cannot match/);
+  const args={slot:0,shell_tab_id:'stale',live_shell_tab_id:'live',
+    retired_target_id:'absent',retired_symbol:'BRN1!',_deps:deps};
+  const dry=await cleanupRetiredWorkerShell({...args,dry_run:true});
+  assert.equal(dry.success,true);
+  assert.equal(dry.retained_symbol,'NQ1!');
+  assert.equal(closes,0);
+  const result=await cleanupRetiredWorkerShell({...args,dry_run:false});
+  assert.equal(result.all_workers_verified,true);
+  assert.equal(result.remaining_shells.length,1);
+  assert.equal(result.remaining_shells[0].shell_tab_id,'live');
+  assert.equal(closes,1);
+  assert.deepEqual(targets.map(t=>t.id),['registered']);
 });

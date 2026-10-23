@@ -5,6 +5,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { getOhlcvHistory } from '../src/core/history.js';
+import { verifyHistoryResearchTarget, registerDataTools } from '../src/tools/data.js';
+import { LEGACY_TOOL_ANNOTATIONS } from '../src/server/tool-annotations.js';
 
 const ORIGIN = 1700000000;
 function createHarness({
@@ -119,4 +121,53 @@ describe('DTV paginated OHLCV history', () => {
     assert.equal(result.bars[0].time,h.all[0].time);
     assert.equal(result.bars.at(-1).time,h.all.at(-1).time);
   });
+
+  it('binds pagination cursors to one exact CDP chart target',async()=>{
+    const h=createHarness({initiallyLoaded:2000});
+    const p=await getOhlcvHistory({expected_symbol:h.expected_symbol,expected_resolution:'1',count:100,_deps:h._deps});
+    assert.ok(p.next_cursor);
+    await assert.rejects(getOhlcvHistory({
+      expected_symbol:h.expected_symbol,expected_resolution:'1',cursor:p.next_cursor,
+      count:100,_deps:{...h._deps,getTargetInfo:async()=>({id:'different-nvda-chart'})}
+    }),/CURSOR_TARGET_MISMATCH/);
+  });
+  it('retries transient false history availability after chart loading',async()=>{
+    const h=createHarness({initiallyLoaded:100});
+    const original=h._deps.evaluate;
+    let attempts=0;
+    const probe=async js=>{
+      const result=await original(js);
+      if(js.includes('eligible = 0') && ++attempts===1)
+        return {...result,more:false};
+      return result;
+    };
+    const p=await getOhlcvHistory({
+      expected_symbol:h.expected_symbol,expected_resolution:'1',count:1000,
+      _deps:{...h._deps,evaluate:probe}
+    });
+    assert.equal(p.returned,1000);
+    assert.ok(h.calls>0);
+  });
+  it('requires registered read-only annotations and excludes market workers',()=>{
+    assert.deepEqual(LEGACY_TOOL_ANNOTATIONS.data_get_ohlcv_history,
+      LEGACY_TOOL_ANNOTATIONS.data_get_ohlcv);
+    const tools=new Map();
+    registerDataTools({tool(name,description,schema,handler){tools.set(name,{schema,handler});}});
+    const normal=tools.get('data_get_ohlcv').schema;
+    assert.equal(normal.history.safeParse({
+      expected_symbol:'BATS:NVDA',expected_resolution:'1',count:1000,
+    }).success,true);
+    assert.equal(normal.history.safeParse({count:1000}).success,false);
+    assert.equal(tools.has('data_get_ohlcv_history'),true);
+    const tabs={tabs:[
+      {id:'qa-target',is_chart:true,chart_id:'qa-chart',title:'DTV OHLCV QA'},
+      {id:'worker-target',is_chart:true,chart_id:'worker-chart',title:'BATS:NVDA DTV Worker 06'},
+    ]};
+    const workerState={worker_tabs:[{target_id:'worker-target',chart_id:'worker-chart'}]};
+    assert.equal(verifyHistoryResearchTarget({id:'qa-target'},tabs,workerState).id,'qa-target');
+    assert.throws(()=>verifyHistoryResearchTarget({id:'worker-target'},tabs,workerState),/WORKER_TARGET_FORBIDDEN/);
+    assert.throws(()=>verifyHistoryResearchTarget({id:'absent'},tabs,workerState),/HISTORY_TARGET_UNVERIFIED/);
+    assert.throws(()=>verifyHistoryResearchTarget({id:'worker-target'},tabs,{worker_tabs:[]}),/WORKER_TARGET_FORBIDDEN/);
+  });
+
 });

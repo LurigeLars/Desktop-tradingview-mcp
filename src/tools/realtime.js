@@ -15,6 +15,7 @@ export function registerRealtimeTools(server) {
       include_studies: z.coerce.boolean().optional().describe('Include visible study data-window values (default false in fast, true in decision).'),
       study_filters: z.array(z.string()).optional().describe('Optional case-insensitive study-name substrings. Empty means all visible studies when include_studies=true.'),
       stale_after_ms: z.coerce.number().min(0).optional().describe('Decision-useful last-trade freshness threshold (default 5000 ms). Source age is measured when DTV reads it; gateway/tool turnaround is not included. Bid/ask freshness remains unknown without a source timestamp.'),
+      consumer: z.enum(['trade_spine','trade_alert','morning_brief','agent','unattributed']).optional().describe('Optional self-declared consumer for durable usage audit. Does not authenticate the caller.'),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {
