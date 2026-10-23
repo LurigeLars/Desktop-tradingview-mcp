@@ -39,6 +39,15 @@ export function registerTabTools(server) {
     } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.registerTool('tab_dialog_probe', {
+    description:'Read-only bounded CDP scan for an exact unsaved-chart confirmation in separate TradingView Desktop Electron targets. Never clicks or closes anything.',
+    inputSchema:{},
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},
+  },async()=>{
+    try{return jsonResult(await core.probeDesktopCloseDialogs({include_existing:true}));}
+    catch(err){return jsonResult({success:false,error:err.message},true);}
+  });
+
   server.registerTool('tab_probe_identity', {
     description: 'Read-only chart-state shell/renderer correspondence probe. Visually cycles only explicitly named physical tabs and restores the original active tab. Reports unverified mapping if focus/visibility evidence is ambiguous; never closes tabs.',
     inputSchema: {

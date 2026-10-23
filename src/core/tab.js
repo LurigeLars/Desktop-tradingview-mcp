@@ -271,6 +271,13 @@ export async function closeShellTabById({
       throw new Error('Shell layout identity changed before close.');
     }
     await selectShellTab(evalIn, tab.shell_tab_id, wait);
+    const snapshot=_deps?.closeTargetSnapshot
+      ? await _deps.closeTargetSnapshot() : _deps?.withShell ? [] : await listCdpTargets();
+    const baselineIds=snapshot.map(t=>String(t.id));
+    const externalProbe=_deps?.probeExternalDialogs ||
+      (_deps?.withShell ? null : probeDesktopCloseDialogs);
+    const externalClick=_deps?.clickExternalDialog ||
+      (_deps?.withShell ? null : clickDesktopCloseDialog);
     const clicked = await evalIn("(function(){const tab=document.getElementById("+id+");" +
       "if(!tab||!tab.matches('.tabs-container .tab'))return false;" +
       "const close=tab.querySelector('.tab-close-button-container button, [class*=close] button, button[class*=close]');" +
@@ -328,6 +335,29 @@ export async function closeShellTabById({
         return {kind:'discard_clicked'};
       })()`);
       lastDialogProbe = confirmation;
+      if(confirmation?.kind==='none' && externalProbe && (n===3 || n===11 || n===21)){
+        const external=await externalProbe({baseline_ids:baselineIds});
+        lastDialogProbe={...confirmation,external:{
+          inspected:external.inspected,matches:external.matches.length,
+          desktop_target_count:external.desktop_target_count,
+          other_target_types:external.other_target_types}};
+        if(external.matches.length>1)
+          throw new Error('Multiple Electron confirmation targets; refusing ambiguous close.');
+        if(external.matches.length===1){
+          const match=external.matches[0];
+          if(!match.new_since_close)throw new Error('Stale Desktop dialog target; refusing close.');
+          const stillActive=await evalIn(
+            "document.querySelector('.tabs-container .tab.active')?.id==="+id+
+            " && !!document.getElementById("+id+")");
+          if(!stillActive)throw new Error('Physical tab changed during dialog discovery.');
+          if(!discard_unsaved_changes)
+            throw new Error('Unsaved chart confirmation is in a separate Electron target. Explicit discard required.');
+          const acted=await externalClick(match.target_id);
+          if(!acted?.matched||!acted?.clicked)
+            throw new Error('Desktop dialog changed before the explicit click.');
+          confirmationHandled=true;
+        }
+      }
       if (confirmation?.kind==='active_tab_changed')
         throw new Error('Active Desktop tab changed during close; refusing to proceed.');
       if (confirmation?.kind==='unsaved_confirmation')
@@ -723,6 +753,63 @@ async function probeLandingTarget(target, timeoutMs = LANDING_PROBE_TIMEOUT_MS) 
  * Discover a layout-picker target by DOM capability, not by a single title.
  * Newly-created page targets are checked first, then existing candidates.
  */
+
+/** Scan only local TradingView Desktop Electron UI targets. Never inspect
+ * arbitrary web pages for a privileged close confirmation. */
+export function isDesktopUiTarget(t) {
+  if(!t || !['page','other'].includes(t.type))return false;
+  try {
+    const u=new URL(String(t.url||''));
+    return u.protocol==='file:' &&
+      /(?:\/app\.asar\/app\/|\/app\/(?:window|dialog|modal|popup)\/)/i.test(u.pathname);
+  }catch{return false;}
+}
+export function closeDialogExpression({click=false}={}) {
+  return '(function(){'+
+    "const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};"+
+    "const buttons=Array.from(document.querySelectorAll('button,[role=\"button\"]'))"+
+      ".filter(e=>visible(e)&&String(e.textContent||'').trim()==='Close without saving');"+
+    "if(buttons.length!==1)return {matched:false,buttons:buttons.length};"+
+    "let p=buttons[0].parentElement,ok=false;"+
+    "for(let i=0;p&&i<12;i++,p=p.parentElement){const t=String(p.textContent||'');"+
+      "if(t.length>3000)break;"+
+      "if(/close tab\\?/i.test(t)&&/unsaved changes/i.test(t)){ok=true;break;}}"+
+    "if(!ok)return {matched:false,buttons:1};"+
+    (click?
+      "const b=buttons[0],k=Object.keys(b).find(x=>x.startsWith('__reactProps'));"+
+      "if(k&&typeof b[k].onClick==='function')b[k].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:b,target:b});"+
+      "else b.click();return {matched:true,clicked:true};":
+      "return {matched:true,clicked:false};")+
+    '})()';
+}
+export async function probeDesktopCloseDialogs({baseline_ids=[],include_existing=false,_deps}={}) {
+  const list=_deps?.listTargets||listCdpTargets;
+  const evaluate=_deps?.evaluateTarget||((id,expr)=>withTarget(id,fn=>fn(expr),900));
+  const previous=new Set(baseline_ids.map(String));
+  const all=await list();
+  const own=all.filter(isDesktopUiTarget);
+  const candidates=(include_existing?own:own.filter(t=>!previous.has(String(t.id)))).slice(0,16);
+  const inspected=await Promise.all(candidates.map(async t=>{
+    try{
+      const result=await evaluate(t.id,closeDialogExpression());
+      return {target_id:t.id,new_since_close:!previous.has(String(t.id)),
+        matched:result?.matched===true,buttons:result?.buttons??null};
+    }catch(e){
+      return {target_id:t.id,new_since_close:!previous.has(String(t.id)),
+        matched:false,error:String(e?.message||e).slice(0,120)};
+    }
+  }));
+  return {desktop_target_count:own.length,inspected:inspected.length,
+    matches:inspected.filter(x=>x.matched),candidates:inspected,
+    other_target_types:all.filter(t=>!isDesktopUiTarget(t)&&!isChartPageTarget(t))
+      .slice(0,15).map(t=>({type:t.type,
+        scheme:(()=>{try{return new URL(String(t.url||'')).protocol}catch{return 'unknown'}})()}))};
+}
+async function clickDesktopCloseDialog(id,{_deps}={}) {
+  const evaluate=_deps?.evaluateTarget||((target,expr)=>withTarget(target,fn=>fn(expr),1200));
+  return evaluate(id,closeDialogExpression({click:true}));
+}
+
 async function findLandingTarget({ beforeIds = [], timeoutMs = 1000, requireNew = false } = {}) {
   const deadline = Date.now() + timeoutMs;
   const before = beforeIds instanceof Set ? beforeIds : new Set(beforeIds);
