@@ -34,6 +34,7 @@ export const LEGACY_TOOL_ANNOTATIONS = Object.freeze({
   symbol_search: CLOSED_READ,
 
   data_get_ohlcv: CLOSED_READ,
+  data_get_ohlcv_history: CLOSED_READ,
   data_get_indicator: CLOSED_READ,
   data_get_strategy_results: CLOSED_WRITE,
   data_get_trades: CLOSED_WRITE,
