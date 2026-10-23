@@ -10,6 +10,7 @@
  * (Approach from issue #155 and PR #163, verified on Desktop 3.1.0.)
  */
 import CDP from 'chrome-remote-interface';
+import { setSymbol as setChartSymbol } from './chart.js';
 import { getClient, getTargetInfo, reconnectTo, CDP_HOST, CDP_PORT, listCdpTargets } from '../connection.js';
 
 const LANDING_PROBE_TIMEOUT_MS = 500;
@@ -239,7 +240,8 @@ export async function switchShellTab({ shell_tab_id, expected_layout_name, _deps
 }
 
 export async function closeShellTabById({
-  shell_tab_id, expected_layout_name, protected_layout_names = [], _deps,
+  shell_tab_id, expected_layout_name, protected_layout_names = [],
+  discard_unsaved_changes = false, _deps,
 } = {}) {
   const shell = _deps?.withShell || withShell;
   const wait = _deps?.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
@@ -278,14 +280,46 @@ export async function closeShellTabById({
       "close[k].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:close,target:close});" +
       "}else close.click();return true;})()");
     if (!clicked) throw new Error('Exact Desktop tab close button not available.');
-    for (let n=0;n<20;n++) {
+    let confirmationHandled = false;
+    for (let n=0;n<30;n++) {
       if (!await evalIn("!!document.getElementById("+id+")")) {
         return {success:true,action:'desktop_shell_tab_closed',
-          shell_tab_id:tab.shell_tab_id,layout_name:tab.layout_name};
+          shell_tab_id:tab.shell_tab_id,layout_name:tab.layout_name,
+          discarded_unsaved_changes:confirmationHandled};
       }
+      // An explicit opt-in is necessary to discard unsaved chart changes.
+      const confirmation = await evalIn(`(function(){
+        if(document.querySelector('.tabs-container .tab.active')?.id!==${id})
+          return {kind:'active_tab_changed'};
+        const dialogs=Array.from(document.querySelectorAll(
+          '[role="dialog"],[aria-modal="true"],[class*="dialog"],[class*="modal"]'
+        )).filter(el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0;});
+        const matches=dialogs.filter(el=>
+          /close tab\\?/i.test(String(el.textContent||'')) &&
+          /unsaved changes/i.test(String(el.textContent||'')));
+        if(matches.length!==1)return {kind:matches.length?'ambiguous':'none'};
+        const buttons=Array.from(matches[0].querySelectorAll('button'));
+        const discard=buttons.filter(el=>String(el.textContent||'').trim()==='Close without saving');
+        if(discard.length!==1)return {kind:'confirmation_without_exact_button'};
+        if(!${discard_unsaved_changes ? 'true' : 'false'})return {kind:'unsaved_confirmation'};
+        const button=discard[0],key=Object.keys(button).find(k=>k.startsWith('__reactProps'));
+        if(key&&typeof button[key].onClick==='function'){
+          button[key].onClick({button:0,preventDefault(){},stopPropagation(){},
+            currentTarget:button,target:button});
+        }else button.click();
+        return {kind:'discard_clicked'};
+      })()`);
+      if (confirmation?.kind==='active_tab_changed')
+        throw new Error('Active Desktop tab changed during close; refusing to proceed.');
+      if (confirmation?.kind==='unsaved_confirmation')
+        throw new Error('TradingView has unsaved chart changes. Set discard_unsaved_changes=true only to discard the exact tab.');
+      if (confirmation?.kind==='ambiguous' ||
+          confirmation?.kind==='confirmation_without_exact_button')
+        throw new Error('Ambiguous unsaved-changes confirmation; manual close required.');
+      if (confirmation?.kind==='discard_clicked') confirmationHandled=true;
       await wait(100);
     }
-    throw new Error('Desktop tab remains open (possible unsaved changes).');
+    throw new Error('Exact Desktop tab remains open after close request. A chart-renderer confirmation may require manual close.');
   });
 }
 
@@ -603,25 +637,25 @@ export async function list() {
  * the tab bar. There can be several app/window/index.html targets; the shell
  * is the one whose DOM actually contains `.tabs-container .tab`.
  */
-async function withShell(fn) {
-  const targets = await listCdpTargets();
+export async function withShell(fn, { listTargets = listCdpTargets, connectTarget = withTarget } = {}) {
+  const targets = await listTargets();
   const candidates = rankShellCandidates(targets);
 
   const failures = [];
   for (const cand of candidates) {
+    let shellVerified = false;
     try {
-      const result = await withTarget(cand.id, async evalIn => {
+      const result = await connectTarget(cand.id, async evalIn => {
         const hasTabs = await evalIn(`!!document.querySelector('.tabs-container .tab')`);
         if (!hasTabs) return { matched: false, value: null };
+        shellVerified = true;
         return { matched: true, value: await fn(evalIn) };
       }, SHELL_OPERATION_TIMEOUT_MS);
-
       if (result?.matched) return result.value;
     } catch (error) {
-      failures.push({
-        target_id: cand.id,
-        error: error?.message || String(error),
-      });
+      // Surface the real operation error once the tabbed shell is verified.
+      if (shellVerified) throw error;
+      failures.push({target_id:cand.id,error:error?.message || String(error)});
     }
   }
 
@@ -889,6 +923,12 @@ async function navigateTarget(targetId, url, timeoutMs = 2500) {
   return withDeadline(task, timeoutMs, 'CDP Page.navigate for target ' + targetId);
 }
 
+/** Named new layouts must be created in the layout picker before any symbol changes. */
+export function shouldDirectNavigate({layout, symbol, as_chart, chart_id} = {}) {
+  if (String(layout || '').trim().toLowerCase() === 'new') return false;
+  return Boolean(symbol) || Boolean(as_chart) || Boolean(chart_id);
+}
+
 /**
  * Open a new chart tab by clicking the shell window's new-tab button.
  * With `layout`, also picks from the landing page's layout list:
@@ -915,7 +955,7 @@ export async function newTab({
   if (requestedChartId && !/^[A-Za-z0-9_-]+$/.test(requestedChartId)) {
     throw new Error('chart_id must be a TradingView chart URL token');
   }
-  const wantsDirectChart = Boolean(symbol) || Boolean(as_chart) || Boolean(requestedChartId);
+  const wantsDirectChart = shouldDirectNavigate({layout,symbol,as_chart,chart_id:requestedChartId});
   const forceNewTab = Boolean(force_new_tab);
   if (!Number.isFinite(landingTimeoutMs) || landingTimeoutMs < 0) {
     throw new Error('landing_timeout_ms must be a non-negative number');
@@ -1216,10 +1256,15 @@ export async function newTab({
   }
 
   await reconnectTo(chartTarget.id);
+  // Apply the requested symbol only AFTER creating and attaching the new layout.
+  const symbolResult = wantNew && symbol ? await setChartSymbol({symbol:String(symbol)}) : null;
+  if (symbolResult && (!symbolResult.success || !symbolResult.chart_ready))
+    throw new Error('New layout created but requested symbol did not become ready; tab left open for inspection.');
   return {
     success: true,
     action: wantNew ? 'new_layout_created' : 'layout_opened_in_new_tab',
     layout: picked,
+    ...(symbolResult ? {symbol:symbolResult.symbol,chart_ready:true} : {}),
     target_id: chartTarget.id,
     chart_id: chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1] || null,
   };
