@@ -1,7 +1,58 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { runInNewContext } from 'node:vm';
 import { inspectShellTabMetadata, rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline, withShell, shouldDirectNavigate } from '../src/core/tab.js';
 import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
+
+test('classless Desktop unsaved-close popover is recognized only for an exact tab and opt-in', async () => {
+  for (const optIn of [false,true]) {
+    let closed = false;
+    let clicks = 0;
+    const message = 'Close tab? There are unsaved changes on your chart layout. You will lose them if you close the tab.';
+    const ancestor = {textContent:message+' Close without saving',parentElement:null};
+    const discardButton = {
+      textContent:'Close without saving',parentElement:ancestor,
+      getBoundingClientRect:()=>({width:120,height:25}),
+      click:()=>{clicks++;closed=true},
+    };
+    const document = {
+      body:{innerText:ancestor.textContent},
+      querySelector:selector=>selector==='.tabs-container .tab.active'?{id:'scratch'}:null,
+      querySelectorAll:selector=>selector.includes('button,[role="button"]')?[discardButton]:[],
+    };
+    const shell=async fn=>fn(async expression=>{
+      if(expression.includes('return {name:'))return {name:'DTV Close QA',label:'MRNA DTV Close QA'};
+      if(expression.includes('Array.from(document.querySelectorAll') &&
+         !expression.includes('const discard='))return [
+        {shell_tab_id:'keep',layout_name:'GEX Research Pilot',label:'SPY GEX Research Pilot'},
+        {shell_tab_id:'scratch',layout_name:'DTV Close QA',label:'MRNA DTV Close QA'},
+      ];
+      if(expression.includes('const close=tab.querySelector'))return true;
+      if(expression.includes('const discard=Array.from')){
+        return runInNewContext(expression,{document});
+      }
+      if(expression.startsWith('!!document.getElementById'))return !closed;
+      if(expression.includes('tab.click()'))return true;
+      if(expression.includes('.tab.active'))return true;
+      throw new Error('Unexpected shell statement: '+expression);
+    });
+    const call=()=>closeShellTabById({
+      shell_tab_id:'scratch',expected_layout_name:'DTV Close QA',
+      discard_unsaved_changes:optIn,_deps:{withShell:shell,wait:async()=>{}},
+    });
+    if(optIn){
+      const result=await call();
+      assert.equal(result.success,true);
+      assert.equal(result.discarded_unsaved_changes,true);
+      assert.equal(clicks,1);
+      assert.equal(closed,true);
+    }else{
+      await assert.rejects(call(),/unsaved chart changes/);
+      assert.equal(clicks,0);
+      assert.equal(closed,false);
+    }
+  }
+});
 
 test('named new layout never bypasses the picker even if symbol/as_chart are supplied', () => {
   assert.equal(shouldDirectNavigate({layout:'new',name:'MRNA scratch',symbol:'NASDAQ:MRNA',as_chart:true}), false);
