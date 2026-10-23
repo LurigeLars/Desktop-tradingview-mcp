@@ -8,15 +8,17 @@ import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerTabTools(server) {
   server.registerTool('tab_list', {
-    description: 'List current chart and shell tabs. Optionally include an all-candidate worker renderer audit and bounded physical-tab focus witness (restores selected tab). Never closes any tab.',
+    description: 'List chart/shell tabs with optional read-only diagnostics for layout creation, unsaved-close dialogs, worker targets and shell/renderer mapping. Never closes tabs.',
     inputSchema: {
       audit_worker_slot: z.coerce.number().int().min(0).max(49).optional(),
       probe_shell_tab_ids: z.array(z.string()).min(2).max(4).optional(),
       probe_target_ids: z.array(z.string()).min(2).max(8).optional(),
       inspect_shell_tab_ids: z.array(z.string()).min(1).max(4).optional(),
+      diagnose_layout_creation: z.coerce.boolean().optional().describe('Read-only bounded probe of Desktop/new-tab targets for Create new layout controls and naming input metadata; no input values or clicks.'),
+      diagnose_unsaved_dialog: z.coerce.boolean().optional().describe('Read-only bounded probe for a visible unsaved-changes confirmation in local Desktop Electron targets; never clicks or discards.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, async ({audit_worker_slot,probe_shell_tab_ids,probe_target_ids,inspect_shell_tab_ids} = {}) => {
+  }, async ({audit_worker_slot,probe_shell_tab_ids,probe_target_ids,inspect_shell_tab_ids,diagnose_layout_creation,diagnose_unsaved_dialog} = {}) => {
     try {
       const snapshot = await core.list();
       if (audit_worker_slot !== undefined) {
@@ -24,6 +26,12 @@ export function registerTabTools(server) {
       }
       if (inspect_shell_tab_ids) {
         snapshot.shell_tab_details = await core.inspectShellTabMetadata({shell_tab_ids:inspect_shell_tab_ids});
+      }
+      if (diagnose_layout_creation) {
+        snapshot.layout_creation_diagnostics = await core.probeLayoutCreateUi();
+      }
+      if (diagnose_unsaved_dialog) {
+        snapshot.unsaved_dialog_diagnostics = await core.probeDesktopCloseDialogs({include_existing:true});
       }
       if (probe_shell_tab_ids || probe_target_ids) {
         if (!probe_shell_tab_ids || !probe_target_ids) {
@@ -37,24 +45,6 @@ export function registerTabTools(server) {
       }
       return jsonResult(snapshot);
     } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
-
-  server.registerTool('tab_layout_create_probe', {
-    description:'Read-only bounded selector/target diagnostics for TradingView Desktop Create new layout dialog. Returns UI element metadata only; never clicks, types or saves.',
-    inputSchema:{},
-    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},
-  }, async()=>{
-    try{return jsonResult(await core.probeLayoutCreateUi());}
-    catch(err){return jsonResult({success:false,error:err.message},true);}
-  });
-
-  server.registerTool('tab_dialog_probe', {
-    description:'Read-only bounded CDP scan for an exact unsaved-chart confirmation in separate TradingView Desktop Electron targets. Never clicks or closes anything.',
-    inputSchema:{},
-    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},
-  },async()=>{
-    try{return jsonResult(await core.probeDesktopCloseDialogs({include_existing:true}));}
-    catch(err){return jsonResult({success:false,error:err.message},true);}
   });
 
   server.registerTool('tab_probe_identity', {

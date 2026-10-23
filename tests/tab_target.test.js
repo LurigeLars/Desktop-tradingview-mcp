@@ -3,6 +3,24 @@ import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { inspectShellTabMetadata, rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline, withShell, shouldDirectNavigate, isDesktopUiTarget, closeDialogExpression, probeDesktopCloseDialogs, layoutCreateProbeExpression, probeLayoutCreateUi } from '../src/core/tab.js';
 import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
+import { registerTabTools } from '../src/tools/tab.js';
+
+
+test('tab_list exposes diagnostics without registering additional MCP probe tools', () => {
+  const registered = new Map();
+  const server = {registerTool(name,definition,handler){
+    assert.equal(typeof handler,'function');
+    registered.set(name,definition);
+  }};
+  registerTabTools(server);
+  assert.equal(registered.has('tab_list'),true);
+  assert.equal(registered.has('tab_layout_create_probe'),false);
+  assert.equal(registered.has('tab_dialog_probe'),false);
+  const inputs=registered.get('tab_list').inputSchema;
+  assert.equal(inputs.diagnose_layout_creation.safeParse(true).success,true);
+  assert.equal(inputs.diagnose_unsaved_dialog.safeParse(true).success,true);
+  assert.equal(inputs.inspect_shell_tab_ids.safeParse(['scratch']).success,true);
+});
 
 test('classless Desktop unsaved-close popover is recognized only for an exact tab and opt-in', async () => {
   for (const optIn of [false,true]) {
