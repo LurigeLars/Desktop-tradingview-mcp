@@ -281,6 +281,7 @@ export async function closeShellTabById({
       "}else close.click();return true;})()");
     if (!clicked) throw new Error('Exact Desktop tab close button not available.');
     let confirmationHandled = false;
+    let lastDialogProbe = null;
     for (let n=0;n<30;n++) {
       if (!await evalIn("!!document.getElementById("+id+")")) {
         return {success:true,action:'desktop_shell_tab_closed',
@@ -291,24 +292,42 @@ export async function closeShellTabById({
       const confirmation = await evalIn(`(function(){
         if(document.querySelector('.tabs-container .tab.active')?.id!==${id})
           return {kind:'active_tab_changed'};
+        const visible=el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0};
         const dialogs=Array.from(document.querySelectorAll(
           '[role="dialog"],[aria-modal="true"],[class*="dialog"],[class*="modal"]'
-        )).filter(el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0;});
-        const matches=dialogs.filter(el=>
-          /close tab\\?/i.test(String(el.textContent||'')) &&
-          /unsaved changes/i.test(String(el.textContent||'')));
-        if(matches.length!==1)return {kind:matches.length?'ambiguous':'none'};
-        const buttons=Array.from(matches[0].querySelectorAll('button'));
-        const discard=buttons.filter(el=>String(el.textContent||'').trim()==='Close without saving');
-        if(discard.length!==1)return {kind:'confirmation_without_exact_button'};
+        )).filter(visible);
+        // Visible Desktop popovers need not have a dialog/modal class.
+        // Verify the exact discard control within a local confirmation ancestor.
+        const discard=Array.from(document.querySelectorAll('button,[role="button"]'))
+          .filter(el=>visible(el)&&String(el.textContent||'').trim()==='Close without saving');
+        if(discard.length>1)return {kind:'ambiguous'};
+        const hasText=el=>/close tab\\?/i.test(String(el.textContent||'')) &&
+          /unsaved changes/i.test(String(el.textContent||''));
+        let verified=null;
+        if(discard.length===1){
+          let ancestor=discard[0].parentElement;
+          for(let depth=0;ancestor&&depth<12;depth++,ancestor=ancestor.parentElement){
+            const text=String(ancestor.textContent||'');
+            if(text.length>3000)break;
+            if(hasText(ancestor)){verified=discard[0];break;}
+          }
+        }
+        if(!verified){
+          const exactDialogs=dialogs.filter(hasText);
+          return {kind:exactDialogs.length>1?'ambiguous':'none',
+            visible_discard_button:discard.length===1,
+            shell_has_heading:/close tab\\?/i.test(String(document.body?.innerText||'')),
+            shell_has_warning:/unsaved changes/i.test(String(document.body?.innerText||''))};
+        }
         if(!${discard_unsaved_changes ? 'true' : 'false'})return {kind:'unsaved_confirmation'};
-        const button=discard[0],key=Object.keys(button).find(k=>k.startsWith('__reactProps'));
+        const button=verified,key=Object.keys(button).find(k=>k.startsWith('__reactProps'));
         if(key&&typeof button[key].onClick==='function'){
           button[key].onClick({button:0,preventDefault(){},stopPropagation(){},
             currentTarget:button,target:button});
         }else button.click();
         return {kind:'discard_clicked'};
       })()`);
+      lastDialogProbe = confirmation;
       if (confirmation?.kind==='active_tab_changed')
         throw new Error('Active Desktop tab changed during close; refusing to proceed.');
       if (confirmation?.kind==='unsaved_confirmation')
@@ -319,7 +338,7 @@ export async function closeShellTabById({
       if (confirmation?.kind==='discard_clicked') confirmationHandled=true;
       await wait(100);
     }
-    throw new Error('Exact Desktop tab remains open after close request. A chart-renderer confirmation may require manual close.');
+    throw new Error('Exact Desktop tab remains open after close request; dialog probe: '+JSON.stringify(lastDialogProbe));
   });
 }
 
