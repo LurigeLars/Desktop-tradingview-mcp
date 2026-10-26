@@ -174,7 +174,7 @@ function studySpecName(value) {
 // narrow: an unknown indicator/parameter must never match by approximation.
 function canonicalStudyName(value) {
   const name = String(value || '').trim().replace(/[-_]+/g, ' ')
-    .replace(/\\s+/g, ' ').toUpperCase();
+    .replace(/\s+/g, ' ').toUpperCase();
   if (name === 'VWAP' || name === 'VOLUME WEIGHTED AVERAGE PRICE') return 'VWAP';
   if (name === 'EMA' || name === 'EXPONENTIAL MOVING AVERAGE') return 'EMA';
   return name;
