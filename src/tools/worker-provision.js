@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
-import { provisionWorker, rebindPersistentWorkers, auditWorkerTargetCandidates, retireNonmatchingWorkerRenderer, cleanupRetiredWorkerShell } from '../core/worker-provision.js';
+import { provisionWorker, rebindPersistentWorkers, auditWorkerTargetCandidates, retireNonmatchingWorkerRenderer, retireVerifiedDuplicateWorker, cleanupRetiredWorkerShell } from '../core/worker-provision.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerWorkerProvisionTools(server) {
@@ -71,8 +71,8 @@ export function registerWorkerProvisionTools(server) {
       force: z.coerce.boolean().optional().describe('Reconfigure worker-owned tabs even when recorded assignments look complete.'),
       adopt_single_existing: z.coerce.boolean().optional().describe('Explicitly adopt the sole existing non-worker TradingView chart as worker slot 0. Useful when consuming the full connection budget.'),
       layout_prefix: z.string().optional().describe('Optional technical name prefix for DTV-owned saved layouts.'),
-      orphan_slot: z.coerce.number().int().min(0).max(49).optional().describe('Technical cleanup: worker slot of one proven nonmatching renderer.'),
-      orphan_target_id: z.string().optional().describe('Technical cleanup: exact CDP target from worker_target_audit, never the registered worker target.'),
+      orphan_slot: z.coerce.number().int().min(0).max(49).optional().describe('Technical cleanup: worker slot with one proven nonmatching or fully verified duplicate renderer.'),
+      orphan_target_id: z.string().optional().describe('Technical cleanup: exact extra CDP target from worker_target_audit; never the live registered worker target.'),
       stale_shell_slot: z.coerce.number().int().min(0).max(49).optional(),
       stale_shell_tab_id: z.string().optional(),
       retained_shell_tab_id: z.string().optional(),
@@ -95,11 +95,21 @@ export function registerWorkerProvisionTools(server) {
         ));
       }
       if (args?.orphan_target_id) {
-        return jsonResult(await withTopologyMutationLock('worker_retire_nonmatching', () =>
-          retireNonmatchingWorkerRenderer({
-            slot:args.orphan_slot,target_id:args.orphan_target_id,dry_run:args.dry_run!==false,
-          })
-        ));
+        return jsonResult(await withTopologyMutationLock('worker_retire_extra', async () => {
+          const audit = await auditWorkerTargetCandidates({slot:args.orphan_slot});
+          // Matching, exact duplicate renderers require a different gate from
+          // nonmatching orphan renderers. Both paths revalidate before close.
+          if (audit.candidate_count === 2 && audit.matching_count === 2) {
+            return retireVerifiedDuplicateWorker({
+              slot:args.orphan_slot,target_id:args.orphan_target_id,
+              dry_run:args.dry_run!==false,
+            });
+          }
+          return retireNonmatchingWorkerRenderer({
+            slot:args.orphan_slot,target_id:args.orphan_target_id,
+            dry_run:args.dry_run!==false,
+          });
+        }));
       }
       if (args?.dry_run) return jsonResult(await provisionWorker(args));
       return jsonResult(await withTopologyMutationLock('worker_provision', () => provisionWorker(args)));

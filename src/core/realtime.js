@@ -169,12 +169,34 @@ function studySpecName(value) {
     : String(value?.name ?? '').trim();
 }
 
-function studyInputsMatch(requiredInputs, actualInputs) {
+// TradingView's UI exposes descriptions and typed Pine inputs, while worker
+// manifests use indicator names and human-readable input keys. Keep mappings
+// narrow: an unknown indicator/parameter must never match by approximation.
+function canonicalStudyName(value) {
+  const name = String(value || '').trim().replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ').toUpperCase();
+  if (name === 'VWAP' || name === 'VOLUME WEIGHTED AVERAGE PRICE') return 'VWAP';
+  if (name === 'EMA' || name === 'EXPONENTIAL MOVING AVERAGE') return 'EMA';
+  return name;
+}
+
+function unwrappedStudyInput(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && Object.prototype.hasOwnProperty.call(value, 'v') ? value.v : value;
+}
+
+function studyInputsMatch(requiredInputs, actualInputs, studyName) {
   if (!requiredInputs || Object.keys(requiredInputs).length === 0) return true;
   if (!actualInputs || typeof actualInputs !== 'object') return false;
-  return Object.entries(requiredInputs).every(([key, value]) =>
-    JSON.stringify(actualInputs[key]) === JSON.stringify(value)
-  );
+  return Object.entries(requiredInputs).every(([key, value]) => {
+    // TradingView Desktop 3.4.x reports an EMA's length as typed in_0.v,
+    // not as a top-level "length" input in the manifest.
+    const actualKey = studyName === 'EMA' && key === 'length'
+      && !Object.prototype.hasOwnProperty.call(actualInputs, key) ? 'in_0' : key;
+    if (!Object.prototype.hasOwnProperty.call(actualInputs, actualKey)) return false;
+    return JSON.stringify(unwrappedStudyInput(actualInputs[actualKey]))
+      === JSON.stringify(unwrappedStudyInput(value));
+  });
 }
 
 export function requiredStudiesPresent(entry, snapshot) {
@@ -184,12 +206,12 @@ export function requiredStudiesPresent(entry, snapshot) {
   if (!present.length) return false;
 
   return required.every(spec => {
-    const name = studySpecName(spec).toUpperCase();
+    const name = canonicalStudyName(studySpecName(spec));
     if (!name) return false;
     const inputs = typeof spec === 'object' && spec ? spec.inputs : undefined;
     return present.some(study =>
-      String(study?.name || '').trim().toUpperCase() === name
-      && studyInputsMatch(inputs, study?.inputs)
+      canonicalStudyName(study?.name) === name
+      && studyInputsMatch(inputs, study?.inputs, name)
     );
   });
 }
