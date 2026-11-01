@@ -113,7 +113,7 @@ test('opaque pagination cursor reaches the authenticated fixed news-mediator URL
   assert.match(calls[0], /params\.set\('cursor',/);
   assert.match(calls[0], /params\.append\('filter', 'watchlist:' \+/);
   assert.match(calls[0], /credentials: 'include'/);
-  assert.match(calls[0], new RegExp(cursor.replace(/[=]/g, '\\=')));
+  assert.ok(calls[0].includes(cursor));
 });
 
 test('pagination cursor is bounded, validated and cannot be used to inject query parameters', async () => {
