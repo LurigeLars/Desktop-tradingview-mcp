@@ -109,7 +109,7 @@ test('opaque pagination cursor reaches the authenticated fixed news-mediator URL
   assert.equal(response.pagination_cursor, 'next-page-token=');
   assert.equal(response.items[0].id, 'older-1');
   assert.equal(calls.length, 1);
-  assert.ok(calls[0].includes("parsed.hostname !== 'news-mediator.tradingview.com'"));
+  assert.ok(calls[0].includes('parsed.hostname !== "news-mediator.tradingview.com"'));
   assert.match(calls[0], /params\.set\('cursor',/);
   assert.match(calls[0], /params\.append\('filter', 'watchlist:' \+/);
   assert.match(calls[0], /credentials: 'include'/);
