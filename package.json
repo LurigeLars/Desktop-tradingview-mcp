@@ -31,5 +31,9 @@
   },
   "devDependencies": {
     "eslint": "^10.10.0"
+  },
+  "overrides": {
+    "body-parser": "2.4.0",
+    "iconv-lite": "0.7.3"
   }
 }
