@@ -34,6 +34,7 @@
   },
   "overrides": {
     "body-parser": "2.4.0",
-    "iconv-lite": "0.7.3"
+    "iconv-lite": "0.7.3",
+    "minimatch": "11.0.1"
   }
 }
