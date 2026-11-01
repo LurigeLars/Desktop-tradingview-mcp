@@ -51,7 +51,14 @@ export { KNOWN_PATHS };
 export function safeString(str) { return JSON.stringify(String(str)); }
 
 export function requireFinite(value, name) {
-  const n = Number(value);
+  // Preserve the existing null -> 0 behavior. Other non-numeric inputs
+  // must not silently turn into valid-looking chart prices or coordinates.
+  if (value === null) return 0;
+  const n = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim() !== ''
+      ? Number(value)
+      : NaN;
   if (!Number.isFinite(n)) throw new Error(`${name} must be a finite number, got: ${value}`);
   return n;
 }
