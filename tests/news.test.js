@@ -5,6 +5,7 @@ import {
   NEWS_MEDIATOR_HOST,
   normalizeNewsFlowResponse,
   normalizeWatchlistId,
+  normalizeNewsCursor,
 } from '../src/core/news.js';
 
 test('watchlist ids are numeric and cannot inject a URL/query', () => {
@@ -89,4 +90,41 @@ test('news flow page-context request is fixed to TradingView mediator and authen
   assert.equal(result.watchlist_id, '349099896');
   assert.equal(result.streaming_channel, 'stream-1');
   assert.equal(result.items[0].provider.name, 'Reuters');
+});
+
+
+test('opaque pagination cursor reaches the authenticated fixed news-mediator URL', async () => {
+  const cursor = 'eyJfaWQiOiJzdG9yeS0xIiwicHViZGF0ZSI6MTc5MzM2NjE2MDAwMH0=';
+  const calls = [];
+  const now = 1_793_574_081;
+  const raw = { items: [{ id: 'older-1', title: 'Older story', published: now - 3600 }],
+    pagination: { cursor: 'next-page-token=' } };
+  const response = await getWatchlistNews({
+    watchlist_id: '347899985',
+    since: '2026-10-20T11:32:00Z',
+    cursor,
+    _deps: { evaluateAsync: async code => { calls.push(code); return raw; } },
+  });
+  assert.equal(response.request_cursor, cursor);
+  assert.equal(response.pagination_cursor, 'next-page-token=');
+  assert.equal(response.items[0].id, 'older-1');
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].includes('parsed.hostname !== "news-mediator.tradingview.com"'));
+  assert.match(calls[0], /params\.set\('cursor',/);
+  assert.match(calls[0], /params\.append\('filter', 'watchlist:' \+/);
+  assert.match(calls[0], /credentials: 'include'/);
+  assert.ok(calls[0].includes(cursor));
+});
+
+test('pagination cursor is bounded, validated and cannot be used to inject query parameters', async () => {
+  assert.equal(normalizeNewsCursor(null), null);
+  assert.equal(normalizeNewsCursor('abc-_+/='), 'abc-_+/=');
+  for (const bad of ['', 'x&filter=all', 'x%26z', 'x y', 'x\nq', '\\', 'a'.repeat(513)]) {
+    if (bad === '') { assert.equal(normalizeNewsCursor(bad), null); continue; }
+    assert.throws(() => normalizeNewsCursor(bad), /cursor must be/);
+  }
+  await assert.rejects(
+    getWatchlistNews({ watchlist_id: '347899985', cursor: 'validbase64=' }),
+    /requires a since boundary/,
+  );
 });
