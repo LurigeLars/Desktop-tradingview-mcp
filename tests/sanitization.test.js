@@ -125,6 +125,22 @@ describe('requireFinite() — numeric validation', () => {
   it('includes bad value in error message', () => {
     assert.throws(() => requireFinite('oops', 'field'), /got: oops/);
   });
+
+  it('rejects blank and whitespace-only numeric input', () => {
+    assert.throws(() => requireFinite('', 'price'), /price must be a finite number/);
+    assert.throws(() => requireFinite('   ', 'price'), /price must be a finite number/);
+  });
+
+  it('rejects arrays, booleans and objects instead of coercing them', () => {
+    for (const value of [[], [5], true, false, {}]) {
+      assert.throws(() => requireFinite(value, 'coordinate'), /coordinate must be a finite number/);
+    }
+  });
+
+  it('keeps numeric strings and existing null behavior', () => {
+    assert.equal(requireFinite(' 17.5 ', 'price'), 17.5);
+    assert.equal(requireFinite(null, 'price'), 0);
+  });
 });
 
 // ── chart.js — safeString in evaluate calls ──────────────────────────────
