@@ -5,6 +5,7 @@ import {
   auditWorkerTargetCandidates,
   cleanupRetiredWorkerShell,
   retireNonmatchingWorkerRenderer,
+  retireVerifiedDuplicateWorker,
   buildWorkerLayoutName,
   closeTabByOwned,
   closeWorkerTargetGracefully,
@@ -1473,4 +1474,124 @@ test('retired worker shell cleanup requires exact obsolete symbol and preserves 
   assert.equal(result.remaining_shells[0].shell_tab_id,'live');
   assert.equal(closes,1);
   assert.deepEqual(targets.map(t=>t.id),['registered']);
+});
+
+test('verified duplicate cleanup is read-only first, closes exactly one renderer, and rebinds', async () => {
+  let state = {
+    topology_plan: { tab_count: 1, tabs: [
+      { tab_index: 0, pane_count: 2, handles: ['brent', 'adbe'] },
+    ] },
+    worker_tabs: [{
+      slot: 0, chart_id: 'worker06', target_id: 'stale-before-restart',
+      persistent_layout: true, layout_name: 'DTV Worker 01', pane_count: 2,
+    }],
+    entries: [
+      { handle: 'brent', symbol: 'NYMEX:BZZ2026', timeframe: '1', studies: [],
+        assignment: { worker_slot: 0, chart_id: 'worker06', target_id: 'stale-before-restart', pane_index: 0 } },
+      { handle: 'adbe', symbol: 'BATS:ADBE', timeframe: '1',
+        studies: [{ name: 'EXPONENTIAL MOVING AVERAGE', inputs: { length: 20 } },
+          { name: 'VWAP', inputs: {} }],
+        assignment: { worker_slot: 0, chart_id: 'worker06', target_id: 'stale-before-restart', pane_index: 1 } },
+    ],
+  };
+  const panes = [
+    { resolved_symbol: 'NYMEX:BZZ2026', resolution: '1', studies: [] },
+    { resolved_symbol: 'BATS:ADBE', resolution: '1', studies: [
+      { name: 'Exponential moving average', inputs: { in_0: { v: 20, t: 'integer' } } },
+      { name: 'Volume-weighted average price', inputs: {} },
+    ] },
+  ];
+  let live = ['live-01', 'live-02'].map(target_id => ({
+    target_id, chart_id: 'worker06', pane_count: 2, panes,
+  }));
+  const closes = [];
+  const deps = {
+    status: () => state,
+    record: ({ worker_tabs, assignments }) => {
+      state = { ...state, worker_tabs: worker_tabs || state.worker_tabs,
+        entries: state.entries.map(entry => ({
+          ...entry, assignment: Object.hasOwn(assignments || {}, entry.handle)
+            ? assignments[entry.handle] : entry.assignment,
+        })) };
+      return state;
+    },
+    listTargets: async () => live.map(item => ({
+      id: item.target_id, url: 'https://www.tradingview.com/chart/' + item.chart_id + '/',
+    })),
+    inspectTargets: async targets => targets.map(t => live.find(item => item.target_id === t.id)),
+    closeTabByOwned: async ({ target_id, chart_id }) => {
+      closes.push({ target_id, chart_id });
+      live = live.filter(item => item.target_id !== target_id);
+      return { success: true, closed: true };
+    },
+  };
+  const plan = await retireVerifiedDuplicateWorker({
+    slot: 0, target_id: 'live-02', dry_run: true, _deps: deps,
+  });
+  assert.equal(plan.success, true);
+  assert.equal(plan.retained_target_id, 'live-01');
+  assert.deepEqual(plan.verified_slots, [0]);
+  assert.equal(closes.length, 0);
+  assert.equal(state.worker_tabs[0].target_id, 'stale-before-restart');
+
+  const done = await retireVerifiedDuplicateWorker({
+    slot: 0, target_id: 'live-02', dry_run: false, _deps: deps,
+  });
+  assert.equal(done.success, true);
+  assert.equal(done.rebound.success, true);
+  assert.deepEqual(closes, [{ target_id: 'live-02', chart_id: 'worker06' }]);
+  assert.deepEqual(live.map(item => item.target_id), ['live-01']);
+  assert.equal(state.worker_tabs[0].target_id, 'live-01');
+  assert.equal(state.entries[0].assignment.target_id, 'live-01');
+  assert.equal(state.entries[1].assignment.target_id, 'live-01');
+  await assert.rejects(retireVerifiedDuplicateWorker({
+    slot: 0, target_id: 'live-01', dry_run: false, _deps: deps,
+  }), /not uniquely verified safe/);
+  assert.equal(closes.length, 1);
+});
+
+test('duplicate cleanup fails closed on wrong target, mismatching studies, or missing workers', async () => {
+  const state = {
+    topology_plan: { tab_count: 1, tabs: [
+      { tab_index: 0, pane_count: 1, handles: ['adbe'] },
+    ] },
+    worker_tabs: [{ slot: 0, chart_id: 'stable', target_id: 'old',
+      persistent_layout: true, layout_name: 'DTV Worker 01' }],
+    entries: [{ handle: 'adbe', symbol: 'BATS:ADBE', timeframe: '1',
+      studies: [{ name: 'EMA', inputs: { length: 20 } }] }],
+  };
+  let targets = ['a', 'b'].map(target_id => ({
+    target_id, chart_id: 'stable', pane_count: 1,
+    panes: [{ resolved_symbol: 'BATS:ADBE', resolution: '1',
+      studies: [{ name: 'Exponential moving average', inputs: { in_0: { v: 20 } } }] }],
+  }));
+  let closes = 0;
+  const deps = {
+    status: () => state,
+    listTargets: async () => targets.map(t => ({
+      id: t.target_id, url: 'https://www.tradingview.com/chart/stable/',
+    })),
+    inspectTargets: async () => targets,
+    closeTabByOwned: async () => { closes++; throw new Error('must never close'); },
+  };
+  await assert.rejects(retireVerifiedDuplicateWorker({
+    slot: 0, target_id: 'a', dry_run: false, _deps: deps,
+  }), /not uniquely verified safe/, 'cannot remove selected primary');
+  await assert.rejects(retireVerifiedDuplicateWorker({
+    slot: 0, target_id: 'something-else', dry_run: false, _deps: deps,
+  }), /not uniquely verified safe/, 'cannot remove an unrelated target');
+  targets[1] = { ...targets[1], panes: [{
+    ...targets[1].panes[0],
+    studies: [{ name: 'Exponential moving average', inputs: { in_0: { v: 9 } } }],
+  }] };
+  await assert.rejects(retireVerifiedDuplicateWorker({
+    slot: 0, target_id: 'b', dry_run: false, _deps: deps,
+  }), /not uniquely verified safe/, 'mismatched EMA must block cleanup');
+  targets[1] = { ...targets[0], target_id: 'b' };
+  state.topology_plan.tabs.push({ tab_index: 1, pane_count: 1, handles: ['missing'] });
+  state.topology_plan.tab_count = 2;
+  await assert.rejects(retireVerifiedDuplicateWorker({
+    slot: 0, target_id: 'b', dry_run: false, _deps: deps,
+  }), /not uniquely verified safe/, 'unverified remaining worker must block cleanup');
+  assert.equal(closes, 0);
 });
