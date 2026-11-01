@@ -11,12 +11,14 @@ export function registerNewsTools(server) {
         .describe('Numeric TradingView watchlist id, e.g. 349099896'),
       since: z.string().optional()
         .describe('Optional ISO-8601 lower freshness boundary. coverage reports whether the 200-item source window reaches it.'),
+      cursor: z.string().min(1).max(512).regex(/^[A-Za-z0-9_+/=-]+$/).optional()
+        .describe('Opaque bounded continuation token from pagination_cursor; requires since and never changes the news-mediator host.'),
       limit: z.number().int().min(1).max(200).optional().default(200)
         .describe('Maximum returned stories after freshness filtering; source snapshot remains bounded at 200'),
     },
-    async ({ watchlist_id, since, limit }) => {
+    async ({ watchlist_id, since, cursor, limit }) => {
       try {
-        return jsonResult(await core.getWatchlistNews({ watchlist_id, since, limit }));
+        return jsonResult(await core.getWatchlistNews({ watchlist_id, since, cursor, limit }));
       } catch (err) {
         return jsonResult({ success: false, error: err.message }, true);
       }
