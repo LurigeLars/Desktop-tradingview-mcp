@@ -246,8 +246,11 @@ export function persistentWorkerRecovery(state, topology, byHandle, inspectedTar
       continue;
     }
 
-    const selected = matching[0];
-    const duplicates = matching.slice(1);
+    // Preserve a verified current owner; after restart, select deterministically
+    // among verified candidates and require explicit cleanup of any duplicate.
+    const selected = matching.find(item => String(item.target_id) === String(owned.target_id))
+      || matching[0];
+    const duplicates = matching.filter(item => item !== selected);
     bySlot.set(slot, selected);
     targetIds.add(String(selected.target_id));
     for (const item of duplicates) targetIds.add(String(item.target_id));
@@ -311,6 +314,83 @@ export async function auditWorkerTargetCandidates({ slot, _deps } = {}) {
   };
 }
 
+
+/**
+ * Retire one *fully verified* duplicate persistent worker renderer without
+ * allocating another chart. In particular, this avoids the provisioning
+ * connection-budget gate: this operation strictly decreases live connections.
+ *
+ * A stale CDP ID alone is not proof. Both candidates must match every symbol,
+ * timeframe and required indicator, and the rest of the worker fleet must
+ * already be independently verified. Keep the registered live target if any.
+ */
+export async function retireVerifiedDuplicateWorker({
+  slot, target_id, dry_run = true, _deps,
+} = {}) {
+  const deps = resolveDeps(_deps);
+  const index = Number(slot);
+  const retireId = String(target_id || '').trim();
+  if (!Number.isInteger(index) || index < 0 || !/^[a-zA-Z0-9-]+$/.test(retireId)) {
+    throw new Error('An exact worker slot and live duplicate CDP target_id are required.');
+  }
+
+  const verify = async () => {
+    const state = deps.status();
+    const plan = state.topology_plan?.tabs?.find(item => Number(item.tab_index) === index);
+    const owned = (state.worker_tabs || []).find(item => Number(item.slot) === index);
+    if (!plan || !owned?.persistent_layout || !owned?.chart_id
+        || !/^DTV (?:Worker|Market) \d{2}$/.test(String(owned.layout_name || ''))) {
+      throw new Error('An exact registered persistent worker identity is required.');
+    }
+    const inspected = await deps.inspectTargets(await deps.listTargets());
+    const recovery = persistentWorkerRecovery(
+      state, state.topology_plan, entryMap(state), inspected,
+    );
+    const primary = recovery.bySlot.get(index);
+    const duplicates = recovery.duplicatesBySlot.get(index) || [];
+    const sameChart = inspected.filter(item => String(item.chart_id || '') === String(owned.chart_id));
+    if (recovery.conflicts.length || recovery.bySlot.size !== state.topology_plan.tabs.length
+        || recovery.duplicatesBySlot.size !== 1 || duplicates.length !== 1
+        || sameChart.length !== 2 || !primary
+        || String(primary.target_id) === retireId
+        || String(duplicates[0].target_id) !== retireId
+        || String(owned.target_id) === retireId) {
+      throw new Error('Worker duplicate is not uniquely verified safe to retire.');
+    }
+    return {
+      slot: index,
+      chart_id: String(owned.chart_id),
+      retained_target_id: String(primary.target_id),
+      retired_target_id: retireId,
+      verified_slots: [...recovery.bySlot.keys()].sort((a, b) => a - b),
+    };
+  };
+
+  const planned = await verify();
+  const report = { success: true, dry_run: dry_run !== false, ...planned };
+  if (dry_run !== false) return report;
+
+  // One last full verification inside the topology mutation lock. Fail closed
+  // if a renderer/assignment changes between planning and closure.
+  const current = await verify();
+  if (JSON.stringify(current) !== JSON.stringify(planned)) {
+    throw new Error('Worker identities changed before duplicate cleanup.');
+  }
+  const closed = await deps.closeTabByOwned({
+    target_id: retireId,
+    chart_id: planned.chart_id,
+  });
+  if (closed?.success !== true || closed?.closed !== true) {
+    return { ...report, dry_run: false, success: false, closed,
+      error: 'Exact duplicate renderer was not confirmed closed.' };
+  }
+  const rebound = await rebindPersistentWorkers({ dry_run: false, _deps });
+  return {
+    ...report, dry_run: false, success: rebound.success === true,
+    closed, rebound,
+    error: rebound.success ? null : 'Renderer closed but worker rebind needs repair.',
+  };
+}
 
 /**
  * Retire exactly one proven nonmatching renderer of a registered worker layout.

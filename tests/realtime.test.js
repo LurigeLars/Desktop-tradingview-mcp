@@ -9,6 +9,7 @@ import {
   activeRealtimePaneCount,
   filterSnapshotsBySymbols,
   selectSnapshotsForWorkerEntries,
+  requiredStudiesPresent,
 } from '../src/core/realtime.js';
 
 test('snapshot options use compact fast defaults', () => {
@@ -420,4 +421,40 @@ test('worker selection accepts a uniquely resolved exchange-qualified form for a
   const selected = selectSnapshotsForWorkerEntries([entry], snapshots);
   assert.equal(selected.unmatched.length, 0);
   assert.equal(selected.snapshots[0].resolved_symbol, 'EX:AAA');
+});
+
+test('Desktop 3.4.x VWAP/EMA indicators verify against manifest aliases and typed inputs', () => {
+  const required = { studies: [
+    { name: 'VWAP', inputs: {} },
+    { name: 'EXPONENTIAL MOVING AVERAGE', inputs: { length: 20 } },
+    { name: 'EXPONENTIAL MOVING AVERAGE', inputs: { length: 9 } },
+    { name: 'VOLUME', inputs: {} },
+  ] };
+  const present = { studies: [
+    { name: 'Volume-weighted average price', inputs: { in_1: { v: 'Session', t: 'text' } } },
+    { name: 'Exponential moving average', inputs: { in_0: { v: 20, t: 'integer' } } },
+    { name: 'Exponential moving average', inputs: { in_0: { v: 9, t: 'integer' } } },
+    { name: 'Volume', inputs: { length: { v: 20, t: 'integer' } } },
+  ] };
+  assert.equal(requiredStudiesPresent(required, present), true);
+  assert.equal(requiredStudiesPresent(
+    { studies: [{ name: 'EMA', inputs: { length: 20 } }] }, present), true);
+
+  const badEma = { studies: present.studies.map(study =>
+    study.name === 'Exponential moving average'
+      ? { ...study, inputs: { in_0: { v: 9, t: 'integer' } } } : study) };
+  assert.equal(requiredStudiesPresent(required, badEma), false,
+    'EMA20 must not pass against EMA9');
+  assert.equal(requiredStudiesPresent(required,
+    { studies: present.studies.filter(study => !study.name.startsWith('Volume-weighted')) }), false,
+  'VWAP must not pass against volume alone');
+  assert.equal(requiredStudiesPresent({ studies: [
+    { name: 'VOLUME', inputs: { length: 21 } },
+  ] }, present), false, 'typed Volume length must still be checked');
+  assert.equal(requiredStudiesPresent({ studies: [
+    { name: 'SIMPLE MOVING AVERAGE', inputs: { length: 20 } },
+  ] }, present), false, 'unknown indicator aliases must not match');
+  assert.equal(requiredStudiesPresent({ studies: [
+    { name: 'EMA', inputs: { unknown_param: 20 } },
+  ] }, present), false, 'unknown input keys must fail closed');
 });
