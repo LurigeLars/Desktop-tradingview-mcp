@@ -19,15 +19,6 @@ export function normalizeWatchlistId(value) {
   return text;
 }
 
-export function normalizeNewsCursor(value) {
-  if (value == null || value === '') return null;
-  if (typeof value !== 'string' || value.length > 512 ||
-      !/^[A-Za-z0-9_+/=-]+$/.test(value)) {
-    throw new Error('cursor must be a bounded opaque base64 pagination token');
-  }
-  return value;
-}
-
 export function normalizeSince(value) {
   if (value == null || String(value).trim() === '') return null;
   const ms = Date.parse(String(value));
@@ -73,7 +64,7 @@ function compactItem(item) {
   };
 }
 
-export function normalizeNewsFlowResponse(raw, { watchlistId, since = null, limit = MAX_SOURCE_ITEMS, cursor = null } = {}) {
+export function normalizeNewsFlowResponse(raw, { watchlistId, since = null, limit = MAX_SOURCE_ITEMS } = {}) {
   if (!raw || typeof raw !== 'object') throw new Error('TradingView News Flow returned no payload');
   if (raw.error) throw new Error(String(raw.error));
 
@@ -110,21 +101,16 @@ export function normalizeNewsFlowResponse(raw, { watchlistId, since = null, limi
     freshness_boundary_reached: boundaryReached,
     source_window_truncated: sinceUnix != null && boundaryReached === false,
     result_truncated: freshItems.length > boundedLimit,
-    request_cursor: normalizeNewsCursor(cursor),
-    pagination_cursor: normalizeNewsCursor(raw.pagination?.cursor),
+    pagination_cursor: raw.pagination?.cursor ?? null,
     streaming_channel: raw.streaming?.channel ?? null,
     items: returned,
   };
 }
 
-export async function getWatchlistNews({ watchlist_id, since = null, limit = MAX_SOURCE_ITEMS, cursor = null, _deps } = {}) {
+export async function getWatchlistNews({ watchlist_id, since = null, limit = MAX_SOURCE_ITEMS, _deps } = {}) {
   const watchlistId = normalizeWatchlistId(watchlist_id);
   const sinceUnix = normalizeSince(since);
   const boundedLimit = Math.max(1, Math.min(MAX_SOURCE_ITEMS, Number(limit) || MAX_SOURCE_ITEMS));
-  const pageCursor = normalizeNewsCursor(cursor);
-  if (pageCursor && sinceUnix == null) {
-    throw new Error('cursor pagination requires a since boundary');
-  }
   const runEvaluateAsync = _deps?.evaluateAsync || evaluateAsync;
 
   const raw = await runEvaluateAsync(`
@@ -140,10 +126,6 @@ export async function getWatchlistNews({ watchlist_id, since = null, limit = MAX
         params.append('filter', 'lang:en');
         params.append('filter', 'watchlist:' + ${JSON.stringify(watchlistId)});
         params.set('client', 'screener');
-        if (${JSON.stringify(pageCursor)} !== null) {
-          params.set('cursor', ${JSON.stringify(pageCursor)});
-        }
-
         params.set('streaming', 'true');
         params.set('user_prostatus', window.user && window.user.is_pro ? 'pro' : 'non_pro');
 
@@ -168,6 +150,5 @@ export async function getWatchlistNews({ watchlist_id, since = null, limit = MAX
     watchlistId,
     since: sinceUnix == null ? null : isoFromUnix(sinceUnix),
     limit: boundedLimit,
-    cursor: pageCursor,
   });
 }
