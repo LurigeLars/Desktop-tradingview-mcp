@@ -1084,7 +1084,7 @@ test('duplicate tabs without React layout name require exact visible suffix and 
       rows.splice(rows.findIndex(x=>x.shell_tab_id==='remove'),1);return true;
     }
     if(expression.includes('.tab.active'))return true;
-    if(expression.includes('tab.click()')){selected=true;return true}
+    if(expression.includes('tab.click()')){selected=true;return true;}
     if(expression.startsWith('!!document.getElementById'))return rows.some(x=>expression.includes(JSON.stringify(x.shell_tab_id)));
     throw new Error('Unexpected shell eval '+expression);
   });
