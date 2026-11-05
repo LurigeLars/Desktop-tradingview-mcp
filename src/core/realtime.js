@@ -542,12 +542,34 @@ function buildTargetExpression({ bars, includeStudies, studyFilters }) {
   `;
 }
 
-async function readTarget(target, options) {
+async function closeTargetClient(client, timeoutMs) {
+  try {
+    await withTimeout(client.close(), timeoutMs, 'CDP close');
+  } catch {
+    // CRI close waits for the peer handshake; terminate its socket if that stalls.
+    try { client._ws?.terminate(); } catch { /* transport already gone */ }
+  }
+}
+
+export async function readTarget(target, options, {
+  connect = CDP,
+  timeoutMs = TARGET_TIMEOUT_MS,
+  closeTimeoutMs = 1000,
+} = {}) {
   const started = Date.now();
   let client = null;
+  let abandoned = false;
   try {
-    client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
-    await client.Runtime.enable();
+    const attaching = connect({ host: CDP_HOST, port: CDP_PORT, target: target.id })
+      .then(async connected => {
+        if (abandoned) {
+          await closeTargetClient(connected, closeTimeoutMs);
+          throw new Error('CDP attach completed after timeout');
+        }
+        return connected;
+      });
+    client = await withTimeout(attaching, timeoutMs, `CDP attach ${target.id}`);
+    await withTimeout(client.Runtime.enable(), timeoutMs, `CDP Runtime.enable ${target.id}`);
 
     const result = await withTimeout(
       client.Runtime.evaluate({
@@ -555,7 +577,7 @@ async function readTarget(target, options) {
         returnByValue: true,
         awaitPromise: false,
       }),
-      TARGET_TIMEOUT_MS,
+      timeoutMs,
       `CDP target ${target.id}`,
     );
 
@@ -596,7 +618,8 @@ async function readTarget(target, options) {
       panes: [],
     };
   } finally {
-    try { if (client) await client.close(); } catch { /* best effort */ }
+    abandoned = true;
+    if (client) await closeTargetClient(client, closeTimeoutMs);
   }
 }
 
