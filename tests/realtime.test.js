@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { setImmediate as nextTurn } from 'node:timers/promises';
+import { createMutationLock } from '../src/core/topology-lock.js';
 import {
+  readTarget,
   normalizeSnapshotOptions,
   realtimeStatusFromDelay,
   realtimeStatusFromQuote,
@@ -11,6 +14,88 @@ import {
   selectSnapshotsForWorkerEntries,
   requiredStudiesPresent,
 } from '../src/core/realtime.js';
+
+const target = { id: 'stalled-chart', url: 'https://www.tradingview.com/chart/test/' };
+const snapshotOptions = normalizeSnapshotOptions();
+const never = () => new Promise(() => {});
+
+function snapshotClient() {
+  return {
+    Runtime: {
+      enable: async () => {},
+      evaluate: async () => ({ result: { value: { panes: [{ success: true }] } } }),
+    },
+    close: async () => {},
+  };
+}
+
+for (const phase of ['attach', 'enable', 'evaluate']) {
+  test(`snapshot releases the topology lock after stalled CDP ${phase}`, { timeout: 2000 }, async () => {
+    const lock = createMutationLock();
+    const client = snapshotClient();
+    let closed = false;
+    client.close = async () => { closed = true; };
+    if (phase !== 'attach') client.Runtime[phase] = never;
+    const snapshot = lock.run('realtime_snapshot', () => readTarget(target, snapshotOptions, {
+      connect: phase === 'attach' ? never : async () => client,
+      timeoutMs: 20,
+    }));
+    const launch = lock.run('tv_launch', async () => 'launch reached');
+    const result = await snapshot;
+    assert.equal(result.success, false);
+    assert.match(result.error, /timed out/);
+    assert.deepEqual(result.panes, []);
+    assert.equal(closed, phase !== 'attach');
+    assert.equal(await launch, 'launch reached');
+    assert.equal(lock.status().locked, false);
+  });
+}
+
+test('late CDP attachment is closed without reading after the lock is released', { timeout: 2000 }, async () => {
+  let finishAttach;
+  let closed = false;
+  let enabled = false;
+  const client = snapshotClient();
+  client.close = async () => { closed = true; };
+  client.Runtime.enable = async () => { enabled = true; };
+  const result = await readTarget(target, snapshotOptions, {
+    connect: () => new Promise(resolve => { finishAttach = resolve; }),
+    timeoutMs: 20,
+  });
+  assert.equal(result.success, false);
+  finishAttach(client);
+  await nextTurn();
+  assert.equal(closed, true);
+  assert.equal(enabled, false);
+});
+
+test('stalled CDP close terminates the socket before the next lock holder runs', { timeout: 2000 }, async () => {
+  const lock = createMutationLock();
+  const client = snapshotClient();
+  let terminated = false;
+  client.close = never;
+  client._ws = { terminate: () => { terminated = true; } };
+  const snapshot = lock.run('realtime_snapshot', () => readTarget(target, snapshotOptions, {
+    connect: async () => client,
+    closeTimeoutMs: 20,
+  }));
+  const next = lock.run('tv_launch', async () => assert.equal(terminated, true));
+  assert.equal((await snapshot).success, true);
+  await next;
+  assert.equal(lock.status().locked, false);
+});
+
+test('successful snapshot closes its CDP client and preserves pane identity', async () => {
+  const client = snapshotClient();
+  let closed = false;
+  client.close = async () => { closed = true; };
+  const result = await readTarget(target, snapshotOptions, { connect: async () => client });
+  assert.equal(result.success, true);
+  assert.equal(closed, true);
+  assert.equal(result.chart_id, 'test');
+  assert.equal(result.panes[0].target_id, target.id);
+  assert.equal(result.panes[0].chart_id, 'test');
+});
 
 test('snapshot options use compact fast defaults', () => {
   assert.deepEqual(normalizeSnapshotOptions({}), {
