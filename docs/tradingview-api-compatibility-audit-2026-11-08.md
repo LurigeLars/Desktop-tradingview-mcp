@@ -78,3 +78,9 @@ The 523-method inventory is now fully status-classified, but **428 remain presen
 - Additional probes confirm that **method invocation must preserve the owning object as `this`**. Calling detached methods such as `const f = chart.chartModel; f()` produces misleading `Cannot read properties of undefined` errors. Calling `chart.chartModel()` succeeds. These are test-harness errors, not TradingView API regressions.
 - 149 methods now have successful invocation evidence, 335 remain untested, and 18 Promise-returning methods need awaited validation. Full status in the machine-readable inventory.
 - Read-only follow-up confirmed BATS:NVDA 1D, one study, zero shapes, and successful chart, collection and API getters. No order or layout mutation.
+
+## Asynchronous and argument-aware verification
+- Retested Promise-returning methods and observed actual fulfillment: `chart.dataReady`, `TradingViewApi.getSavedCharts` (24 saved-chart entries), `collection.clientSnapshot`, `TradingViewApi.alerts`, `currencies` (256), `replayApi`, `units`, `chart.actionsProvider`, and `collection.generalPropertiesDefinitions` (7 entries).
+- `chart.chartPainted()` remained pending at observation; do not classify as broken.
+- `collection.state({withData:false})` and `chart.whenChartReady(callback)` accepted valid arguments and returned without throwing. Other private methods that require model/selection arguments remain unverified.
+- **166** successful method invocations, **324** not behavior-tested. The chart was BATS:XOM 1D when this audit began; this audit did not change its symbol or timeframe.
