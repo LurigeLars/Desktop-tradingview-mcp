@@ -1,8 +1,7 @@
 /**
  * Core batch execution logic.
  */
-import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
-import { waitForChartReady } from '../wait.js';
+import { evaluate, getClient } from '../connection.js';
 import { setSymbol, setTimeframe, getState } from './chart.js';
 import { getOhlcv } from './data.js';
 import { writeFileSync, mkdirSync } from 'fs';
@@ -16,10 +15,6 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
   const tfs = timeframes && timeframes.length > 0 ? timeframes : [null];
   const delay = delay_ms || 2000;
   const results = [];
-
-  let colPath, apiPath;
-  try { colPath = await getChartCollection(); } catch {}
-  try { apiPath = await getChartApi(); } catch {}
 
   for (const symbol of symbols) {
     for (const tf of tfs) {
