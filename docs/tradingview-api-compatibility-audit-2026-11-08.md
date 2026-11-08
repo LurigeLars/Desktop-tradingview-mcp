@@ -47,3 +47,16 @@ Calling every one of 523 methods would trigger destructive chart, trading, repla
 
 ## Next operational step
 Merge the verified source fix only after final PR checks, update the local Desktop MCP service from the merged commit, and rerun `batch_run` on the research layout. Until local deployment, the connected MCP still uses the old `exportData` implementation.
+
+## Additional non-destructive probes
+A second read-only round increased successful method invocations to **81 of 523**. New working chart getters include `getBarsMarksSources`, `getLollipopSourcesApi`, `getTimezoneApi`, `isPriceToBarRatioLocked`, `isSelectBarRequested`, `priceFormatter`, `properties`, `scrollPosition`, `sessions`, `selection`, `symbolResolvingActive`, `getStudyById`, `getStudyTemplateDescString`, and `getEntityValues`. Additional API/collection getters also returned successfully; see per-method JSON.
+
+New unsupported or conditional behavior:
+- `TradingViewApi.getFavoriteIntervalsService()` and `getFavoriteChartStylesService()` threw `not implemented`.
+- `chart.inactivityGaps()` threw `inactivity_gaps featureset is not enabled` (feature-gated, not necessarily removed).
+- `chart.getShapeById(nonexistent)` threw `There is no such shape` (expected negative-path error, not a broken method).
+- `chart.chartPainted()` and `TradingViewApi.getChartStorage()` returned Promises not awaited in this audit.
+
+Repeatable presence inventory: `node scripts/audit-live-api.mjs --target <EXPLICIT_CDP_TARGET_ID> --output audit.json`. The script refuses implicit target selection, does not mutate the UI, and writes a new file without overwriting an existing one. It inventories methods and possible stubs; it does not automatically execute dangerous methods.
+
+The 523-method inventory is now fully status-classified, but **428 remain present/not behavior-tested**. Treat them as unknown, not failed or supported.
