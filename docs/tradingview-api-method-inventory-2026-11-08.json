@@ -599,7 +599,7 @@
       "createOrderLine": "mock_contract_verified",
       "createPositionLine": "mock_contract_verified",
       "createShape": "invoked_successfully",
-      "createStudy": "rejected_invalid_study_id",
+      "createStudy": "invoked_successfully",
       "createStudyTemplate": "invoked_successfully",
       "crossHairMoved": "invoked_successfully",
       "dataReady": "invoked_successfully",
@@ -696,7 +696,7 @@
       "setZoomEnabled": "invoked_successfully",
       "shapesGroupController": "invoked_successfully",
       "shareLineTools": "invoked_successfully",
-      "showPropertiesDialog": "requires_valid_argument_fixture",
+      "showPropertiesDialog": "invoked_successfully",
       "studyMetaIntoRepository": "invoked_successfully",
       "symbol": "invoked_successfully",
       "symbolExt": "invoked_successfully",
@@ -715,10 +715,10 @@
       "_alreadyHasId": "invoked_successfully",
       "_applyResolution": "invoked_successfully",
       "_applySharedLineToolsDto": "requires_valid_argument_fixture",
-      "_barsMarksContainersFactory": "requires_valid_argument_fixture",
+      "_barsMarksContainersFactory": "mock_contract_verified",
       "_bottomToolbarDestroyer": "invoked_successfully",
       "_cancelAllDrawings": "invoked_successfully",
-      "_cellMetrics": "requires_context_arguments",
+      "_cellMetrics": "mock_contract_verified",
       "_chartWidgetGotoTimeRange": "invoked_successfully",
       "_chartsCountToSave": "invoked_successfully",
       "_checkAllPendingModelsAlreadyCreated": "invoked_successfully",
@@ -754,9 +754,9 @@
       "_handleSymbolLockChange": "invoked_successfully",
       "_handleTrackTimeLockChange": "invoked_successfully",
       "_hasChartsAbovePlanLimit": "invoked_successfully",
-      "_hideChart": "requires_valid_argument_fixture",
+      "_hideChart": "mock_contract_verified",
       "_isChartsLimitApplied": "invoked_successfully",
-      "_isDetached": "requires_context_arguments",
+      "_isDetached": "invoked_successfully",
       "_isLayoutKeptBehindPaywall": "invoked_successfully",
       "_liveCellsCount": "invoked_successfully",
       "_lockedLayoutLiveCount": "invoked_successfully",
@@ -766,8 +766,8 @@
       "_onResizeActionChanged": "invoked_successfully",
       "_onToolChanged": "invoked_successfully",
       "_onmodel": "requires_valid_argument_fixture",
-      "_onselectedsource": "requires_valid_argument_fixture",
-      "_onstyle": "requires_valid_argument_fixture",
+      "_onselectedsource": "invoked_successfully",
+      "_onstyle": "invoked_successfully",
       "_openMultipleChartsPaywall": "specific_widget_or_ui_fixture_required",
       "_openRestoreLayoutPaywall": "specific_widget_or_ui_fixture_required",
       "_planChartsLimit": "invoked_successfully",
@@ -922,10 +922,10 @@
       "alerts": "invoked_successfully",
       "autosave": "invoked_successfully",
       "brokerLoginEventsBus": "promise_not_awaited",
-      "changeSymbol": "requires_valid_argument_fixture",
+      "changeSymbol": "invoked_successfully",
       "chart": "invoked_successfully",
       "chartWidgetCollectionSeriesStatuses": "invoked_successfully",
-      "chartWidgetCollectionState": "requires_arguments",
+      "chartWidgetCollectionState": "invoked_successfully",
       "charts": "invoked_successfully",
       "chartsCount": "invoked_successfully",
       "clearUndoHistory": "invoked_successfully",
@@ -1070,15 +1070,14 @@
     }
   },
   "status_counts": {
-    "invoked_successfully": 435,
-    "requires_context_arguments": 5,
-    "mock_contract_verified": 21,
+    "invoked_successfully": 442,
+    "requires_context_arguments": 3,
+    "mock_contract_verified": 24,
     "rejected_invalid_record": 1,
     "promise_pending_observation": 1,
-    "rejected_invalid_study_id": 1,
     "unsupported_runtime_stub": 1,
     "feature_disabled": 1,
-    "requires_valid_argument_fixture": 17,
+    "requires_valid_argument_fixture": 11,
     "requires_nonnull_session_context": 1,
     "not_implemented_stub": 1,
     "specific_widget_or_ui_fixture_required": 5,
@@ -1088,7 +1087,6 @@
     "requires_widget_model_fixture": 1,
     "disposable_server_layout_fixture_required": 1,
     "rejected_clipboard_document_not_focused": 1,
-    "requires_arguments": 1,
     "requires_feature_argument": 1,
     "throws_not_implemented": 17,
     "throws_null_error": 1
@@ -1631,8 +1629,8 @@
         "source_excerpt": "async createStudy(e,t,i,r,s,n){if(\"function\"==typeof s)return console.warn('\"createStudy\" does not take \"callback\" parameter anymore'),Promise.resolve(null);if(n=n||{},\"string\"!=typeof e)return this._createStudy(e);e=e.t",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "rejected_invalid_study_id",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "createStudyTemplate": {
@@ -2504,8 +2502,8 @@
         "source_excerpt": "showPropertiesDialog(e){const t=this._chartWidget.model().model().dataSourceForId(e);if(null===t)throw new Error(`Study or shape ${e} does not exist`);this._chartWidget.showChartPropertiesForSource(t)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "studyMetaIntoRepository": {
@@ -2659,9 +2657,9 @@
         "source_excerpt": "_barsMarksContainersFactory(e){const t=[];if(this._options.publishedChartsEnabled){const i=new De.PublishedChartsTimeline(e,(0,Ee.createIdeaPopupOpener)(this._options.externalServices.community.publicationViewPopupServic",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "_bottomToolbarDestroyer": {
         "arity": 0,
@@ -2686,9 +2684,9 @@
         "source_excerpt": "_cellMetrics(e,t,i,s){const{padding:r=2,border:o=0}=this._options,n=s.sizer(e,t,i,r+o,this._sizingState.value());return n.width=Math.max(Math.round(n.width),0),n.height=Math.max(Math.round(n.height),0),n.top=Math.round(n",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "requires_context_arguments",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "_chartWidgetGotoTimeRange": {
         "arity": 4,
@@ -3010,9 +3008,9 @@
         "source_excerpt": "_hideChart(e){e.hiddenInLayout.setValue(!0);const t=e.container.value();t.parentNode&&t.parentNode.removeChild(t)}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "_isChartsLimitApplied": {
         "arity": 1,
@@ -3028,8 +3026,8 @@
         "source_excerpt": "_isDetached(e){return e.rdState.owner.value()!==e}",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "requires_context_arguments",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_isLayoutKeptBehindPaywall": {
@@ -3118,8 +3116,8 @@
         "source_excerpt": "_onselectedsource(){const e=(0,c.ensureNotNull)(this._subscribedChartWidget).model();this._selectedSources.setValue(e.selection().allSources().slice())}",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "requires_valid_argument_fixture",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_onstyle": {
@@ -3127,8 +3125,8 @@
         "source_excerpt": "_onstyle(e){this.activeChartStyle.setValue(e.value())}",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "requires_valid_argument_fixture",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_openMultipleChartsPaywall": {
@@ -4506,8 +4504,8 @@
         "source_excerpt": "changeSymbol(e,t,i,n=\"API\"){r.linking.setIntervalAndLogInitiator((0,s.ensureNotNull)(k.Interval.normalize(t)),n),r.linking.setSymbolAndLogInitiator(e,n),i&&this.activeChart().onDataLoaded().subscribe(null,i,!0)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "chart": {
@@ -4533,8 +4531,8 @@
         "source_excerpt": "chartWidgetCollectionState(e){return this._chartWidgetCollection.state(e)}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "requires_arguments",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "charts": {
