@@ -666,7 +666,7 @@
       "removeEntity": "invoked_successfully",
       "removeEntityWithUndo": "invoked_successfully",
       "replayStatus": "invoked_successfully",
-      "replayStudyStrategyProperties": "promise_not_awaited",
+      "replayStudyStrategyProperties": "invoked_successfully",
       "requestSelectBar": "invoked_successfully",
       "resetData": "invoked_successfully",
       "resolution": "invoked_successfully",
@@ -711,7 +711,7 @@
       "_activeChartLogicalRangeChanged": "invoked_successfully",
       "_actualLayoutCount": "invoked_successfully",
       "_addNewChartWidget": "specific_widget_or_ui_fixture_required",
-      "_allInitialModelsCreated": "promise_not_awaited",
+      "_allInitialModelsCreated": "invoked_successfully",
       "_alreadyHasId": "invoked_successfully",
       "_applyResolution": "invoked_successfully",
       "_applySharedLineToolsDto": "requires_valid_argument_fixture",
@@ -728,7 +728,7 @@
       "_computeContentBox": "invoked_successfully",
       "_createBroadcastChannel": "invoked_successfully",
       "_createChartWidget": "specific_widget_or_ui_fixture_required",
-      "_createChartWidgetCollectionNewsNotifier": "promise_not_awaited",
+      "_createChartWidgetCollectionNewsNotifier": "invoked_successfully",
       "_createClipboardHandler": "invoked_successfully",
       "_createCombineTrackTimeLock": "invoked_successfully",
       "_createSeriesControlWidget": "promise_not_awaited",
@@ -773,7 +773,7 @@
       "_planChartsLimit": "invoked_successfully",
       "_recalcHasChanges": "invoked_successfully",
       "_recalculateMaximizedChartDef": "invoked_successfully",
-      "_returnChartsToContent": "promise_not_awaited",
+      "_returnChartsToContent": "invoked_successfully",
       "_setExternalPosition": "isolated_broker_or_destructive_fixture_required",
       "_setInitialSizes": "requires_valid_argument_fixture",
       "_setLayoutCornerMaximizeChart": "invoked_successfully",
@@ -932,7 +932,7 @@
       "closeMobileChartPicker": "invoked_successfully",
       "closePopupsAndDialogs": "invoked_successfully",
       "closePublicationViewPopup": "invoked_successfully",
-      "colorDependantStudyDefaults": "promise_not_awaited",
+      "colorDependantStudyDefaults": "invoked_successfully",
       "connect": "invoked_successfully",
       "createGoProDialog": "requires_feature_argument",
       "createNewLayout": "disposable_server_layout_fixture_required",
@@ -949,10 +949,10 @@
       "drawOnAllChartsMode": "invoked_successfully",
       "dummyBrokerController": "promise_not_awaited",
       "exitFullscreen": "invoked_successfully",
-      "favoriteDrawingsToolbar": "promise_not_awaited",
+      "favoriteDrawingsToolbar": "invoked_successfully",
       "flushBufferedData": "invoked_successfully",
-      "fontIconsSettingsDrawer": "promise_not_awaited",
-      "getChartStorage": "promise_not_awaited",
+      "fontIconsSettingsDrawer": "invoked_successfully",
+      "getChartStorage": "invoked_successfully",
       "getDrawOnAllCharts": "invoked_successfully",
       "getDrawOnAllChartsMode": "invoked_successfully",
       "getFavoriteChartStylesService": "throws_not_implemented",
@@ -980,7 +980,7 @@
       "layoutId": "invoked_successfully",
       "layoutName": "invoked_successfully",
       "layoutNameWatchedValue": "invoked_successfully",
-      "layoutSettingsDrawer": "promise_not_awaited",
+      "layoutSettingsDrawer": "invoked_successfully",
       "loadChart": "throws_not_implemented",
       "loadChartFromServer": "disposable_server_layout_fixture_required",
       "loadLayoutFromServerByLayoutId": "disposable_server_layout_fixture_required",
@@ -1012,7 +1012,7 @@
       "saveChart": "invoked_successfully",
       "saveChartOrShowTitleDialog": "disposable_server_layout_fixture_required",
       "saveChartToServer": "isolated_broker_or_destructive_fixture_required",
-      "searchSymbols": "promise_not_awaited",
+      "searchSymbols": "invoked_successfully",
       "selectLineTool": "invoked_successfully",
       "selectedLineTool": "invoked_successfully",
       "setActiveChart": "invoked_successfully",
@@ -1045,13 +1045,13 @@
       "showSupportDialog": "invoked_successfully",
       "startFullscreen": "invoked_successfully",
       "studyMetaIntoRepository": "invoked_successfully",
-      "studyTemplatesDrawerApi": "promise_not_awaited",
+      "studyTemplatesDrawerApi": "invoked_successfully",
       "subscribe": "invoked_successfully",
       "supportTicketData": "invoked_successfully",
       "supportedChartTypes": "invoked_successfully",
       "symbolSync": "invoked_successfully",
-      "takeClientScreenshot": "promise_not_awaited",
-      "takeScreenshot": "promise_not_awaited",
+      "takeClientScreenshot": "invoked_successfully",
+      "takeScreenshot": "invoked_successfully",
       "themes": "invoked_successfully",
       "timeSync": "invoked_successfully",
       "trading": "invoked_successfully",
@@ -1070,7 +1070,7 @@
     }
   },
   "status_counts": {
-    "invoked_successfully": 419,
+    "invoked_successfully": 432,
     "requires_context_arguments": 5,
     "rejected_invalid_fixture_or_server_response": 5,
     "isolated_broker_or_destructive_fixture_required": 11,
@@ -1082,9 +1082,9 @@
     "rejected_invalid_study_id": 1,
     "unsupported_runtime_stub": 1,
     "feature_disabled": 1,
-    "promise_not_awaited": 18,
     "requires_nonnull_session_context": 1,
     "not_implemented_stub": 1,
+    "promise_not_awaited": 5,
     "requires_widget_model_fixture": 1,
     "disposable_server_layout_fixture_required": 7,
     "rejected_clipboard_document_not_focused": 1,
@@ -2234,8 +2234,8 @@
         "source_excerpt": "replayStudyStrategyProperties(){return this._chartWidget.model().model().replayStudyStrategyProperties()}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "requestSelectBar": {
@@ -2623,8 +2623,8 @@
         "source_excerpt": "_allInitialModelsCreated(){return this._chartWidgetsDefs.every((e=>e.chartWidget.hasModel()))?Promise.resolve(this._chartWidgetsDefs.map((e=>e.chartWidget))):Promise.all(this._chartWidgetsDefs.map((e=>e.chartWidget.hasMo",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_alreadyHasId": {
@@ -2776,8 +2776,8 @@
         "source_excerpt": "async _createChartWidgetCollectionNewsNotifier(){if(this._widgetOptions.newsNotificationsEnabled){const e=await i.e(4855).then(i.bind(i,402559)),t=this._options.externalServices.news;return new e.ChartWidgetCollectionNew",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_createClipboardHandler": {
@@ -3181,8 +3181,8 @@
         "source_excerpt": "async _returnChartsToContent(e){const t=await Promise.all(this._chartWidgetsDefs.slice(e).map((e=>e.chartWidget.lineToolsSynchronizer()?.flushPendingSavings()??null))).then((()=>!0),(()=>!1));if(this._destroyed)return;co",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_setExternalPosition": {
@@ -4596,8 +4596,8 @@
         "source_excerpt": "async colorDependantStudyDefaults(){{const[{volumeProfileThemedColors:e},{tpoThemedColors:t}]=await Promise.all([Promise.all([i.e(80120),i.e(83156),i.e(5919),i.e(68905),i.e(79857),i.e(93658),i.e(70169),i.e(15196)]).then(",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "connect": {
@@ -4749,8 +4749,8 @@
         "source_excerpt": "favoriteDrawingsToolbar(){return this._favoriteDrawingsToolbar??=this._loadFavoriteDrawingsToolbar().catch((e=>{throw this._favoriteDrawingsToolbar=null,e})),this._favoriteDrawingsToolbar}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "flushBufferedData": {
@@ -4767,8 +4767,8 @@
         "source_excerpt": "fontIconsSettingsDrawer(){if(null!==this._loadFontIconsSettingsDrawer)return this._fontIconsSettingsDrawer??=this._loadFontIconsSettingsDrawer().catch((e=>{throw this._fontIconsSettingsDrawer=null,e})),this._fontIconsSet",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "getChartStorage": {
@@ -4776,8 +4776,8 @@
         "source_excerpt": "getChartStorage(){return this._saveLoad.chartStorage()}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "getDrawOnAllCharts": {
@@ -5028,8 +5028,8 @@
         "source_excerpt": "async layoutSettingsDrawer(){if(null!==this._loadLayoutSettingsDrawer)return this._layoutSettingsDrawer??=this._loadLayoutSettingsDrawer().catch((e=>{throw this._layoutSettingsDrawer=null,e})),this._layoutSettingsDrawer;",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "loadChart": {
@@ -5316,8 +5316,8 @@
         "source_excerpt": "async searchSymbols(e){const{searchSymbolsPaginated:t}=await(0,s.ensureNotNull)(this._loadSymbolSearchApi,\"Symbol search api loader of TradingViewApi\")();return t(e)}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "selectLineTool": {
@@ -5613,8 +5613,8 @@
         "source_excerpt": "studyTemplatesDrawerApi(){if(null!==this._loadStudyTemplatesDrawer)return this._studyTemplatesDrawer??=this._loadStudyTemplatesDrawer().catch((e=>{throw this._studyTemplatesDrawer=null,e})),this._studyTemplatesDrawer;Wt(",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "subscribe": {
@@ -5658,8 +5658,8 @@
         "source_excerpt": "takeClientScreenshot(e){return this._chartWidgetCollection.clientSnapshot(e)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "takeScreenshot": {
@@ -5667,8 +5667,8 @@
         "source_excerpt": "takeScreenshot(){return this._chartWidgetCollection.takeScreenshot()}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "promise_not_awaited",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "themes": {
