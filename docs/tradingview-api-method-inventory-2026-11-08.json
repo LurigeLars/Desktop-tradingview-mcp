@@ -592,7 +592,7 @@
       "clickAtLatestUpdatesLollipop": "invoked_successfully",
       "cloneLineTool": "invoked_successfully",
       "compileFailedStudies": "invoked_successfully",
-      "copyEntityToClipboard": "present_not_behavior_tested",
+      "copyEntityToClipboard": "invoked_successfully",
       "createAnchoredShape": "invoked_successfully",
       "createExecutionShape": "present_not_behavior_tested",
       "createMultipointShape": "invoked_successfully",
@@ -634,8 +634,8 @@
       "hasModel": "invoked_successfully",
       "id": "invoked_successfully",
       "inactivityGaps": "feature_disabled",
-      "insertAfter": "present_not_behavior_tested",
-      "insertBefore": "present_not_behavior_tested",
+      "insertAfter": "requires_valid_argument_fixture",
+      "insertBefore": "requires_valid_argument_fixture",
       "insertStudyWithoutCheck": "present_not_behavior_tested",
       "isMaximized": "invoked_successfully",
       "isPriceToBarRatioLocked": "invoked_successfully",
@@ -695,8 +695,8 @@
       "setVisibleRange": "not_implemented_stub",
       "setZoomEnabled": "invoked_successfully",
       "shapesGroupController": "invoked_successfully",
-      "shareLineTools": "requires_valid_argument_fixture",
-      "showPropertiesDialog": "present_not_behavior_tested",
+      "shareLineTools": "invoked_successfully",
+      "showPropertiesDialog": "requires_valid_argument_fixture",
       "studyMetaIntoRepository": "invoked_successfully",
       "symbol": "invoked_successfully",
       "symbolExt": "invoked_successfully",
@@ -722,9 +722,9 @@
       "_chartWidgetGotoTimeRange": "present_not_behavior_tested",
       "_chartsCountToSave": "invoked_successfully",
       "_checkAllPendingModelsAlreadyCreated": "invoked_successfully",
-      "_checkForLineToolsSplitsAdjustment": "present_not_behavior_tested",
+      "_checkForLineToolsSplitsAdjustment": "invoked_successfully",
       "_checkProFeature": "invoked_successfully",
-      "_clearSplitters": "present_not_behavior_tested",
+      "_clearSplitters": "invoked_successfully",
       "_computeContentBox": "invoked_successfully",
       "_createBroadcastChannel": "present_not_behavior_tested",
       "_createChartWidget": "present_not_behavior_tested",
@@ -743,16 +743,16 @@
       "_getStateForChartImpl": "invoked_successfully",
       "_getSubscriptionObjectForChartModel": "invoked_successfully",
       "_getVisuallyAdjacentDef": "invoked_successfully",
-      "_handleDateRangeLockChange": "present_not_behavior_tested",
-      "_handleInternalDateRangeLockChange": "present_not_behavior_tested",
-      "_handleInternalIntervalLockChange": "present_not_behavior_tested",
-      "_handleInternalSymbolLockChange": "present_not_behavior_tested",
-      "_handleInternalTrackTimeLockChange": "present_not_behavior_tested",
-      "_handleIntervalLockChange": "present_not_behavior_tested",
+      "_handleDateRangeLockChange": "invoked_successfully",
+      "_handleInternalDateRangeLockChange": "invoked_successfully",
+      "_handleInternalIntervalLockChange": "invoked_successfully",
+      "_handleInternalSymbolLockChange": "invoked_successfully",
+      "_handleInternalTrackTimeLockChange": "invoked_successfully",
+      "_handleIntervalLockChange": "invoked_successfully",
       "_handlePhoneForceFullscreen": "invoked_successfully",
       "_handlePhoneSize": "invoked_successfully",
-      "_handleSymbolLockChange": "present_not_behavior_tested",
-      "_handleTrackTimeLockChange": "present_not_behavior_tested",
+      "_handleSymbolLockChange": "invoked_successfully",
+      "_handleTrackTimeLockChange": "invoked_successfully",
       "_hasChartsAbovePlanLimit": "invoked_successfully",
       "_hideChart": "present_not_behavior_tested",
       "_isChartsLimitApplied": "invoked_successfully",
@@ -772,7 +772,7 @@
       "_openRestoreLayoutPaywall": "present_not_behavior_tested",
       "_planChartsLimit": "invoked_successfully",
       "_recalcHasChanges": "invoked_successfully",
-      "_recalculateMaximizedChartDef": "present_not_behavior_tested",
+      "_recalculateMaximizedChartDef": "invoked_successfully",
       "_returnChartsToContent": "present_not_behavior_tested",
       "_setExternalPosition": "present_not_behavior_tested",
       "_setInitialSizes": "present_not_behavior_tested",
@@ -781,11 +781,11 @@
       "_setSymbolImpl": "present_not_behavior_tested",
       "_someOfWidgetsAreInSelectingReplayPointMode": "requires_context_arguments",
       "_subscribeToCompletedEventForDateRangeSync": "present_not_behavior_tested",
-      "_subscribeToEventsForDateRangeSync": "present_not_behavior_tested",
-      "_subscribeToProperties": "present_not_behavior_tested",
+      "_subscribeToEventsForDateRangeSync": "requires_valid_argument_fixture",
+      "_subscribeToProperties": "invoked_successfully",
       "_swapCharts": "present_not_behavior_tested",
-      "_syncChartsDateRangesWithActiveChartRange": "present_not_behavior_tested",
-      "_unsubscribeFromEventsForDateRangeSync": "present_not_behavior_tested",
+      "_syncChartsDateRangesWithActiveChartRange": "invoked_successfully",
+      "_unsubscribeFromEventsForDateRangeSync": "requires_valid_argument_fixture",
       "_updateActiveChartCanBeMoved": "invoked_successfully",
       "_updateActiveChartInterval": "invoked_successfully",
       "_updateActivityView": "invoked_successfully",
@@ -1070,16 +1070,16 @@
     }
   },
   "status_counts": {
-    "invoked_successfully": 343,
+    "invoked_successfully": 358,
     "requires_context_arguments": 5,
-    "present_not_behavior_tested": 138,
+    "present_not_behavior_tested": 119,
     "promise_pending_observation": 1,
     "rejected_invalid_study_id": 1,
     "unsupported_runtime_stub": 1,
     "feature_disabled": 1,
+    "requires_valid_argument_fixture": 7,
     "requires_nonnull_session_context": 1,
     "not_implemented_stub": 1,
-    "requires_valid_argument_fixture": 3,
     "promise_not_awaited": 12,
     "requires_widget_model_fixture": 1,
     "requires_arguments": 1,
@@ -1561,8 +1561,8 @@
         "source_excerpt": "copyEntityToClipboard(e){const t=this._chartWidget.model().model().dataSourceForId(e);t&&this._chartWidget.chartWidgetCollection().clipboard.uiRequestCopy([t])}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "createAnchoredShape": {
@@ -1939,7 +1939,7 @@
         "source_excerpt": "insertAfter(e,t){const i=this._chartWidget.model().model(),r=ht(i,e),n=(0,s.ensureNotNull)(i.dataSourceForId(t));this._chartWidget.model().insertAfter(r,n)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "requires_valid_argument_fixture",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -1948,7 +1948,7 @@
         "source_excerpt": "insertBefore(e,t){const i=this._chartWidget.model().model(),r=ht(i,e),n=(0,s.ensureNotNull)(i.dataSourceForId(t));this._chartWidget.model().insertBefore(r,n)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "requires_valid_argument_fixture",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -2488,8 +2488,8 @@
         "source_excerpt": "shareLineTools(e,t){const i=this._chartWidget.model(),r=e.map((e=>i.model().dataSourceForId(e)));i.shareLineTools(r,t)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "showPropertiesDialog": {
@@ -2497,7 +2497,7 @@
         "source_excerpt": "showPropertiesDialog(e){const t=this._chartWidget.model().model().dataSourceForId(e);if(null===t)throw new Error(`Study or shape ${e} does not exist`);this._chartWidget.showChartPropertiesForSource(t)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "requires_valid_argument_fixture",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -2715,8 +2715,8 @@
         "source_excerpt": "async _checkForLineToolsSplitsAdjustment(e){if(!this._widgetOptions.onWidget){if(!this._lineToolsSplitAdjuster){const{LineToolsSplitAdjuster:e}=await Promise.all([i.e(28397),i.e(96212),i.e(72260),i.e(25220),i.e(88550),i.",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_checkProFeature": {
@@ -2733,8 +2733,8 @@
         "source_excerpt": "_clearSplitters(e=0){const t=this._splitters.value();t.splice(e).forEach((e=>{e.destroy()})),this._splitters.setValue([...t])}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_computeContentBox": {
@@ -2904,8 +2904,8 @@
         "source_excerpt": "_handleDateRangeLockChange(e){this._loadingContent?this._internalDateRangeLock.setValue(e):this.undoHistory.setWatchedValue(this._internalDateRangeLock,e,Bi)}",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_handleInternalDateRangeLockChange": {
@@ -2913,8 +2913,8 @@
         "source_excerpt": "_handleInternalDateRangeLockChange(e){const t=this.activeChartWidget.value();if(t&&t.hasModel()){const i=t.model();e?(this._subscribeToEventsForDateRangeSync(i),this._syncChartsDateRangesWithActiveChartRange(t)):this._un",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_handleInternalIntervalLockChange": {
@@ -2922,8 +2922,8 @@
         "source_excerpt": "_handleInternalIntervalLockChange(e){this._intervalLock.setValue(e)}",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_handleInternalSymbolLockChange": {
@@ -2931,8 +2931,8 @@
         "source_excerpt": "_handleInternalSymbolLockChange(e){this._symbolLock.setValue(e)}",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_handleInternalTrackTimeLockChange": {
@@ -2940,8 +2940,8 @@
         "source_excerpt": "_handleInternalTrackTimeLockChange(e){this._trackTimeLock.setValue(e)}",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_handleIntervalLockChange": {
@@ -2949,8 +2949,8 @@
         "source_excerpt": "_handleIntervalLockChange(e){if(e!==this._internalIntervalLock.value())if(this._loadingContent)this._internalIntervalLock.setValue(e);else{if(this.undoHistory.beginUndoMacro(Vi),e&&e){const e=this.activeChartWidget.value",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_handlePhoneForceFullscreen": {
@@ -2976,8 +2976,8 @@
         "source_excerpt": "_handleSymbolLockChange(e){if(e!==this._internalSymbolLock.value())if(this._loadingContent)this._internalSymbolLock.setValue(e);else{if(this.undoHistory.beginUndoMacro(Ri),e){const e=this.activeChartWidget.value(),t=this",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_handleTrackTimeLockChange": {
@@ -2985,8 +2985,8 @@
         "source_excerpt": "_handleTrackTimeLockChange(e){this._loadingContent?this._internalTrackTimeLock.setValue(e):this.undoHistory.setWatchedValue(this._internalTrackTimeLock,e,Oi)}",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_hasChartsAbovePlanLimit": {
@@ -3165,8 +3165,8 @@
         "source_excerpt": "_recalculateMaximizedChartDef(){let e=null;if(this._isPhoneSize.value()&&this._viewMode.value()===ve.CollectionViewMode.ForceFullscreen){const t=this._maximizedChartDef.value();if(t){const i=this._chartWidgetsDefs.indexO",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_returnChartsToContent": {
@@ -3246,7 +3246,7 @@
         "source_excerpt": "_subscribeToEventsForDateRangeSync(e){e.timeScale().visibleBarsStrictRangeChanged().subscribe(this._getSubscriptionObjectForChartModel(e),(()=>{this._activeChartLogicalRangeChanged()}))}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "requires_valid_argument_fixture",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -3255,8 +3255,8 @@
         "source_excerpt": "_subscribeToProperties(e){if(this._subscribedChartWidget!==e){if(this._subscribedChartWidget&&(this._subscribedChartWidget.modelCreated().unsubscribe(null,this._onmodel),this._subscribedChartWidget.hasModel())){const e=t",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_swapCharts": {
@@ -3273,8 +3273,8 @@
         "source_excerpt": "_syncChartsDateRangesWithActiveChartRange(e){const t=this.activeChartWidget.value(),i=t.model().mainSeries();if(!(0,H.isTimeBasedStyle)(i.style())||i.intervalObj().value().isTicks())return;const s=t.model().timeScale();i",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_unsubscribeFromEventsForDateRangeSync": {
@@ -3282,7 +3282,7 @@
         "source_excerpt": "_unsubscribeFromEventsForDateRangeSync(e){\ne.timeScale().visibleBarsStrictRangeChanged().unsubscribeAll(this._getSubscriptionObjectForChartModel(e)),zi.forEach((e=>{const t=e.cw,i=e.callback;t.model().mainSeries().dataEv",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "requires_valid_argument_fixture",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
