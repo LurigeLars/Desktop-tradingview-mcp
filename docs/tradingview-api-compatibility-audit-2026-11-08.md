@@ -98,3 +98,10 @@ The 523-method inventory is now fully status-classified, but **428 remain presen
 - Source inspection identifies potentially destructive methods: `chart._destroy`, `collection.destroy`, `api.destroy`, `api.disconnect`, `chart.createOrderLine`, `chart.createPositionLine`, `api.removeChartFromServer`, chart/layout saves, drawing deletion, and trading/broker setup. They MUST NOT be run against a live chart/account solely to improve test counts.
 - The attached research tab is a live TradingView layout, not a disposable fixture. A new isolated chart or test harness is required to validate mutators without risking saved layouts. A second test account/sandbox would be required for actual broker/order side effects.
 - **Do not describe the audit as fully behavior verified.** Full inventory coverage is achieved; remaining statuses are explicit verification gaps, not established bugs.
+
+## Isolated sandbox created and exercised
+- Created a new dedicated Desktop layout `API Audit Sandbox 2026-11-08`, CDP target `6CBB540B104EBB0698D9EE42A6BD5D34`, chart `IN9aj8GI`. This is separate from the existing research tab. User authorized expanding the test environment.
+- Successfully exercised reversible chart/UI mutations: scrolling/zoom toggles, chart timezone, bar spacing, drawing creation/removal, all-shapes/all-studies removal, chart type, resolution, symbol, collection layout, UI preferences, and data refresh. No broker orders or server chart deletions.
+- Awaited 13 additional chart/collection/lazy-loader promises: all fulfilled except `chart.createStudy('MASimple',...)`, which rejected `unexpected study id:masimple` (invalid study identifier; not proof that study creation is broken).
+- **268 methods successfully invoked**, **218 untested**. Final sandbox chart NASDAQ:NVDA 1D, zero shapes and studies. Existing research charts untouched.
+- Remaining 218 methods include private callbacks, account/server mutators, replay/trading operations, and methods requiring particular application states. They are not safely callable with arbitrary arguments; use test fixtures and method-specific contracts before marking working.
