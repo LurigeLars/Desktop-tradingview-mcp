@@ -715,8 +715,8 @@
       "_alreadyHasId": "invoked_successfully",
       "_applyResolution": "present_not_behavior_tested",
       "_applySharedLineToolsDto": "present_not_behavior_tested",
-      "_barsMarksContainersFactory": "present_not_behavior_tested",
-      "_bottomToolbarDestroyer": "present_not_behavior_tested",
+      "_barsMarksContainersFactory": "requires_valid_argument_fixture",
+      "_bottomToolbarDestroyer": "invoked_successfully",
       "_cancelAllDrawings": "invoked_successfully",
       "_cellMetrics": "requires_context_arguments",
       "_chartWidgetGotoTimeRange": "present_not_behavior_tested",
@@ -726,13 +726,13 @@
       "_checkProFeature": "invoked_successfully",
       "_clearSplitters": "invoked_successfully",
       "_computeContentBox": "invoked_successfully",
-      "_createBroadcastChannel": "present_not_behavior_tested",
+      "_createBroadcastChannel": "invoked_successfully",
       "_createChartWidget": "present_not_behavior_tested",
-      "_createChartWidgetCollectionNewsNotifier": "present_not_behavior_tested",
-      "_createClipboardHandler": "present_not_behavior_tested",
-      "_createCombineTrackTimeLock": "present_not_behavior_tested",
-      "_createSeriesControlWidget": "present_not_behavior_tested",
-      "_destroyBroadcastChannel": "present_not_behavior_tested",
+      "_createChartWidgetCollectionNewsNotifier": "promise_not_awaited",
+      "_createClipboardHandler": "invoked_successfully",
+      "_createCombineTrackTimeLock": "invoked_successfully",
+      "_createSeriesControlWidget": "promise_not_awaited",
+      "_destroyBroadcastChannel": "invoked_successfully",
       "_ensureLockedChartBlocks": "invoked_successfully",
       "_getActiveLinkingGroupWV": "invoked_successfully",
       "_getAllLinkingGroups": "invoked_successfully",
@@ -754,7 +754,7 @@
       "_handleSymbolLockChange": "invoked_successfully",
       "_handleTrackTimeLockChange": "invoked_successfully",
       "_hasChartsAbovePlanLimit": "invoked_successfully",
-      "_hideChart": "present_not_behavior_tested",
+      "_hideChart": "requires_valid_argument_fixture",
       "_isChartsLimitApplied": "invoked_successfully",
       "_isDetached": "requires_context_arguments",
       "_isLayoutKeptBehindPaywall": "invoked_successfully",
@@ -775,9 +775,9 @@
       "_recalculateMaximizedChartDef": "invoked_successfully",
       "_returnChartsToContent": "promise_not_awaited",
       "_setExternalPosition": "present_not_behavior_tested",
-      "_setInitialSizes": "present_not_behavior_tested",
-      "_setLayoutCornerMaximizeChart": "present_not_behavior_tested",
-      "_setMaximized": "present_not_behavior_tested",
+      "_setInitialSizes": "requires_valid_argument_fixture",
+      "_setLayoutCornerMaximizeChart": "invoked_successfully",
+      "_setMaximized": "invoked_successfully",
       "_setSymbolImpl": "present_not_behavior_tested",
       "_someOfWidgetsAreInSelectingReplayPointMode": "requires_context_arguments",
       "_subscribeToCompletedEventForDateRangeSync": "present_not_behavior_tested",
@@ -879,7 +879,7 @@
       "setViewMode": "invoked_successfully",
       "startFullscreen": "present_not_behavior_tested",
       "state": "invoked_successfully",
-      "subscribeChartStorageNotification": "present_not_behavior_tested",
+      "subscribeChartStorageNotification": "invoked_successfully",
       "switchChart": "present_not_behavior_tested",
       "symbolAliasService": "invoked_successfully",
       "symbolSyncEnabled": "invoked_successfully",
@@ -887,11 +887,11 @@
       "syncScroll": "invoked_successfully",
       "takeScreenshot": "present_not_behavior_tested",
       "takeServerScreenshot": "present_not_behavior_tested",
-      "trackChangeSymbol": "present_not_behavior_tested",
-      "trackIntervalChanging": "present_not_behavior_tested",
+      "trackChangeSymbol": "requires_valid_argument_fixture",
+      "trackIntervalChanging": "invoked_successfully",
       "unloadUnusedCharts": "invoked_successfully",
-      "unsubscribeChartStorageNotification": "present_not_behavior_tested",
-      "updateReplaySessionState": "present_not_behavior_tested"
+      "unsubscribeChartStorageNotification": "invoked_successfully",
+      "updateReplaySessionState": "invoked_successfully"
     },
     "api": {
       "_activateChart": "invoked_successfully",
@@ -995,9 +995,9 @@
       "news": "throws_not_implemented",
       "onActiveChartChanged": "invoked_successfully",
       "onConnectionStatusChanged": "invoked_successfully",
-      "onContextMenu": "present_not_behavior_tested",
-      "onGoProDialog": "present_not_behavior_tested",
-      "onGrayedObjectClicked": "present_not_behavior_tested",
+      "onContextMenu": "invoked_successfully",
+      "onGoProDialog": "invoked_successfully",
+      "onGrayedObjectClicked": "invoked_successfully",
       "openMobileChartPicker": "present_not_behavior_tested",
       "openPublicationViewPopup": "present_not_behavior_tested",
       "persistentLogger": "invoked_successfully",
@@ -1026,13 +1026,13 @@
       "setLayout": "invoked_successfully",
       "setLayoutSizes": "invoked_successfully",
       "setMultichartMode": "invoked_successfully",
-      "setNewsApiPromise": "present_not_behavior_tested",
+      "setNewsApiPromise": "throws_not_implemented",
       "setPublishChartOptions": "invoked_successfully",
       "setSymbolSearchUI": "invoked_successfully",
       "setTimeFrame": "invoked_successfully",
       "setUserInfo": "present_not_behavior_tested",
-      "setWatchlistApiPromise": "present_not_behavior_tested",
-      "setWidgetbarApiPromise": "present_not_behavior_tested",
+      "setWatchlistApiPromise": "throws_not_implemented",
+      "setWidgetbarApiPromise": "throws_not_implemented",
       "sharingChart": "invoked_successfully",
       "shouldAffectUser": "invoked_successfully",
       "shouldBeSaved": "invoked_successfully",
@@ -1070,20 +1070,20 @@
     }
   },
   "status_counts": {
-    "invoked_successfully": 374,
+    "invoked_successfully": 388,
     "requires_context_arguments": 5,
-    "present_not_behavior_tested": 96,
+    "present_not_behavior_tested": 73,
     "promise_pending_observation": 1,
     "rejected_invalid_study_id": 1,
     "unsupported_runtime_stub": 1,
     "feature_disabled": 1,
-    "requires_valid_argument_fixture": 10,
-    "promise_not_awaited": 16,
+    "requires_valid_argument_fixture": 14,
+    "promise_not_awaited": 18,
     "requires_nonnull_session_context": 1,
     "not_implemented_stub": 1,
     "requires_widget_model_fixture": 1,
     "requires_arguments": 1,
-    "throws_not_implemented": 13,
+    "throws_not_implemented": 16,
     "throws_null_error": 1
   },
   "method_metadata": {
@@ -2652,7 +2652,7 @@
         "source_excerpt": "_barsMarksContainersFactory(e){const t=[];if(this._options.publishedChartsEnabled){const i=new De.PublishedChartsTimeline(e,(0,Ee.createIdeaPopupOpener)(this._options.externalServices.community.publicationViewPopupServic",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
+        "verification": "requires_valid_argument_fixture",
         "behavior_verified": false,
         "next_test": "valid model arguments or read-only probe"
       },
@@ -2661,8 +2661,8 @@
         "source_excerpt": "()=>{null!==this._bottomToolbarWidget&&(this._bottomToolbarWidget.destroy(),this._bottomToolbarWidget=null,this._bottomToolbar.setValue(null)),o.forEach((e=>{e.destroy()})),a.destroy(),(0,ue.getChartApiSite)().connection",
         "access": "private",
         "risk_screen": "account_or_destructive",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "mocked broker/account or disposable server fixture"
       },
       "_cancelAllDrawings": {
@@ -2751,8 +2751,8 @@
         "source_excerpt": "_createBroadcastChannel(){const e=new BroadcastChannel(\"ChartWidgetsCollection\");return e.onmessage=e=>{const t=e.data;if(this._crossHairSyncBroadcast&&\"crosshair\"===t.type)this._crossHairSyncBroadcast.uniqueId!==t.paylo",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_createChartWidget": {
@@ -2769,7 +2769,7 @@
         "source_excerpt": "async _createChartWidgetCollectionNewsNotifier(){if(this._widgetOptions.newsNotificationsEnabled){const e=await i.e(4855).then(i.bind(i,402559)),t=this._options.externalServices.news;return new e.ChartWidgetCollectionNew",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "promise_not_awaited",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -2778,8 +2778,8 @@
         "source_excerpt": "_createClipboardHandler(){return new Nt({copyRequested:(e,t)=>{this.activeChartWidget.value().model().clipboardCopy(e,t).catch((e=>{const t=Ji(e)??(0,v.formatByKey)(Ii,{keystroke:(0,ne.humanReadableHash)(ne.Modifiers.Mod",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_createCombineTrackTimeLock": {
@@ -2787,8 +2787,8 @@
         "source_excerpt": "_createCombineTrackTimeLock(){return(0,u.combine)(((e,t)=>e||t),this._trackTimeLock.weakReference(),this._someOfWidgetsAreInSelectingReplayPointMode(this._layoutWV,this._chartWidgetsDefs).ownership())}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_createSeriesControlWidget": {
@@ -2796,7 +2796,7 @@
         "source_excerpt": "async _createSeriesControlWidget(e){const t=\"0px\",i=document.createElement(\"div\");this._bottomToolbar.setValue(i),i.style.left=t,i.style.right=t,i.style.bottom=t,i.classList.add(\"chart-toolbar\",\"chart-controls-bar\"),i.se",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "promise_not_awaited",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -2805,8 +2805,8 @@
         "source_excerpt": "_destroyBroadcastChannel(){null!==this._crossHairSyncBroadcast&&(this._crossHairSyncBroadcast.channel.onmessage=null,this._crossHairSyncBroadcast.channel.close(),this._crossHairSyncBroadcast=null)}",
         "access": "private",
         "risk_screen": "account_or_destructive",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "mocked broker/account or disposable server fixture"
       },
       "_ensureLockedChartBlocks": {
@@ -3003,7 +3003,7 @@
         "source_excerpt": "_hideChart(e){e.hiddenInLayout.setValue(!0);const t=e.container.value();t.parentNode&&t.parentNode.removeChild(t)}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "requires_valid_argument_fixture",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -3192,7 +3192,7 @@
         "source_excerpt": "_setInitialSizes(e){let t=0,i=0;const s=this._layoutTemplate.value();for(let r=0;r<s.count;r++){this._chartWidgetsDefs[r]===e&&(i=t),t++}this._updateLayoutPartial(e,i,t,s)}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "requires_valid_argument_fixture",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -3201,8 +3201,8 @@
         "source_excerpt": "e=>{this._layoutCornerMaximize?.setChart(e??null)}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_setMaximized": {
@@ -3210,8 +3210,8 @@
         "source_excerpt": "_setMaximized(e){this._maximizedChartDef.value()!==e&&this._maximizedChartDef.setValue(e)}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_setSymbolImpl": {
@@ -4128,8 +4128,8 @@
         "source_excerpt": "subscribeChartStorageNotification(e){this._chartStorageNotification?.subscribeOnChanges(e)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "switchChart": {
@@ -4200,7 +4200,7 @@
         "source_excerpt": "trackChangeSymbol(e,t){{const i=e;(0,ct.trackChangeSymbol)(i.model().mainSeries(),this.layout.value(),this.metaInfo.uid.value()||\"\",t)}}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "requires_valid_argument_fixture",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -4209,8 +4209,8 @@
         "source_excerpt": "trackIntervalChanging(e,t){(0,ht.trackIntervalChanging)(e,t)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "unloadUnusedCharts": {
@@ -4227,8 +4227,8 @@
         "source_excerpt": "unsubscribeChartStorageNotification(e){this._chartStorageNotification?.unsubscribeOnChanges(e)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "updateReplaySessionState": {
@@ -4236,8 +4236,8 @@
         "source_excerpt": "updateReplaySessionState(e){(0,s.default)(this._replaySessionState,e)||(this._replaySessionState=e,this._saveChartService?.markContentAsChanged())}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       }
     },
@@ -5156,8 +5156,8 @@
         "source_excerpt": "onContextMenu(e){c.subscribe(\"onContextMenu\",(t=>{t.callback(e(t.unixtime,t.price))}),void 0)}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "onGoProDialog": {
@@ -5165,8 +5165,8 @@
         "source_excerpt": "onGoProDialog(e,t=[]){{const i=(0,r.wallInterceptor)(s.PAYWALL_KIND);i.subscribe(e),t.forEach((e=>i.hide(e)))}}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "onGrayedObjectClicked": {
@@ -5174,8 +5174,8 @@
         "source_excerpt": "onGrayedObjectClicked(e){c.subscribe(\"onGrayedObjectClicked\",e,void 0)}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "openMobileChartPicker": {
@@ -5435,7 +5435,7 @@
         "source_excerpt": "setNewsApiPromise(e){Wt()}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "throws_not_implemented",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -5480,7 +5480,7 @@
         "source_excerpt": "setWatchlistApiPromise(e){Wt()}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "throws_not_implemented",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -5489,7 +5489,7 @@
         "source_excerpt": "setWidgetbarApiPromise(e){Wt()}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "throws_not_implemented",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
