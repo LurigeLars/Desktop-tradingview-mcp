@@ -21,7 +21,13 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Inv
 
 const targets = await CDP.List({ host: '127.0.0.1', port });
 const tab = targets.find(t => t.id === target && t.type === 'page');
-if (!tab || !/tradingview\.com/.test(tab.url || '')) {
+let isTradingView = false;
+try {
+  const url = new URL(tab?.url || '');
+  isTradingView = url.protocol === 'https:' &&
+    (url.hostname === 'tradingview.com' || url.hostname.endsWith('.tradingview.com'));
+} catch { /* invalid URL */ }
+if (!tab || !isTradingView) {
   throw new Error('Target not a verified TradingView page; no action taken.');
 }
 
