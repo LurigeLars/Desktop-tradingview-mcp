@@ -3,6 +3,8 @@
  */
 import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
+import { setSymbol, setTimeframe, getState } from './chart.js';
+import { getOhlcv } from './data.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -23,16 +25,21 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
     for (const tf of tfs) {
       const combo = { symbol, timeframe: tf };
       try {
-        if (colPath) await evaluate(`${colPath}.setSymbol(${safeString(symbol)})`);
-        else if (apiPath) await evaluate(`${apiPath}.setSymbol(${safeString(symbol)})`);
+        await setSymbol({ symbol });
 
         if (tf) {
-          if (colPath) await evaluate(`${colPath}.setResolution(${safeString(tf)})`);
-          else if (apiPath) await evaluate(`${apiPath}.setResolution(${safeString(tf)})`);
+          await setTimeframe({ timeframe: tf });
         }
 
-        await waitForChartReady(symbol);
         await new Promise(r => setTimeout(r, delay));
+        const state = await getState();
+        const actualTicker = String(state.symbol || '').split(':').pop().toUpperCase();
+        const requestedTicker = String(symbol).split(':').pop().toUpperCase();
+        const actualTf = String(state.resolution || '').replace(/^1D$/, 'D').replace(/^1W$/, 'W');
+        const requestedTf = tf ? String(tf).replace(/^1D$/, 'D').replace(/^1W$/, 'W') : null;
+        if (actualTicker !== requestedTicker || (requestedTf && actualTf !== requestedTf)) {
+          throw new Error(`Chart mismatch: requested ${symbol}/${tf || 'current'}, got ${state.symbol}/${state.resolution}`);
+        }
 
         let actionResult;
         if (action === 'screenshot') {
@@ -44,17 +51,20 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
           const filePath = join(SCREENSHOT_DIR, fname);
           writeFileSync(filePath, Buffer.from(data, 'base64'));
           actionResult = { file_path: filePath };
-        } else if (action === 'get_ohlcv' && apiPath) {
-          const limit = Math.min(ohlcv_count || 100, 500);
-          actionResult = await evaluateAsync(`
-            new Promise(function(resolve, reject) {
-              ${apiPath}.exportData({ includeTime: true, includeSeries: true, includeStudies: false })
-                .then(function(result) {
-                  var bars = (result.data || []).slice(-${limit});
-                  resolve({ bar_count: bars.length, last_bar: bars[bars.length - 1] || null });
-                }).catch(reject);
-            })
-          `);
+        } else if (action === 'get_ohlcv') {
+          // Use the same direct chart-series reader as data_get_ohlcv.
+          // exportData() is not supported on all Desktop chart builds.
+          const limit = Math.min(Math.max(1, Math.floor(Number(ohlcv_count) || 100)), 500);
+          const data = await getOhlcv({ count: limit });
+          if (!data.success || !data.bars?.length) throw new Error('No OHLCV bars returned');
+          if (String(data.symbol || '').split(':').pop().toUpperCase() !== requestedTicker) {
+            throw new Error('OHLCV symbol mismatch: ' + data.symbol);
+          }
+          actionResult = {
+            symbol: data.symbol, resolution: data.resolution,
+            bar_count: data.bar_count, total_available: data.total_available,
+            truncated: data.truncated, last_bar: data.bars.at(-1),
+          };
         } else if (action === 'get_strategy_results') {
           await new Promise(r => setTimeout(r, 1000));
           actionResult = await evaluate(`
