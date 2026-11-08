@@ -550,7 +550,7 @@
       "_convertTimeToPublic": "invoked_successfully",
       "_convertUserPointsToDataSource": "invoked_successfully",
       "_createDateRangeApi": "requires_context_arguments",
-      "_createMultipointShape": "present_not_behavior_tested",
+      "_createMultipointShape": "invoked_successfully",
       "_createStudy": "present_not_behavior_tested",
       "_createTradingPrimitive": "present_not_behavior_tested",
       "_destroy": "present_not_behavior_tested",
@@ -566,7 +566,7 @@
       "_openSolution": "present_not_behavior_tested",
       "_prepareEndOfPeriodArgs": "invoked_successfully",
       "_setChartType": "invoked_successfully",
-      "_showGoToDateDialog": "present_not_behavior_tested",
+      "_showGoToDateDialog": "invoked_successfully",
       "actionsProvider": "invoked_successfully",
       "addOverlayStudy": "present_not_behavior_tested",
       "applyChartTempalte": "invoked_successfully",
@@ -719,7 +719,7 @@
       "_bottomToolbarDestroyer": "invoked_successfully",
       "_cancelAllDrawings": "invoked_successfully",
       "_cellMetrics": "requires_context_arguments",
-      "_chartWidgetGotoTimeRange": "present_not_behavior_tested",
+      "_chartWidgetGotoTimeRange": "invoked_successfully",
       "_chartsCountToSave": "invoked_successfully",
       "_checkAllPendingModelsAlreadyCreated": "invoked_successfully",
       "_checkForLineToolsSplitsAdjustment": "invoked_successfully",
@@ -778,7 +778,7 @@
       "_setInitialSizes": "requires_valid_argument_fixture",
       "_setLayoutCornerMaximizeChart": "invoked_successfully",
       "_setMaximized": "invoked_successfully",
-      "_setSymbolImpl": "present_not_behavior_tested",
+      "_setSymbolImpl": "invoked_successfully",
       "_someOfWidgetsAreInSelectingReplayPointMode": "requires_context_arguments",
       "_subscribeToCompletedEventForDateRangeSync": "present_not_behavior_tested",
       "_subscribeToEventsForDateRangeSync": "requires_valid_argument_fixture",
@@ -874,13 +874,13 @@
       "setResolution": "invoked_successfully",
       "setSaveChartService": "present_not_behavior_tested",
       "setSymbol": "invoked_successfully",
-      "setSymbolAll": "present_not_behavior_tested",
+      "setSymbolAll": "invoked_successfully",
       "setTimeFrame": "invoked_successfully",
       "setViewMode": "invoked_successfully",
-      "startFullscreen": "present_not_behavior_tested",
+      "startFullscreen": "invoked_successfully",
       "state": "invoked_successfully",
       "subscribeChartStorageNotification": "invoked_successfully",
-      "switchChart": "present_not_behavior_tested",
+      "switchChart": "invoked_successfully",
       "symbolAliasService": "invoked_successfully",
       "symbolSyncEnabled": "invoked_successfully",
       "syncCrosshair": "invoked_successfully",
@@ -933,8 +933,8 @@
       "closePopupsAndDialogs": "invoked_successfully",
       "closePublicationViewPopup": "invoked_successfully",
       "colorDependantStudyDefaults": "promise_not_awaited",
-      "connect": "present_not_behavior_tested",
-      "createGoProDialog": "present_not_behavior_tested",
+      "connect": "invoked_successfully",
+      "createGoProDialog": "requires_feature_argument",
       "createNewLayout": "present_not_behavior_tested",
       "crosshairSync": "invoked_successfully",
       "currencies": "invoked_successfully",
@@ -998,7 +998,7 @@
       "onContextMenu": "invoked_successfully",
       "onGoProDialog": "invoked_successfully",
       "onGrayedObjectClicked": "invoked_successfully",
-      "openMobileChartPicker": "present_not_behavior_tested",
+      "openMobileChartPicker": "invoked_successfully",
       "openPublicationViewPopup": "present_not_behavior_tested",
       "persistentLogger": "invoked_successfully",
       "pineEditorApi": "invoked_successfully",
@@ -1039,11 +1039,11 @@
       "showConfirmDialog": "present_not_behavior_tested",
       "showCreateAlertDialog": "present_not_behavior_tested",
       "showLoadChartDialog": "present_not_behavior_tested",
-      "showNoticeDialog": "present_not_behavior_tested",
+      "showNoticeDialog": "invoked_successfully",
       "showRenameChartDialog": "present_not_behavior_tested",
       "showSaveAsChartDialog": "present_not_behavior_tested",
       "showSupportDialog": "present_not_behavior_tested",
-      "startFullscreen": "present_not_behavior_tested",
+      "startFullscreen": "invoked_successfully",
       "studyMetaIntoRepository": "invoked_successfully",
       "studyTemplatesDrawerApi": "promise_not_awaited",
       "subscribe": "invoked_successfully",
@@ -1070,9 +1070,9 @@
     }
   },
   "status_counts": {
-    "invoked_successfully": 388,
+    "invoked_successfully": 399,
     "requires_context_arguments": 5,
-    "present_not_behavior_tested": 73,
+    "present_not_behavior_tested": 61,
     "promise_pending_observation": 1,
     "rejected_invalid_study_id": 1,
     "unsupported_runtime_stub": 1,
@@ -1083,6 +1083,7 @@
     "not_implemented_stub": 1,
     "requires_widget_model_fixture": 1,
     "requires_arguments": 1,
+    "requires_feature_argument": 1,
     "throws_not_implemented": 16,
     "throws_null_error": 1
   },
@@ -1183,8 +1184,8 @@
         "source_excerpt": "async _createMultipointShape(e,t){const i=()=>new Error(`Cannot create \"${r.shape}\" shape`),r=Object.assign({},{filled:!0},t),n=R.supportedLineTools[r.shape]||R.supportedLineTools.flag;if(\"image\"===r.shape&&!(0,R.isImage",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_createStudy": {
@@ -1327,8 +1328,8 @@
         "source_excerpt": "e=>{(0,\nIa.showGoToDateDialog)(e)}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "actionsProvider": {
@@ -2688,8 +2689,8 @@
         "source_excerpt": "_chartWidgetGotoTimeRange(e,t,i,s){e.model().model().gotoTimeRange(t,i,s).catch((e=>{e instanceof D.GotoTimeRangeCancelledError||fi.logError(`Date range sync failed to apply the time range: ${e}`)}))}",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "valid model arguments or read-only probe"
       },
       "_chartsCountToSave": {
@@ -3219,8 +3220,8 @@
         "source_excerpt": "async _setSymbolImpl(e,t,s,r){const o=s??this.activeChartWidget.value();void 0===t&&(t=o.linkingGroupIndex().value()),r=r??(this._symbolLock.value()?this._chartWidgetsDefs.map((e=>e.chartWidget)):[o]),this._pendingSetSym",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_someOfWidgetsAreInSelectingReplayPointMode": {
@@ -4083,8 +4084,8 @@
         "source_excerpt": "setSymbolAll(e){const t=this._chartWidgetsDefs.map((e=>e.chartWidget));return this._setSymbolImpl(e,void 0,void 0,t)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "setTimeFrame": {
@@ -4110,8 +4111,8 @@
         "source_excerpt": "startFullscreen(){\nthis._options.resizerBridge.requestFullscreen()}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "state": {
@@ -4137,8 +4138,8 @@
         "source_excerpt": "switchChart(e){const t=this._getVisuallyAdjacentDef(this._chartWidgetsDefs[this._activeIndex],e);this.ariaDescribeChart(t?t.chartWidget:this.activeChartWidget.value()),t&&this.activeChartWidget.setValue(t.chartWidget)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "symbolAliasService": {
@@ -4598,8 +4599,8 @@
         "source_excerpt": "connect(){this._chartApiInstance&&!this._chartApiInstance.connected()&&(0,gt.getChartApiSite)().resumeConnection(),Lt.pushStreamMultiplexer.forceConnect()}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "createGoProDialog": {
@@ -4607,7 +4608,7 @@
         "source_excerpt": "createGoProDialog(e,t={}){(0,Et.openWall)(It.PAYWALL_KIND,e,t)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
+        "verification": "requires_feature_argument",
         "behavior_verified": false,
         "next_test": "disposable chart with snapshot and cleanup"
       },
@@ -5183,8 +5184,8 @@
         "source_excerpt": "openMobileChartPicker(){c.emit(Dt.openMobileChartPickerCommand)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "openPublicationViewPopup": {
@@ -5552,8 +5553,8 @@
         "source_excerpt": "showNoticeDialog(e){(0,yt.showWarning)({title:e.title,text:e.body||\"\",onClose:e.callback})}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "showRenameChartDialog": {
@@ -5588,8 +5589,8 @@
         "source_excerpt": "startFullscreen(){return this._chartWidgetCollection.startFullscreen()}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "present_not_behavior_tested",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "studyMetaIntoRepository": {
