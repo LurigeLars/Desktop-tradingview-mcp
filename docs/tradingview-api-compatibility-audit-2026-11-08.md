@@ -66,3 +66,10 @@ The 523-method inventory is now fully status-classified, but **428 remain presen
 - Re-enumerated chart 166, collection 184, TradingViewApi 173 methods. Zero additions/removals versus the 523-method inventory.
 - Re-invoked 14 read-only chart methods successfully (studies, shapes, visible ranges, time scale, market/replay status).
 - The remaining untested methods cannot be marked working based solely on presence. Mutating and trading methods require disposable fixtures and appropriate safe test contracts.
+
+## Additional API read-only probes
+- Expanded successful direct invocations to **122 methods** across the three inventoried objects. Presence-only methods now **372**. Status JSON updated individually.
+- `TradingViewApi.news`, `watchlist`, `watermark`, `webview`, and `widgetbar` all throw `not implemented` in this runtime; treat them as unsupported entrypoints, not proof the UI feature is absent.
+- `collection.state` and `TradingViewApi.chartWidgetCollectionState` require arguments; `chart.whenChartReady` requires callback; `chart.availableZOrderOperations` requires selection/arguments. These are not classified as broken.
+- Six newly probed methods returned unresolved Promises; do not classify as success or failure without awaited completion.
+- No trading/order methods were invoked, and no charts were modified during these read-only probes.
