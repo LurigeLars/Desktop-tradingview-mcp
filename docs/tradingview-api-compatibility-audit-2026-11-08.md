@@ -32,3 +32,18 @@ PR #183 replaces batch `exportData` with the existing direct main-series OHLCV r
 2. Add read-only contract tests for documented public methods and known stub functions.
 3. Test reversible chart changes on a disposable research layout only, with before/after state and cleanup.
 4. Do not call trading, order, account, destructive chart, or worker mutation APIs in an audit.
+
+## Extended audit and upstream comparison
+- Compared `src/core/batch.js` with `tradesdontlie/tradingview-mcp`: **identical blob SHA** `11246978cc622b70b33834f76f28da507d27c61a` on both default branches. The unsupported `exportData` usage is inherited upstream, not introduced in this fork.
+- Live method inventory: **523 callable method names** (chart 166, collection 184, TradingViewApi 173), excluding common Object prototype helpers. Complete names are in `tradingview-api-method-inventory-2026-11-08.json`. These are *presence observations*, not 523 functional tests.
+- Inspected actual function bodies: `chart.exportData(e)` always returns `Promise.reject("Data export is not supported")`; `chart.setVisibleRange(e,t)` always throws `Not implemented`. `chart.ranges()` is conditional on an injected date-range API and cannot be classified as globally unsupported.
+- TradingViewApi `getStudiesList()`, `getStudyInputs()`, `getStudyStyles()` each threw `not implemented` on this session. `hasVisibleToasts()` threw `hasVisibleToasts is null`.
+- Reversible integration test on research layout: `chart_set_timeframe(W)` changed 1D→1W and `chart_set_timeframe(D)` restored 1D, both returned `chart_ready:true`. `chart_set_symbol(NASDAQ:MSFT)` changed state to BATS:MSFT, direct OHLCV read returned five MSFT bars; switching back restored BATS:NVDA. Symbol setter returned `chart_ready:false` despite the chart subsequently reporting the requested symbol; batch code must verify the *main series*, not just the setter response.
+- Read-only Promise probes: `collection.clientSnapshot()` fulfilled with an object; `chart.dataReady()` and `TradingViewApi.getSavedCharts()` remained pending during observation. **Pending is not failure**; do not assume they are unsupported.
+- CI on PR commit `40b30068f041ba2b1b1628fe02cd0dc6adb6f918`: Fork CI, CI, Static analysis and CodeQL all succeeded; Fork CI includes a successful unit-test step. Subsequent inventory-only commit does not change runtime behavior.
+
+## Risk and completion boundary
+Calling every one of 523 methods would trigger destructive chart, trading, replay, save, deletion, account or UI actions. Those methods are **intentionally not executed**. Full behavior verification requires isolated disposable state, appropriate permissions, explicit test contracts and rollback, not blanket invocation. No broker orders or worker mutations were performed.
+
+## Next operational step
+Merge the verified source fix only after final PR checks, update the local Desktop MCP service from the merged commit, and rerun `batch_run` on the research layout. Until local deployment, the connected MCP still uses the old `exportData` implementation.
