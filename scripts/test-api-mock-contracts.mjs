@@ -137,6 +137,43 @@ try {
       replaySource.includes('const o=') && replaySource.includes('a=()=>'),
       'replay watcher unsafe callback ordering detected');
 
+
+    // Recompile the exact runtime body with fake module dependencies.
+    // This is necessary for closure-captured module symbols, not a live server call.
+    const layoutCalls = [];
+    const layoutBody = String(collection.loadContent).replace(/^async /, '');
+    const isolatedLoad = Function('fi', 'k', 'r', 've', 'return async function ' + layoutBody)(
+      { logNormal: () => {} },
+      { init: () => layoutCalls.push('init') },
+      { linking: { muteGroup: (_, value) => layoutCalls.push('mute:' + value) } },
+      { CollectionViewMode: { Multichart: 'multi' } },
+    );
+    const layoutReceiver = {
+      getAll: () => [], _savedChartWidgetOptions: [], _layoutType: 's',
+      _options: { mobileForceChartMaximizeEnabled: false },
+      setLayout: async name => layoutCalls.push('layout:' + name),
+      _tool: { subscribe: () => {} },
+      _onToolChanged: () => {},
+      _updateCrossHairPositionIfNeeded: () => {},
+    };
+    const loadResult = await isolatedLoad.call(layoutReceiver, null, false);
+    check(loadResult.contentMigrated === false && layoutReceiver._loadingContent === false &&
+      layoutCalls.join('|') === 'init|mute:true|layout:s|mute:false',
+      'collection.loadContent empty-layout isolated lifecycle');
+
+    const paywallCalls = [];
+    const restoreSource = String(collection._openRestoreLayoutPaywall);
+    const isolatedRestore = Function('Ye', '$e', 'We',
+      'return function(){return (' + restoreSource + ')()}')(
+      { trackGoProFeature: name => paywallCalls.push(['feature', name]) },
+      { reloginOrGoPro: (kind, options) => paywallCalls.push(['paywall', kind, options.limit]) },
+      { PAYWALL_RESTORE_LAYOUT: 'MOCK_RESTORE' },
+    );
+    isolatedRestore.call({ _layoutTemplate: { value: () => ({ count: 2 }) } });
+    check(paywallCalls[0]?.[1] === 'restoreLayout' &&
+      paywallCalls[1]?.[1] === 'MOCK_RESTORE' && paywallCalls[1]?.[2] === 2,
+      'collection._openRestoreLayoutPaywall isolated delegation');
+
     return { count: passed.length, passed, isolation: 'fake receivers, no real server/broker mutation' };
   })()`;
   const response = await client.Runtime.evaluate({
@@ -146,7 +183,7 @@ try {
     throw new Error(response.exceptionDetails.text || 'CDP runtime exception');
   }
   const value = response.result?.value;
-  assert.equal(value?.count, 19);
+  assert.equal(value?.count, 21);
   process.stdout.write(JSON.stringify(value, null, 2) + '\n');
 } finally {
   await client.close();
