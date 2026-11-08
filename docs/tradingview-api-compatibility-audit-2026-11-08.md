@@ -84,3 +84,10 @@ The 523-method inventory is now fully status-classified, but **428 remain presen
 - `chart.chartPainted()` remained pending at observation; do not classify as broken.
 - `collection.state({withData:false})` and `chart.whenChartReady(callback)` accepted valid arguments and returned without throwing. Other private methods that require model/selection arguments remain unverified.
 - **166** successful method invocations, **324** not behavior-tested. The chart was BATS:XOM 1D when this audit began; this audit did not change its symbol or timeframe.
+
+## Internal accessor verification with real arguments
+- Verified 200 successful method invocations; 277 methods remain not behavior-tested. The attached research chart was BATS:XOM 1D (changed externally since prior audit); no symbol/timeframe change was made.
+- Confirmed private chart API accessors `_getPaneApi` and `_getStudyApi` work when passed actual chart-model pane and study objects, and `_getChartWidgetApi` works with a real widget. Incorrect/missing arguments previously produced misleading exceptions.
+- `getFavoriteCurrencyUnitConversionApi` and `getLinetoolsFavoritesStore` throw `not implemented` in the running client.
+- Seven internal methods require model/context arguments; their failure on dummy arguments is not classified as an implementation defect. Promise-returning loader methods remain unawaited.
+- Destructive UI, trading, order, and account methods were deliberately not invoked.
