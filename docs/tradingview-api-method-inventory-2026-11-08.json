@@ -774,7 +774,7 @@
       "_recalcHasChanges": "invoked_successfully",
       "_recalculateMaximizedChartDef": "invoked_successfully",
       "_returnChartsToContent": "invoked_successfully",
-      "_setExternalPosition": "isolated_broker_or_destructive_fixture_required",
+      "_setExternalPosition": "mock_contract_verified",
       "_setInitialSizes": "requires_valid_argument_fixture",
       "_setLayoutCornerMaximizeChart": "invoked_successfully",
       "_setMaximized": "invoked_successfully",
@@ -830,7 +830,7 @@
       "chartsSymbols": "invoked_successfully",
       "clearChartMetaInfo": "invoked_successfully",
       "clientSnapshot": "invoked_successfully",
-      "destroy": "isolated_broker_or_destructive_fixture_required",
+      "destroy": "mock_contract_verified",
       "destroyReplayWidget": "invoked_successfully",
       "exitFullscreen": "invoked_successfully",
       "fullscreen": "invoked_successfully",
@@ -1071,7 +1071,7 @@
   },
   "status_counts": {
     "invoked_successfully": 446,
-    "mock_contract_verified": 25,
+    "mock_contract_verified": 27,
     "rejected_invalid_record": 1,
     "promise_pending_observation": 1,
     "unsupported_runtime_stub": 1,
@@ -1081,7 +1081,6 @@
     "not_implemented_stub": 1,
     "specific_widget_or_ui_fixture_required": 5,
     "promise_not_awaited": 4,
-    "isolated_broker_or_destructive_fixture_required": 2,
     "requires_context_arguments": 1,
     "rejected_invalid_fixture_or_server_response": 2,
     "disposable_server_layout_fixture_required": 1,
@@ -3187,9 +3186,9 @@
         "source_excerpt": "_setExternalPosition(e,t,i){const s=this._actualLayoutCount();return this._chartWidgetsDefs.slice(0,s).filter((e=>e.rdState.bridge().visible.value())).map((e=>e.chartWidget)).filter((e=>e.id()!==t&&(!!e.hasModel()&&(e.se",
         "access": "private",
         "risk_screen": "account_or_destructive",
-        "verification": "isolated_broker_or_destructive_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "isolated_broker_or_destructive_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "_setInitialSizes": {
         "arity": 1,
@@ -3691,9 +3690,9 @@
         "source_excerpt": "destroy(){bi.chartFloatingTooltipEnabledWV.unsubscribe(this._onChartFloatingTooltipEnabledChanged),this._chartFloatingTooltipController?.destroy(),qt.CHART_FONT_FAMILY_WV.unsubscribe(this._onChartFontFamilyChanged),this.",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "isolated_broker_or_destructive_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "isolated_broker_or_destructive_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "destroyReplayWidget": {
         "arity": 0,
