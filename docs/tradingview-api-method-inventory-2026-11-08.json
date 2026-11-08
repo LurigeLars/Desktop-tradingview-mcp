@@ -573,7 +573,7 @@
       "applyLineToolsState": "invoked_successfully",
       "applyOverrides": "invoked_successfully",
       "applyStudyTemplate": "invoked_successfully",
-      "applyStudyTemplateByRecord": "rejected_invalid_record",
+      "applyStudyTemplateByRecord": "invoked_successfully",
       "availableZOrderOperations": "invoked_successfully",
       "barTimeToEndOfPeriod": "invoked_successfully",
       "bringForward": "invoked_successfully",
@@ -714,7 +714,7 @@
       "_allInitialModelsCreated": "invoked_successfully",
       "_alreadyHasId": "invoked_successfully",
       "_applyResolution": "invoked_successfully",
-      "_applySharedLineToolsDto": "requires_valid_argument_fixture",
+      "_applySharedLineToolsDto": "invoked_successfully",
       "_barsMarksContainersFactory": "mock_contract_verified",
       "_bottomToolbarDestroyer": "invoked_successfully",
       "_cancelAllDrawings": "invoked_successfully",
@@ -775,17 +775,17 @@
       "_recalculateMaximizedChartDef": "invoked_successfully",
       "_returnChartsToContent": "invoked_successfully",
       "_setExternalPosition": "mock_contract_verified",
-      "_setInitialSizes": "requires_valid_argument_fixture",
+      "_setInitialSizes": "mock_contract_verified",
       "_setLayoutCornerMaximizeChart": "invoked_successfully",
       "_setMaximized": "invoked_successfully",
       "_setSymbolImpl": "invoked_successfully",
       "_someOfWidgetsAreInSelectingReplayPointMode": "requires_context_arguments",
       "_subscribeToCompletedEventForDateRangeSync": "requires_valid_argument_fixture",
-      "_subscribeToEventsForDateRangeSync": "requires_valid_argument_fixture",
+      "_subscribeToEventsForDateRangeSync": "mock_contract_verified",
       "_subscribeToProperties": "invoked_successfully",
       "_swapCharts": "mock_contract_verified",
       "_syncChartsDateRangesWithActiveChartRange": "invoked_successfully",
-      "_unsubscribeFromEventsForDateRangeSync": "requires_valid_argument_fixture",
+      "_unsubscribeFromEventsForDateRangeSync": "mock_contract_verified",
       "_updateActiveChartCanBeMoved": "invoked_successfully",
       "_updateActiveChartInterval": "invoked_successfully",
       "_updateActivityView": "invoked_successfully",
@@ -793,7 +793,7 @@
       "_updateCrossHairPositionIfNeeded": "invoked_successfully",
       "_updateInlineChartsCount": "invoked_successfully",
       "_updateLayout": "invoked_successfully",
-      "_updateLayoutPartial": "requires_valid_argument_fixture",
+      "_updateLayoutPartial": "mock_contract_verified",
       "_updateLinkingGroupCharts": "invoked_successfully",
       "_updateLockedChartBlocks": "invoked_successfully",
       "_updateViewMode": "invoked_successfully",
@@ -1070,13 +1070,12 @@
     }
   },
   "status_counts": {
-    "invoked_successfully": 446,
-    "mock_contract_verified": 27,
-    "rejected_invalid_record": 1,
+    "invoked_successfully": 448,
+    "mock_contract_verified": 31,
     "promise_pending_observation": 1,
     "unsupported_runtime_stub": 1,
     "feature_disabled": 1,
-    "requires_valid_argument_fixture": 11,
+    "requires_valid_argument_fixture": 6,
     "requires_nonnull_session_context": 1,
     "not_implemented_stub": 1,
     "specific_widget_or_ui_fixture_required": 5,
@@ -1197,7 +1196,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_createTradingPrimitive": {
         "arity": 1,
@@ -1206,7 +1205,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_destroy": {
         "arity": 0,
@@ -1215,7 +1214,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_getLineDataSourceApi": {
         "arity": 1,
@@ -1393,8 +1392,8 @@
         "source_excerpt": "async applyStudyTemplateByRecord(e){if(!e)return;const{name:t,id:i,is_default:r}=e,s=e=>this._chartWidget.model().applyStudyTemplate(JSON.parse(e.content),t);r?await this._actionsProviderServices.saveLoad.backend.getStan",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "rejected_invalid_record",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "availableZOrderOperations": {
@@ -1584,7 +1583,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "createMultipointShape": {
         "arity": 2,
@@ -1602,7 +1601,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "createPositionLine": {
         "arity": 0,
@@ -1611,7 +1610,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "createShape": {
         "arity": 2,
@@ -2646,8 +2645,8 @@
         "source_excerpt": "_applySharedLineToolsDto(e,t){const i=e.lineToolsSynchronizer();if(i)for(const[e,s]of t.entries())e!==B.SharingMode.NotShared&&i.applyDTO(s,e).then((()=>{i.invalidateAll(!0)}))}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_barsMarksContainersFactory": {
@@ -2657,7 +2656,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_bottomToolbarDestroyer": {
         "arity": 0,
@@ -2684,7 +2683,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_chartWidgetGotoTimeRange": {
         "arity": 4,
@@ -3008,7 +3007,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_isChartsLimitApplied": {
         "arity": 1,
@@ -3188,16 +3187,16 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_setInitialSizes": {
         "arity": 1,
         "source_excerpt": "_setInitialSizes(e){let t=0,i=0;const s=this._layoutTemplate.value();for(let r=0;r<s.count;r++){this._chartWidgetsDefs[r]===e&&(i=t),t++}this._updateLayoutPartial(e,i,t,s)}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_setLayoutCornerMaximizeChart": {
         "arity": 1,
@@ -3249,9 +3248,9 @@
         "source_excerpt": "_subscribeToEventsForDateRangeSync(e){e.timeScale().visibleBarsStrictRangeChanged().subscribe(this._getSubscriptionObjectForChartModel(e),(()=>{this._activeChartLogicalRangeChanged()}))}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_subscribeToProperties": {
         "arity": 1,
@@ -3269,7 +3268,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_syncChartsDateRangesWithActiveChartRange": {
         "arity": 1,
@@ -3285,9 +3284,9 @@
         "source_excerpt": "_unsubscribeFromEventsForDateRangeSync(e){\ne.timeScale().visibleBarsStrictRangeChanged().unsubscribeAll(this._getSubscriptionObjectForChartModel(e)),zi.forEach((e=>{const t=e.cw,i=e.callback;t.model().mainSeries().dataEv",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_updateActiveChartCanBeMoved": {
         "arity": 0,
@@ -3357,9 +3356,9 @@
         "source_excerpt": "_updateLayoutPartial(e,t,i,s=this._layoutTemplate.value()){const r=this._computeContentBox(),o=this._cellMetrics(r,t,i,s);e.metrics=o;const n=e.container.value();if(n){n.style.width=o.width+\"px\",n.style.height=o.height+\"",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "_updateLinkingGroupCharts": {
         "arity": 0,
@@ -3692,7 +3691,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "destroyReplayWidget": {
         "arity": 0,
@@ -3854,7 +3853,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "maximizedChartWidget": {
         "arity": 0,
@@ -3926,7 +3925,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "replaySessionState": {
         "arity": 0,
@@ -3980,7 +3979,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "setActive": {
         "arity": 1,
@@ -3998,7 +3997,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "setChartFloatingTooltipVisible": {
         "arity": 1,
@@ -4070,7 +4069,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "setSymbol": {
         "arity": 3,
@@ -4621,7 +4620,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "crosshairSync": {
         "arity": 0,
@@ -4666,7 +4665,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "dialogs": {
         "arity": 0,
@@ -4693,7 +4692,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "drawOnAllCharts": {
         "arity": 1,
@@ -5044,7 +5043,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "loadLayoutFromServerByLayoutId": {
         "arity": 3,
@@ -5053,7 +5052,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "lockAllDrawingTools": {
         "arity": 0,
@@ -5233,7 +5232,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "redo": {
         "arity": 0,
@@ -5251,7 +5250,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "replayApi": {
         "arity": 0,
@@ -5296,7 +5295,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "saveChartToServer": {
         "arity": 3,
@@ -5305,7 +5304,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "searchSymbols": {
         "arity": 1,
@@ -5476,7 +5475,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "integration test against disposable backend; mock validates delegation only"
+        "next_test": "mock delegation tested; full integration requires a disposable widget"
       },
       "setWatchlistApiPromise": {
         "arity": 1,
