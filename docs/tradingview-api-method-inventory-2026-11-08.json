@@ -769,7 +769,7 @@
       "_onselectedsource": "invoked_successfully",
       "_onstyle": "invoked_successfully",
       "_openMultipleChartsPaywall": "mock_contract_verified",
-      "_openRestoreLayoutPaywall": "specific_widget_or_ui_fixture_required",
+      "_openRestoreLayoutPaywall": "mock_contract_verified",
       "_planChartsLimit": "invoked_successfully",
       "_recalcHasChanges": "invoked_successfully",
       "_recalculateMaximizedChartDef": "invoked_successfully",
@@ -847,7 +847,7 @@
       "linkingGroupsCharts": "invoked_successfully",
       "linkingGroupsWidgets": "invoked_successfully",
       "liveChartsCount": "invoked_successfully",
-      "loadContent": "disposable_server_layout_fixture_required",
+      "loadContent": "mock_contract_verified",
       "loadLayoutState": "mock_contract_verified",
       "maximizedChartWidget": "invoked_successfully",
       "moveActiveChartWithUndo": "invoked_successfully",
@@ -955,11 +955,11 @@
       "getChartStorage": "invoked_successfully",
       "getDrawOnAllCharts": "invoked_successfully",
       "getDrawOnAllChartsMode": "invoked_successfully",
-      "getFavoriteChartStylesService": "throws_not_implemented",
-      "getFavoriteCurrencyUnitConversionApi": "throws_not_implemented",
-      "getFavoriteIntervalsService": "throws_not_implemented",
+      "getFavoriteChartStylesService": "mock_contract_verified",
+      "getFavoriteCurrencyUnitConversionApi": "mock_contract_verified",
+      "getFavoriteIntervalsService": "mock_contract_verified",
       "getIntervals": "invoked_successfully",
-      "getLinetoolsFavoritesStore": "throws_not_implemented",
+      "getLinetoolsFavoritesStore": "mock_contract_verified",
       "getSaveChartService": "invoked_successfully",
       "getSavedCharts": "invoked_successfully",
       "getStudiesList": "throws_not_implemented",
@@ -1071,13 +1071,12 @@
   },
   "status_counts": {
     "invoked_successfully": 448,
-    "mock_contract_verified": 52,
+    "mock_contract_verified": 58,
     "unsupported_runtime_stub": 1,
     "not_implemented_stub": 1,
-    "specific_widget_or_ui_fixture_required": 2,
+    "specific_widget_or_ui_fixture_required": 1,
     "partial_mock_contract_tdz_on_loaded_widget": 1,
-    "disposable_server_layout_fixture_required": 1,
-    "throws_not_implemented": 17
+    "throws_not_implemented": 13
   },
   "method_metadata": {
     "chart": {
@@ -3131,9 +3130,9 @@
         "source_excerpt": "()=>{(0,Ye.trackGoProFeature)(\"restoreLayout\"),(0,$e.reloginOrGoPro)(We.PAYWALL_RESTORE_LAYOUT,{limit:this._layoutTemplate.value().count})}",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "specific_widget_or_ui_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "specific_widget_or_ui_fixture_required"
+        "next_test": "Isolated runtime-body mock path only; actual server/layout/account integration not verified."
       },
       "_planChartsLimit": {
         "arity": 0,
@@ -3833,9 +3832,9 @@
         "source_excerpt": "async loadContent(e,t){fi.logNormal(\"Loading layout content\"),this.getAll().forEach((e=>e.onAboutToLoadContent())),this._loadingContent=!0,this._initialLoading=Boolean(t),this._savedChartWidgetOptions.splice(0),(0,k.init",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "disposable_server_layout_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable_server_layout_fixture_required"
+        "next_test": "Isolated runtime-body mock path only; actual server/layout/account integration not verified."
       },
       "loadLayoutState": {
         "arity": 1,
@@ -4789,27 +4788,27 @@
         "source_excerpt": "getFavoriteChartStylesService(){if(this._favoriteServices)return this._favoriteServices.favoriteChartStylesService;Wt()}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "throws_not_implemented",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "Verified only with injected initialized _favoriteServices; installed runtime without services calls Wt() and throws."
       },
       "getFavoriteCurrencyUnitConversionApi": {
         "arity": 0,
         "source_excerpt": "getFavoriteCurrencyUnitConversionApi(){if(this._favoriteServices)return this._favoriteServices.favoriteCurrencyUnitConversionApi;Wt()}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "throws_not_implemented",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "Verified only with injected initialized _favoriteServices; installed runtime without services calls Wt() and throws."
       },
       "getFavoriteIntervalsService": {
         "arity": 0,
         "source_excerpt": "getFavoriteIntervalsService(){if(this._favoriteServices)return this._favoriteServices.favoriteIntervalsService;Wt()}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "throws_not_implemented",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "Verified only with injected initialized _favoriteServices; installed runtime without services calls Wt() and throws."
       },
       "getIntervals": {
         "arity": 0,
@@ -4825,9 +4824,9 @@
         "source_excerpt": "getLinetoolsFavoritesStore(){if(this._favoriteServices)return this._favoriteServices.lineToolsFavoritesService;Wt()}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "throws_not_implemented",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "Verified only with injected initialized _favoriteServices; installed runtime without services calls Wt() and throws."
       },
       "getSaveChartService": {
         "arity": 0,
