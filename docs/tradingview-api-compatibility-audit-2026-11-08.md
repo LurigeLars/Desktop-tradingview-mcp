@@ -91,3 +91,10 @@ The 523-method inventory is now fully status-classified, but **428 remain presen
 - `getFavoriteCurrencyUnitConversionApi` and `getLinetoolsFavoritesStore` throw `not implemented` in the running client.
 - Seven internal methods require model/context arguments; their failure on dummy arguments is not classified as an implementation defect. Promise-returning loader methods remain unawaited.
 - Destructive UI, trading, order, and account methods were deliberately not invoked.
+
+## Safety classification and completion boundary
+- **209/523** methods successfully invoked; **270** still lack behavior tests. These are not implicitly functional.
+- Confirmed private accessors `_getStateForChartImpl`, `_getSubscriptionObjectForChartModel`, `_getCopiedChartStateAsWidgetContent`, `_getVisuallyAdjacentDef`, `_convertPositionPercentToDataSource` with real chart/model arguments.
+- Source inspection identifies potentially destructive methods: `chart._destroy`, `collection.destroy`, `api.destroy`, `api.disconnect`, `chart.createOrderLine`, `chart.createPositionLine`, `api.removeChartFromServer`, chart/layout saves, drawing deletion, and trading/broker setup. They MUST NOT be run against a live chart/account solely to improve test counts.
+- The attached research tab is a live TradingView layout, not a disposable fixture. A new isolated chart or test harness is required to validate mutators without risking saved layouts. A second test account/sandbox would be required for actual broker/order side effects.
+- **Do not describe the audit as fully behavior verified.** Full inventory coverage is achieved; remaining statuses are explicit verification gaps, not established bugs.
