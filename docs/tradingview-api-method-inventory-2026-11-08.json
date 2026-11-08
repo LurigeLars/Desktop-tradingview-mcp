@@ -710,7 +710,7 @@
     "collection": {
       "_activeChartLogicalRangeChanged": "invoked_successfully",
       "_actualLayoutCount": "invoked_successfully",
-      "_addNewChartWidget": "specific_widget_or_ui_fixture_required",
+      "_addNewChartWidget": "mock_contract_verified",
       "_allInitialModelsCreated": "invoked_successfully",
       "_alreadyHasId": "invoked_successfully",
       "_applyResolution": "invoked_successfully",
@@ -779,7 +779,7 @@
       "_setLayoutCornerMaximizeChart": "invoked_successfully",
       "_setMaximized": "invoked_successfully",
       "_setSymbolImpl": "invoked_successfully",
-      "_someOfWidgetsAreInSelectingReplayPointMode": "mock_contract_verified",
+      "_someOfWidgetsAreInSelectingReplayPointMode": "partial_mock_contract_tdz_on_loaded_widget",
       "_subscribeToCompletedEventForDateRangeSync": "mock_contract_verified",
       "_subscribeToEventsForDateRangeSync": "mock_contract_verified",
       "_subscribeToProperties": "invoked_successfully",
@@ -819,7 +819,7 @@
       "applyOverrides": "invoked_successfully",
       "applyPreferencesToAllCharts": "invoked_successfully",
       "applyStudiesOverrides": "invoked_successfully",
-      "applyTheme": "rejected_invalid_fixture_or_server_response",
+      "applyTheme": "mock_contract_verified",
       "ariaDescribeChart": "invoked_successfully",
       "chartFloatingTooltipVisible": "invoked_successfully",
       "chartMarketStatuses": "invoked_successfully",
@@ -1071,11 +1071,11 @@
   },
   "status_counts": {
     "invoked_successfully": 448,
-    "mock_contract_verified": 51,
+    "mock_contract_verified": 52,
     "unsupported_runtime_stub": 1,
     "not_implemented_stub": 1,
-    "specific_widget_or_ui_fixture_required": 3,
-    "rejected_invalid_fixture_or_server_response": 1,
+    "specific_widget_or_ui_fixture_required": 2,
+    "partial_mock_contract_tdz_on_loaded_widget": 1,
     "disposable_server_layout_fixture_required": 1,
     "throws_not_implemented": 17
   },
@@ -1187,7 +1187,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_createTradingPrimitive": {
         "arity": 1,
@@ -1196,7 +1196,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_destroy": {
         "arity": 0,
@@ -1205,7 +1205,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_getLineDataSourceApi": {
         "arity": 1,
@@ -1466,7 +1466,7 @@
         "risk_screen": "read_or_pure_candidate",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "chartProto": {
         "arity": 0,
@@ -1574,7 +1574,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "createMultipointShape": {
         "arity": 2,
@@ -1592,7 +1592,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "createPositionLine": {
         "arity": 0,
@@ -1601,7 +1601,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "createShape": {
         "arity": 2,
@@ -1925,7 +1925,7 @@
         "risk_screen": "read_or_pure_candidate",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "insertAfter": {
         "arity": 2,
@@ -1934,7 +1934,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "insertBefore": {
         "arity": 2,
@@ -1943,7 +1943,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "insertStudyWithoutCheck": {
         "arity": 5,
@@ -1952,7 +1952,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "isMaximized": {
         "arity": 0,
@@ -2384,7 +2384,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "setPriceToBarRatio": {
         "arity": 2,
@@ -2600,9 +2600,9 @@
         "source_excerpt": "_addNewChartWidget(e,t){let i,s=this._savedChartWidgetOptions.shift();if(void 0!==s){const e=this.activeChartWidget.value();e&&e.lineToolsSynchronizer()&&(i=e.lineToolsAndGroupsDTO())}else s=this._getCopiedChartStateAsWi",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "specific_widget_or_ui_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "specific_widget_or_ui_fixture_required"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_allInitialModelsCreated": {
         "arity": 0,
@@ -2647,7 +2647,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_bottomToolbarDestroyer": {
         "arity": 0,
@@ -2674,7 +2674,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_chartWidgetGotoTimeRange": {
         "arity": 4,
@@ -2791,7 +2791,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_destroyBroadcastChannel": {
         "arity": 0,
@@ -2998,7 +2998,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_isChartsLimitApplied": {
         "arity": 1,
@@ -3097,7 +3097,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_onselectedsource": {
         "arity": 0,
@@ -3124,7 +3124,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_openRestoreLayoutPaywall": {
         "arity": 0,
@@ -3178,7 +3178,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_setInitialSizes": {
         "arity": 1,
@@ -3187,7 +3187,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_setLayoutCornerMaximizeChart": {
         "arity": 1,
@@ -3221,7 +3221,7 @@
         "source_excerpt": "_someOfWidgetsAreInSelectingReplayPointMode(e,t){let i=[];const s={},r=()=>{i.forEach((e=>e.unsubscribe(a))),i=t.filter((e=>e.chartWidget.hasModel())).map((e=>e.chartWidget.selectPointMode())),i.forEach((e=>e.subscribe(a",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "mock_contract_verified",
+        "verification": "partial_mock_contract_tdz_on_loaded_widget",
         "behavior_verified": false,
         "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
@@ -3232,7 +3232,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_subscribeToEventsForDateRangeSync": {
         "arity": 1,
@@ -3241,7 +3241,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_subscribeToProperties": {
         "arity": 1,
@@ -3259,7 +3259,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_syncChartsDateRangesWithActiveChartRange": {
         "arity": 1,
@@ -3277,7 +3277,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_updateActiveChartCanBeMoved": {
         "arity": 0,
@@ -3349,7 +3349,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_updateLinkingGroupCharts": {
         "arity": 0,
@@ -3581,9 +3581,9 @@
         "source_excerpt": "async applyTheme(e){const{theme:t,onlyActiveChart:i,restoreNonThemeDefaults:s,themeName:r,standardTheme:o,syncState:n=!0,noUndo:a}=e,l=(0,z.getCurrentTheme)().name,c=i||!this._hasChartsAbovePlanLimit()?null:this._chartWi",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "rejected_invalid_fixture_or_server_response",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "specific_widget_or_ui_fixture_required"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "ariaDescribeChart": {
         "arity": 1,
@@ -3682,7 +3682,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "destroyReplayWidget": {
         "arity": 0,
@@ -3844,7 +3844,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "maximizedChartWidget": {
         "arity": 0,
@@ -3916,7 +3916,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "replaySessionState": {
         "arity": 0,
@@ -3970,7 +3970,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "setActive": {
         "arity": 1,
@@ -3988,7 +3988,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "setChartFloatingTooltipVisible": {
         "arity": 1,
@@ -4060,7 +4060,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "setSymbol": {
         "arity": 3,
@@ -4186,7 +4186,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "trackChangeSymbol": {
         "arity": 2,
@@ -4195,7 +4195,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "trackIntervalChanging": {
         "arity": 2,
@@ -4395,7 +4395,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "_toggleSeriesStatusTooltip": {
         "arity": 2,
@@ -4485,7 +4485,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "changeSymbol": {
         "arity": 3,
@@ -4602,7 +4602,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "createNewLayout": {
         "arity": 1,
@@ -4611,7 +4611,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "crosshairSync": {
         "arity": 0,
@@ -4656,7 +4656,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "dialogs": {
         "arity": 0,
@@ -4683,7 +4683,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "drawOnAllCharts": {
         "arity": 1,
@@ -4719,7 +4719,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "exitFullscreen": {
         "arity": 0,
@@ -4926,7 +4926,7 @@
         "risk_screen": "read_or_pure_candidate",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "hideAllDrawingTools": {
         "arity": 0,
@@ -5034,7 +5034,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "loadLayoutFromServerByLayoutId": {
         "arity": 3,
@@ -5043,7 +5043,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "lockAllDrawingTools": {
         "arity": 0,
@@ -5187,7 +5187,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "persistentLogger": {
         "arity": 0,
@@ -5223,7 +5223,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "redo": {
         "arity": 0,
@@ -5241,7 +5241,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "replayApi": {
         "arity": 0,
@@ -5286,7 +5286,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "saveChartToServer": {
         "arity": 3,
@@ -5295,7 +5295,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "searchSymbols": {
         "arity": 1,
@@ -5466,7 +5466,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "setWatchlistApiPromise": {
         "arity": 1,
@@ -5754,7 +5754,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
+        "next_test": "isolated mock delegation only; live backend/UI integration unverified"
       },
       "watchlist": {
         "arity": 0,

@@ -84,6 +84,35 @@ try {
     fakeCollection._saveChartService = { saveChartOrShowTitleDialog: (cancel, resolve) => resolve('MOCK_SAVED') };
     check((await fakeCollection.saveLayoutState()) === 'MOCK_SAVED', 'collection.saveLayoutState');
 
+
+    const newWidget = { modelCreated: () => ({ subscribe: () => calls.push(['newWidgetSubscribed']) }) };
+    const fakeAdd = Object.create(Object.getPrototypeOf(collection));
+    fakeAdd._savedChartWidgetOptions = [];
+    fakeAdd._getCopiedChartStateAsWidgetContent = () => ({ content: { chartId: 'MOCK' } });
+    fakeAdd._widgetOptions = {};
+    fakeAdd._symbolLock = { value: () => false };
+    fakeAdd._createChartWidget = options => {
+      calls.push(['createdWidget', options.content.chartId]);
+      return { chartWidget: newWidget };
+    };
+    check(fakeAdd._addNewChartWidget(0).chartWidget === newWidget &&
+      calls.some(x => x[0] === 'createdWidget' && x[1] === 'MOCK') &&
+      calls.some(x => x[0] === 'newWidgetSubscribed'), 'collection._addNewChartWidget');
+
+    const themeModel = {
+      restoreTheme: () => calls.push(['restoredTheme']),
+      colorStudiesPropertiesReady: () => Promise.resolve(),
+    };
+    const themeWidget = { model: () => ({ model: () => themeModel }) };
+    const fakeTheme = Object.create(Object.getPrototypeOf(collection));
+    fakeTheme._hasChartsAbovePlanLimit = () => false;
+    fakeTheme._savedChartWidgetOptions = [];
+    fakeTheme._chartWidgetsDefs = [{ chartWidget: themeWidget }];
+    fakeTheme.activeChartWidget = { value: () => themeWidget };
+    fakeTheme._returnChartsToContent = async () => {};
+    await fakeTheme.applyTheme({ theme: { mock: true }, onlyActiveChart: true, noUndo: true });
+    check(calls.some(x => x[0] === 'restoredTheme'), 'collection.applyTheme');
+
     return { count: passed.length, passed, isolation: 'fake receivers, no real server/broker mutation' };
   })()`;
   const response = await client.Runtime.evaluate({
@@ -93,7 +122,7 @@ try {
     throw new Error(response.exceptionDetails.text || 'CDP runtime exception');
   }
   const value = response.result?.value;
-  assert.equal(value?.count, 12);
+  assert.equal(value?.count, 14);
   process.stdout.write(JSON.stringify(value, null, 2) + '\n');
 } finally {
   await client.close();

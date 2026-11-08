@@ -161,3 +161,9 @@ The 523-method inventory is now fully status-classified, but **428 remain presen
 - **448 live invocations + 51 isolated mock contracts + 24 non-positive outcomes = 523 inventoried methods**. This does not mean 499 end-to-end tested features: mock results prove isolated delegation only.
 - Added mock coverage for `chart.chartPainted`, `chart.inactivityGaps`, `collection._createSeriesControlWidget` (early-destroy path), `collection.takeServerScreenshot` (stubbed snapshot/clipboard service), and `collection.trackChangeSymbol` (analytics delegation). Browser-focus and network screenshot integration remain unverified.
 - Remaining 24 include 18 explicit `not implemented` methods, one unsupported export stub, plus chart-widget creation, theme, layout loading and restore-paywall contexts. Their absence is **not** a test pass. The inventory records each explicitly.
+
+## Fourth fixture pass — evidence corrections
+- **448 live invocations, 52 mock contracts, 23 non-positive/partial methods = 523**. Mock coverage is not end-to-end verification.
+- Added repeatable isolated contract checks for `collection._addNewChartWidget` and `collection.applyTheme` (no-undo theme restoration on a fake chart model) to the CDP mock runner, increasing its expected assertions from 12 to 14. These exact prototype methods also passed interactive fake-receiver calls.
+- **Corrected overclaim:** `_someOfWidgetsAreInSelectingReplayPointMode` previously counted as a mock success despite an observed temporal-dead-zone exception on the loaded-widget path (`Cannot access 'a' before initialization`). It is now classified as **partial**; only the unloaded-widget path was observed to complete.
+- Remaining 23: 18 explicitly not implemented, one unsupported export stub, two chart-widget construction contexts, one server layout loading context, and the partial replay watcher. No authenticated account, server layout, or broker destructive operations were used.
