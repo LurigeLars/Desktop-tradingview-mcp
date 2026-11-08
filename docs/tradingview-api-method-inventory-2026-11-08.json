@@ -582,7 +582,7 @@
       "canZoomOutWV": "invoked_successfully",
       "cancelSelectBar": "invoked_successfully",
       "chartModel": "invoked_successfully",
-      "chartPainted": "promise_pending_observation",
+      "chartPainted": "mock_contract_verified",
       "chartProto": "invoked_successfully",
       "chartTemplate": "invoked_successfully",
       "chartType": "invoked_successfully",
@@ -633,7 +633,7 @@
       "getVisibleRange": "invoked_successfully",
       "hasModel": "invoked_successfully",
       "id": "invoked_successfully",
-      "inactivityGaps": "feature_disabled",
+      "inactivityGaps": "mock_contract_verified",
       "insertAfter": "mock_contract_verified",
       "insertBefore": "mock_contract_verified",
       "insertStudyWithoutCheck": "mock_contract_verified",
@@ -731,7 +731,7 @@
       "_createChartWidgetCollectionNewsNotifier": "invoked_successfully",
       "_createClipboardHandler": "invoked_successfully",
       "_createCombineTrackTimeLock": "invoked_successfully",
-      "_createSeriesControlWidget": "promise_not_awaited",
+      "_createSeriesControlWidget": "mock_contract_verified",
       "_destroyBroadcastChannel": "invoked_successfully",
       "_ensureLockedChartBlocks": "invoked_successfully",
       "_getActiveLinkingGroupWV": "invoked_successfully",
@@ -886,8 +886,8 @@
       "syncCrosshair": "invoked_successfully",
       "syncScroll": "invoked_successfully",
       "takeScreenshot": "invoked_successfully",
-      "takeServerScreenshot": "rejected_clipboard_document_not_focused",
-      "trackChangeSymbol": "requires_valid_argument_fixture",
+      "takeServerScreenshot": "mock_contract_verified",
+      "trackChangeSymbol": "mock_contract_verified",
       "trackIntervalChanging": "invoked_successfully",
       "unloadUnusedCharts": "invoked_successfully",
       "unsubscribeChartStorageNotification": "invoked_successfully",
@@ -1071,17 +1071,12 @@
   },
   "status_counts": {
     "invoked_successfully": 448,
-    "mock_contract_verified": 46,
-    "promise_pending_observation": 1,
+    "mock_contract_verified": 51,
     "unsupported_runtime_stub": 1,
-    "feature_disabled": 1,
     "not_implemented_stub": 1,
     "specific_widget_or_ui_fixture_required": 3,
-    "promise_not_awaited": 1,
     "rejected_invalid_fixture_or_server_response": 1,
     "disposable_server_layout_fixture_required": 1,
-    "rejected_clipboard_document_not_focused": 1,
-    "requires_valid_argument_fixture": 1,
     "throws_not_implemented": 17
   },
   "method_metadata": {
@@ -1192,7 +1187,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_createTradingPrimitive": {
         "arity": 1,
@@ -1201,7 +1196,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_destroy": {
         "arity": 0,
@@ -1210,7 +1205,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_getLineDataSourceApi": {
         "arity": 1,
@@ -1469,9 +1464,9 @@
         "source_excerpt": "chartPainted(){return this._chartWidget.chartPainted()}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "promise_pending_observation",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "chartProto": {
         "arity": 0,
@@ -1579,7 +1574,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "createMultipointShape": {
         "arity": 2,
@@ -1597,7 +1592,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "createPositionLine": {
         "arity": 0,
@@ -1606,7 +1601,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "createShape": {
         "arity": 2,
@@ -1928,9 +1923,9 @@
         "source_excerpt": "inactivityGaps(){return this._chartWidget.model().model().inactivityGaps()}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "feature_disabled",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "insertAfter": {
         "arity": 2,
@@ -1939,7 +1934,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "insertBefore": {
         "arity": 2,
@@ -1948,7 +1943,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "insertStudyWithoutCheck": {
         "arity": 5,
@@ -1957,7 +1952,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "isMaximized": {
         "arity": 0,
@@ -2389,7 +2384,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "setPriceToBarRatio": {
         "arity": 2,
@@ -2652,7 +2647,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_bottomToolbarDestroyer": {
         "arity": 0,
@@ -2679,7 +2674,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_chartWidgetGotoTimeRange": {
         "arity": 4,
@@ -2794,9 +2789,9 @@
         "source_excerpt": "async _createSeriesControlWidget(e){const t=\"0px\",i=document.createElement(\"div\");this._bottomToolbar.setValue(i),i.style.left=t,i.style.right=t,i.style.bottom=t,i.classList.add(\"chart-toolbar\",\"chart-controls-bar\"),i.se",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "promise_not_awaited",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_destroyBroadcastChannel": {
         "arity": 0,
@@ -3003,7 +2998,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_isChartsLimitApplied": {
         "arity": 1,
@@ -3102,7 +3097,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_onselectedsource": {
         "arity": 0,
@@ -3129,7 +3124,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "specific_widget_or_ui_fixture_required"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_openRestoreLayoutPaywall": {
         "arity": 0,
@@ -3183,7 +3178,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_setInitialSizes": {
         "arity": 1,
@@ -3192,7 +3187,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_setLayoutCornerMaximizeChart": {
         "arity": 1,
@@ -3228,7 +3223,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_subscribeToCompletedEventForDateRangeSync": {
         "arity": 2,
@@ -3237,7 +3232,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_subscribeToEventsForDateRangeSync": {
         "arity": 1,
@@ -3246,7 +3241,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_subscribeToProperties": {
         "arity": 1,
@@ -3264,7 +3259,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_syncChartsDateRangesWithActiveChartRange": {
         "arity": 1,
@@ -3282,7 +3277,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_updateActiveChartCanBeMoved": {
         "arity": 0,
@@ -3354,7 +3349,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_updateLinkingGroupCharts": {
         "arity": 0,
@@ -3687,7 +3682,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "destroyReplayWidget": {
         "arity": 0,
@@ -3849,7 +3844,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "maximizedChartWidget": {
         "arity": 0,
@@ -3921,7 +3916,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "replaySessionState": {
         "arity": 0,
@@ -3975,7 +3970,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "setActive": {
         "arity": 1,
@@ -3993,7 +3988,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "setChartFloatingTooltipVisible": {
         "arity": 1,
@@ -4065,7 +4060,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "setSymbol": {
         "arity": 3,
@@ -4189,18 +4184,18 @@
         "source_excerpt": "async takeServerScreenshot(){if(0===this._options.snapshotUrl?.length)return console.warn(\"To use this feature, please specify the snapshot_url option in the widget constructor.\"),\"\";const e={snapshotUrl:this._options.sn",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "rejected_clipboard_document_not_focused",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "trackChangeSymbol": {
         "arity": 2,
         "source_excerpt": "trackChangeSymbol(e,t){{const i=e;(0,ct.trackChangeSymbol)(i.model().mainSeries(),this.layout.value(),this.metaInfo.uid.value()||\"\",t)}}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "trackIntervalChanging": {
         "arity": 2,
@@ -4400,7 +4395,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "specific_widget_or_ui_fixture_required"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "_toggleSeriesStatusTooltip": {
         "arity": 2,
@@ -4490,7 +4485,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "changeSymbol": {
         "arity": 3,
@@ -4607,7 +4602,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "createNewLayout": {
         "arity": 1,
@@ -4616,7 +4611,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "crosshairSync": {
         "arity": 0,
@@ -4661,7 +4656,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "dialogs": {
         "arity": 0,
@@ -4688,7 +4683,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "drawOnAllCharts": {
         "arity": 1,
@@ -4724,7 +4719,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "exitFullscreen": {
         "arity": 0,
@@ -4931,7 +4926,7 @@
         "risk_screen": "read_or_pure_candidate",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "hideAllDrawingTools": {
         "arity": 0,
@@ -5039,7 +5034,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "loadLayoutFromServerByLayoutId": {
         "arity": 3,
@@ -5048,7 +5043,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "lockAllDrawingTools": {
         "arity": 0,
@@ -5192,7 +5187,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable_server_layout_fixture_required"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "persistentLogger": {
         "arity": 0,
@@ -5228,7 +5223,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "redo": {
         "arity": 0,
@@ -5246,7 +5241,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "replayApi": {
         "arity": 0,
@@ -5291,7 +5286,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "saveChartToServer": {
         "arity": 3,
@@ -5300,7 +5295,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "searchSymbols": {
         "arity": 1,
@@ -5471,7 +5466,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "setWatchlistApiPromise": {
         "arity": 1,
@@ -5759,7 +5754,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock contract validated; no live broker/account mutation"
+        "next_test": "mock contract only; real browser focus, feature and server prerequisites still apply"
       },
       "watchlist": {
         "arity": 0,
