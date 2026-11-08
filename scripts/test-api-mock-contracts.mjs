@@ -113,6 +113,30 @@ try {
     await fakeTheme.applyTheme({ theme: { mock: true }, onlyActiveChart: true, noUndo: true });
     check(calls.some(x => x[0] === 'restoredTheme'), 'collection.applyTheme');
 
+
+    const fakeFavorites = Object.create(Object.getPrototypeOf(api));
+    fakeFavorites._favoriteServices = {
+      favoriteChartStylesService: { mock: 'styles' },
+      favoriteCurrencyUnitConversionApi: { mock: 'currency' },
+      favoriteIntervalsService: { mock: 'intervals' },
+      lineToolsFavoritesService: { mock: 'lines' },
+    };
+    for (const [method, expected] of [
+      ['getFavoriteChartStylesService', 'styles'],
+      ['getFavoriteCurrencyUnitConversionApi', 'currency'],
+      ['getFavoriteIntervalsService', 'intervals'],
+      ['getLinetoolsFavoritesStore', 'lines'],
+    ]) {
+      check(fakeFavorites[method]().mock === expected, 'api.' + method + ' initialized-service path');
+    }
+    // The installed runtime's replay watcher references a const callback
+    // before initialization when a loaded chart immediately invokes subscribe.
+    // Verify that failure instead of falsely recording a successful API.
+    const replaySource = String(collection._someOfWidgetsAreInSelectingReplayPointMode);
+    check(replaySource.includes('i.forEach((e=>e.subscribe(a)))') &&
+      replaySource.includes('const o=') && replaySource.includes('a=()=>'),
+      'replay watcher unsafe callback ordering detected');
+
     return { count: passed.length, passed, isolation: 'fake receivers, no real server/broker mutation' };
   })()`;
   const response = await client.Runtime.evaluate({
@@ -122,7 +146,7 @@ try {
     throw new Error(response.exceptionDetails.text || 'CDP runtime exception');
   }
   const value = response.result?.value;
-  assert.equal(value?.count, 14);
+  assert.equal(value?.count, 19);
   process.stdout.write(JSON.stringify(value, null, 2) + '\n');
 } finally {
   await client.close();
