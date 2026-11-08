@@ -60,3 +60,9 @@ New unsupported or conditional behavior:
 Repeatable presence inventory: `node scripts/audit-live-api.mjs --target <EXPLICIT_CDP_TARGET_ID> --output audit.json`. The script refuses implicit target selection, does not mutate the UI, and writes a new file without overwriting an existing one. It inventories methods and possible stubs; it does not automatically execute dangerous methods.
 
 The 523-method inventory is now fully status-classified, but **428 remain present/not behavior-tested**. Treat them as unknown, not failed or supported.
+
+## Follow-up verification — 2026-11-08
+- Reattached to dedicated research target `02AF63D03D43D7ED809684A008714E1A`, chart BATS:NVDA at 1D.
+- Re-enumerated chart 166, collection 184, TradingViewApi 173 methods. Zero additions/removals versus the 523-method inventory.
+- Re-invoked 14 read-only chart methods successfully (studies, shapes, visible ranges, time scale, market/replay status).
+- The remaining untested methods cannot be marked working based solely on presence. Mutating and trading methods require disposable fixtures and appropriate safe test contracts.
