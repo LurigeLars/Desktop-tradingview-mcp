@@ -93,7 +93,7 @@ try {
     throw new Error(response.exceptionDetails.text || 'CDP runtime exception');
   }
   const value = response.result?.value;
-  assert.equal(value?.count, 13);
+  assert.equal(value?.count, 12);
   process.stdout.write(JSON.stringify(value, null, 2) + '\n');
 } finally {
   await client.close();
