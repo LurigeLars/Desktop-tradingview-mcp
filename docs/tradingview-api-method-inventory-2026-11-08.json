@@ -848,7 +848,7 @@
       "linkingGroupsWidgets": "invoked_successfully",
       "liveChartsCount": "invoked_successfully",
       "loadContent": "disposable_server_layout_fixture_required",
-      "loadLayoutState": "disposable_server_layout_fixture_required",
+      "loadLayoutState": "mock_contract_verified",
       "maximizedChartWidget": "invoked_successfully",
       "moveActiveChartWithUndo": "invoked_successfully",
       "muteSyncDateRangeEvents": "invoked_successfully",
@@ -862,7 +862,7 @@
       "resizerBridge": "invoked_successfully",
       "revertToInline": "invoked_successfully",
       "saveKeysPressed": "invoked_successfully",
-      "saveLayoutState": "disposable_server_layout_fixture_required",
+      "saveLayoutState": "mock_contract_verified",
       "setActive": "invoked_successfully",
       "setBroker": "mock_contract_verified",
       "setChartFloatingTooltipVisible": "invoked_successfully",
@@ -935,7 +935,7 @@
       "colorDependantStudyDefaults": "invoked_successfully",
       "connect": "invoked_successfully",
       "createGoProDialog": "requires_feature_argument",
-      "createNewLayout": "disposable_server_layout_fixture_required",
+      "createNewLayout": "mock_contract_verified",
       "crosshairSync": "invoked_successfully",
       "currencies": "invoked_successfully",
       "dateRangeSync": "invoked_successfully",
@@ -1073,7 +1073,7 @@
     "invoked_successfully": 435,
     "requires_context_arguments": 5,
     "rejected_invalid_fixture_or_server_response": 5,
-    "mock_contract_verified": 17,
+    "mock_contract_verified": 20,
     "rejected_invalid_record": 1,
     "promise_pending_observation": 1,
     "rejected_invalid_study_id": 1,
@@ -1086,7 +1086,7 @@
     "promise_not_awaited": 4,
     "isolated_broker_or_destructive_fixture_required": 2,
     "requires_widget_model_fixture": 1,
-    "disposable_server_layout_fixture_required": 4,
+    "disposable_server_layout_fixture_required": 1,
     "rejected_clipboard_document_not_focused": 1,
     "requires_arguments": 1,
     "requires_feature_argument": 1,
@@ -3856,9 +3856,9 @@
         "source_excerpt": "async loadLayoutState(e){this.metaInfo.id.setValue(e.id),this.metaInfo.uid.setValue(e.uid),this.metaInfo.name.setValue(e.name),this.metaInfo.description.setValue(e.description),this.metaInfo.username.setValue(e.username)",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "disposable_server_layout_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable_server_layout_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "maximizedChartWidget": {
         "arity": 0,
@@ -3982,9 +3982,9 @@
         "source_excerpt": "saveLayoutState(){return new Promise(((e,t)=>{this._saveChartService?.saveChartOrShowTitleDialog((()=>{}),e,t)}))}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "disposable_server_layout_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable_server_layout_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "setActive": {
         "arity": 1,
@@ -4623,9 +4623,9 @@
         "source_excerpt": "async createNewLayout(e){{if(null!==this._showSavingUnavailable)return this._showSavingUnavailable(),null;const t=await(0,A.createNewChart)(e);if(void 0===t)return null;const i=new URL(t);return window.history.replaceSta",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "disposable_server_layout_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable_server_layout_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "crosshairSync": {
         "arity": 0,
