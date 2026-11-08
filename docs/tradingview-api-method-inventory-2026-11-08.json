@@ -549,7 +549,7 @@
       "_convertTimeFromPublic": "invoked_successfully",
       "_convertTimeToPublic": "invoked_successfully",
       "_convertUserPointsToDataSource": "invoked_successfully",
-      "_createDateRangeApi": "requires_context_arguments",
+      "_createDateRangeApi": "invoked_successfully",
       "_createMultipointShape": "invoked_successfully",
       "_createStudy": "mock_contract_verified",
       "_createTradingPrimitive": "mock_contract_verified",
@@ -813,11 +813,11 @@
       "allLinkingGroups": "invoked_successfully",
       "allSymbols": "invoked_successfully",
       "applyIndicatorToAllCharts": "invoked_successfully",
-      "applyIndicatorsToAllCharts": "rejected_invalid_fixture_or_server_response",
+      "applyIndicatorsToAllCharts": "invoked_successfully",
       "applyIndicatorsToAllChartsAvailable": "invoked_successfully",
       "applyLineToolUpdateNotification": "invoked_successfully",
       "applyOverrides": "invoked_successfully",
-      "applyPreferencesToAllCharts": "requires_widget_model_fixture",
+      "applyPreferencesToAllCharts": "invoked_successfully",
       "applyStudiesOverrides": "invoked_successfully",
       "applyTheme": "rejected_invalid_fixture_or_server_response",
       "ariaDescribeChart": "invoked_successfully",
@@ -856,7 +856,7 @@
       "onZoom": "invoked_successfully",
       "readOnly": "invoked_successfully",
       "reconnectChartApi": "invoked_successfully",
-      "removeCustomSource": "rejected_invalid_fixture_or_server_response",
+      "removeCustomSource": "mock_contract_verified",
       "replaySessionState": "invoked_successfully",
       "resetLayoutSizes": "invoked_successfully",
       "resizerBridge": "invoked_successfully",
@@ -898,7 +898,7 @@
       "_activeChartWidget": "invoked_successfully",
       "_chartIndex": "invoked_successfully",
       "_chartWidgetIndexByModelId": "invoked_successfully",
-      "_createDateRangeApi": "requires_context_arguments",
+      "_createDateRangeApi": "invoked_successfully",
       "_getChartWidgetApi": "invoked_successfully",
       "_loadDummyBrokerController": "invoked_successfully",
       "_loadFavoriteDrawingsToolbar": "invoked_successfully",
@@ -1070,9 +1070,8 @@
     }
   },
   "status_counts": {
-    "invoked_successfully": 442,
-    "requires_context_arguments": 3,
-    "mock_contract_verified": 24,
+    "invoked_successfully": 446,
+    "mock_contract_verified": 25,
     "rejected_invalid_record": 1,
     "promise_pending_observation": 1,
     "unsupported_runtime_stub": 1,
@@ -1083,8 +1082,8 @@
     "specific_widget_or_ui_fixture_required": 5,
     "promise_not_awaited": 4,
     "isolated_broker_or_destructive_fixture_required": 2,
-    "rejected_invalid_fixture_or_server_response": 4,
-    "requires_widget_model_fixture": 1,
+    "requires_context_arguments": 1,
+    "rejected_invalid_fixture_or_server_response": 2,
     "disposable_server_layout_fixture_required": 1,
     "rejected_clipboard_document_not_focused": 1,
     "requires_feature_argument": 1,
@@ -1179,8 +1178,8 @@
         "source_excerpt": "e=>new In.DateRangeApi(e)",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_context_arguments",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_createMultipointShape": {
@@ -3539,8 +3538,8 @@
         "source_excerpt": "applyIndicatorsToAllCharts(e){const t=e.model().model().studyTemplate();this.undoHistory.beginUndoMacro(Hi);for(let i=0;i<this._chartWidgetsDefs.length;i++){const s=this._chartWidgetsDefs[i].chartWidget;s!==e&&(s.hasMode",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "rejected_invalid_fixture_or_server_response",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "specific_widget_or_ui_fixture_required"
       },
       "applyIndicatorsToAllChartsAvailable": {
@@ -3575,8 +3574,8 @@
         "source_excerpt": "applyPreferencesToAllCharts(e){{const t=e.model().preferences();this._chartWidgetsDefs.forEach((i=>{i.chartWidget.model()!==e&&i.chartWidget.model().applyPreferences(t)}))}}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_widget_model_fixture",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "applyStudiesOverrides": {
@@ -3926,9 +3925,9 @@
         "source_excerpt": "removeCustomSource(e){(0,c.assert)(this._customSources.has(e),\"Cannot remove not created custom source\"),this._customSources.delete(e);for(let t=0;t<this._chartWidgetsDefs.length;++t){const i=this._chartWidgetsDefs[t].ch",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "rejected_invalid_fixture_or_server_response",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "specific_widget_or_ui_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "replaySessionState": {
         "arity": 0,
@@ -4288,8 +4287,8 @@
         "source_excerpt": "e=>new In.DateRangeApi(e)",
         "access": "private",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_context_arguments",
-        "behavior_verified": false,
+        "verification": "invoked_successfully",
+        "behavior_verified": true,
         "next_test": "disposable chart with snapshot and cleanup"
       },
       "_getChartWidgetApi": {
