@@ -11,29 +11,56 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 
-export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count }) {
+export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_count, _deps = {} }) {
+  const changeSymbol = _deps.setSymbol || setSymbol;
+  const changeTimeframe = _deps.setTimeframe || setTimeframe;
+  const readState = _deps.getState || getState;
+  const readOhlcv = _deps.getOhlcv || getOhlcv;
+  const runEval = _deps.evaluate || evaluate;
+  const sleep = _deps.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const ticker = value => String(value || '').split(':').pop().toUpperCase();
+  const interval = value => String(value || '').replace(/^1([DWM])$/, '$1');
+  if (!['get_ohlcv', 'screenshot', 'get_strategy_results'].includes(action)) {
+    throw new Error('Unsupported batch action: ' + action);
+  }
+  if (!Array.isArray(symbols) || !symbols.length || symbols.some(s => typeof s !== 'string' || !s.trim())) {
+    throw new Error('Batch requires nonempty symbols');
+  }
   const tfs = timeframes && timeframes.length > 0 ? timeframes : [null];
-  const delay = delay_ms || 2000;
+  const delay = delay_ms ?? 2000;
   const results = [];
 
   for (const symbol of symbols) {
     for (const tf of tfs) {
       const combo = { symbol, timeframe: tf };
       try {
-        await setSymbol({ symbol });
+        await changeSymbol({ symbol });
 
         if (tf) {
-          await setTimeframe({ timeframe: tf });
+          await changeTimeframe({ timeframe: tf });
         }
 
-        await new Promise(r => setTimeout(r, delay));
-        const state = await getState();
-        const actualTicker = String(state.symbol || '').split(':').pop().toUpperCase();
-        const requestedTicker = String(symbol).split(':').pop().toUpperCase();
-        const actualTf = String(state.resolution || '').replace(/^1D$/, 'D').replace(/^1W$/, 'W');
-        const requestedTf = tf ? String(tf).replace(/^1D$/, 'D').replace(/^1W$/, 'W') : null;
-        if (actualTicker !== requestedTicker || (requestedTf && actualTf !== requestedTf)) {
-          throw new Error(`Chart mismatch: requested ${symbol}/${tf || 'current'}, got ${state.symbol}/${state.resolution}`);
+        await sleep(delay);
+        // A changed chart title alone does not prove its data series is ready.
+        let state, ready = false;
+        for (let attempt = 0; attempt < 20; attempt++) {
+          state = await readState();
+          const series = await runEval(`(function() {
+            var chart = window.TradingViewApi._activeChartWidgetWV.value();
+            var series = chart._chartWidget.model().mainSeries();
+            return { symbol: series.symbol(), count: series.bars().size() };
+          })()`);
+          if (ticker(state.symbol) === ticker(symbol)
+              && ticker(series?.symbol) === ticker(symbol)
+              && (!tf || interval(state.resolution) === interval(tf))
+              && series?.count > 0) {
+            ready = true;
+            break;
+          }
+          await sleep(500);
+        }
+        if (!ready) {
+          throw new Error(`Chart not ready for ${symbol}/${tf || 'current'}; last state ${state?.symbol}/${state?.resolution}`);
         }
 
         let actionResult;
@@ -50,10 +77,10 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
           // Use the same direct chart-series reader as data_get_ohlcv.
           // exportData() is not supported on all Desktop chart builds.
           const limit = Math.min(Math.max(1, Math.floor(Number(ohlcv_count) || 100)), 500);
-          const data = await getOhlcv({ count: limit });
+          const data = await readOhlcv({ count: limit });
           if (!data.success || !data.bars?.length) throw new Error('No OHLCV bars returned');
-          if (String(data.symbol || '').split(':').pop().toUpperCase() !== requestedTicker) {
-            throw new Error('OHLCV symbol mismatch: ' + data.symbol);
+          if (ticker(data.symbol) !== ticker(symbol) || (tf && interval(data.resolution) !== interval(tf))) {
+            throw new Error('OHLCV identity mismatch: ' + data.symbol + '/' + data.resolution);
           }
           actionResult = {
             symbol: data.symbol, resolution: data.resolution,
@@ -62,7 +89,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
           };
         } else if (action === 'get_strategy_results') {
           await new Promise(r => setTimeout(r, 1000));
-          actionResult = await evaluate(`
+          actionResult = await runEval(`
             (function() {
               var metrics = {};
               var panel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]');
@@ -77,7 +104,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
             })()
           `);
         } else {
-          actionResult = { error: 'Unknown action or API not available: ' + action };
+          throw new Error('Unsupported batch action: ' + action);
         }
         results.push({ ...combo, success: true, result: actionResult });
       } catch (err) {
