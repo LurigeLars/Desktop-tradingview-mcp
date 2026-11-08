@@ -553,7 +553,7 @@
       "_createMultipointShape": "invoked_successfully",
       "_createStudy": "rejected_invalid_fixture_or_server_response",
       "_createTradingPrimitive": "isolated_broker_or_destructive_fixture_required",
-      "_destroy": "isolated_broker_or_destructive_fixture_required",
+      "_destroy": "mock_contract_verified",
       "_getLineDataSourceApi": "invoked_successfully",
       "_getPaneApi": "invoked_successfully",
       "_getStudyApi": "invoked_successfully",
@@ -594,10 +594,10 @@
       "compileFailedStudies": "invoked_successfully",
       "copyEntityToClipboard": "invoked_successfully",
       "createAnchoredShape": "invoked_successfully",
-      "createExecutionShape": "rejected_no_trading_primitive_context",
+      "createExecutionShape": "mock_contract_verified",
       "createMultipointShape": "invoked_successfully",
-      "createOrderLine": "rejected_no_trading_primitive_context",
-      "createPositionLine": "rejected_no_trading_primitive_context",
+      "createOrderLine": "mock_contract_verified",
+      "createPositionLine": "mock_contract_verified",
       "createShape": "invoked_successfully",
       "createStudy": "rejected_invalid_study_id",
       "createStudyTemplate": "invoked_successfully",
@@ -783,7 +783,7 @@
       "_subscribeToCompletedEventForDateRangeSync": "requires_valid_argument_fixture",
       "_subscribeToEventsForDateRangeSync": "requires_valid_argument_fixture",
       "_subscribeToProperties": "invoked_successfully",
-      "_swapCharts": "specific_widget_or_ui_fixture_required",
+      "_swapCharts": "mock_contract_verified",
       "_syncChartsDateRangesWithActiveChartRange": "invoked_successfully",
       "_unsubscribeFromEventsForDateRangeSync": "requires_valid_argument_fixture",
       "_updateActiveChartCanBeMoved": "invoked_successfully",
@@ -872,7 +872,7 @@
       "setLayout": "invoked_successfully",
       "setLayoutSizes": "invoked_successfully",
       "setResolution": "invoked_successfully",
-      "setSaveChartService": "requires_valid_argument_fixture",
+      "setSaveChartService": "mock_contract_verified",
       "setSymbol": "invoked_successfully",
       "setSymbolAll": "invoked_successfully",
       "setTimeFrame": "invoked_successfully",
@@ -940,7 +940,7 @@
       "currencies": "invoked_successfully",
       "dateRangeSync": "invoked_successfully",
       "deferredStudiesReady": "invoked_successfully",
-      "destroy": "isolated_broker_or_destructive_fixture_required",
+      "destroy": "mock_contract_verified",
       "dialogs": "invoked_successfully",
       "disableTrackingEvents": "invoked_successfully",
       "disconnect": "isolated_broker_or_destructive_fixture_required",
@@ -982,8 +982,8 @@
       "layoutNameWatchedValue": "invoked_successfully",
       "layoutSettingsDrawer": "invoked_successfully",
       "loadChart": "throws_not_implemented",
-      "loadChartFromServer": "disposable_server_layout_fixture_required",
-      "loadLayoutFromServerByLayoutId": "disposable_server_layout_fixture_required",
+      "loadChartFromServer": "mock_contract_verified",
+      "loadLayoutFromServerByLayoutId": "mock_contract_verified",
       "lockAllDrawingTools": "invoked_successfully",
       "loginRequired": "invoked_successfully",
       "magnetEnabled": "invoked_successfully",
@@ -1003,15 +1003,15 @@
       "persistentLogger": "invoked_successfully",
       "pineEditorApi": "invoked_successfully",
       "pineLibApi": "invoked_successfully",
-      "publishChart": "isolated_broker_or_destructive_fixture_required",
+      "publishChart": "mock_contract_verified",
       "redo": "invoked_successfully",
-      "removeChartFromServer": "isolated_broker_or_destructive_fixture_required",
+      "removeChartFromServer": "mock_contract_verified",
       "replayApi": "invoked_successfully",
       "resetCache": "throws_not_implemented",
       "resetLayoutSizes": "invoked_successfully",
       "saveChart": "invoked_successfully",
-      "saveChartOrShowTitleDialog": "disposable_server_layout_fixture_required",
-      "saveChartToServer": "isolated_broker_or_destructive_fixture_required",
+      "saveChartOrShowTitleDialog": "mock_contract_verified",
+      "saveChartToServer": "mock_contract_verified",
       "searchSymbols": "invoked_successfully",
       "selectLineTool": "invoked_successfully",
       "selectedLineTool": "invoked_successfully",
@@ -1073,20 +1073,20 @@
     "invoked_successfully": 435,
     "requires_context_arguments": 5,
     "rejected_invalid_fixture_or_server_response": 5,
-    "isolated_broker_or_destructive_fixture_required": 11,
+    "isolated_broker_or_destructive_fixture_required": 6,
+    "mock_contract_verified": 13,
     "rejected_invalid_record": 1,
     "promise_pending_observation": 1,
-    "rejected_no_trading_primitive_context": 3,
     "rejected_invalid_study_id": 1,
     "unsupported_runtime_stub": 1,
     "feature_disabled": 1,
-    "requires_valid_argument_fixture": 18,
+    "requires_valid_argument_fixture": 17,
     "requires_nonnull_session_context": 1,
     "not_implemented_stub": 1,
-    "specific_widget_or_ui_fixture_required": 6,
+    "specific_widget_or_ui_fixture_required": 5,
     "promise_not_awaited": 4,
     "requires_widget_model_fixture": 1,
-    "disposable_server_layout_fixture_required": 7,
+    "disposable_server_layout_fixture_required": 4,
     "rejected_clipboard_document_not_focused": 1,
     "requires_arguments": 1,
     "requires_feature_argument": 1,
@@ -1217,9 +1217,9 @@
         "source_excerpt": "_destroy(){this._zoomUndoStackIsNotEmpty?.destroy(),this._chartWidget.hasModel()&&(this._chartWidget.model().crosshairSource().moved().unsubscribeAll(this),this._chartWidget.model().timeScale().logicalRangeChanged().unsu",
         "access": "private",
         "risk_screen": "account_or_destructive",
-        "verification": "isolated_broker_or_destructive_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "isolated_broker_or_destructive_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "_getLineDataSourceApi": {
         "arity": 1,
@@ -1586,9 +1586,9 @@
         "source_excerpt": "createExecutionShape(){return this._createTradingPrimitive(\"LineToolExecution\")}",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "rejected_no_trading_primitive_context",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "isolated_broker_or_destructive_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "createMultipointShape": {
         "arity": 2,
@@ -1604,18 +1604,18 @@
         "source_excerpt": "createOrderLine(){return this._createTradingPrimitive(\"LineToolOrder\")}",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "rejected_no_trading_primitive_context",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "isolated_broker_or_destructive_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "createPositionLine": {
         "arity": 0,
         "source_excerpt": "createPositionLine(){return this._createTradingPrimitive(\"LineToolPosition\")}",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "rejected_no_trading_primitive_context",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "isolated_broker_or_destructive_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "createShape": {
         "arity": 2,
@@ -3271,9 +3271,9 @@
         "source_excerpt": "_swapCharts(e,t){const i=this._chartWidgetsDefs.findIndex((t=>t.chartWidget===e)),s=this._chartWidgetsDefs.findIndex((e=>e.chartWidget===t));if(-1===i||-1===s)throw new Error(\"chart is not in the layout\");const r=this._c",
         "access": "private",
         "risk_screen": "internal_private",
-        "verification": "specific_widget_or_ui_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "specific_widget_or_ui_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "_syncChartsDateRangesWithActiveChartRange": {
         "arity": 1,
@@ -4072,9 +4072,9 @@
         "source_excerpt": "setSaveChartService(e){this._saveChartService=e,this._hasChangesSpawn?.destroy(),this._hasChangesSpawn=e.hasChangesWV().spawn(),this._hasChangesSpawn.subscribe((e=>this._hasChanges.setValue(e)),{callWithLast:!0});for(let",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "setSymbol": {
         "arity": 3,
@@ -4668,9 +4668,9 @@
         "source_excerpt": "destroy(){this._supportedChartStylesSpawn.destroy(),this._intervalsService?.destroy(),this._themesApi?.destroy(),this._widgebarApi?.destroy(),this._widgetbarApiRejectionReason=\"This ITradingViewApi instance has been dest",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "isolated_broker_or_destructive_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "isolated_broker_or_destructive_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "dialogs": {
         "arity": 0,
@@ -5046,18 +5046,18 @@
         "source_excerpt": "async loadChartFromServer(e){await(this._loadChartService?.loadChart(e,!1))}",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "disposable_server_layout_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable_server_layout_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "loadLayoutFromServerByLayoutId": {
         "arity": 3,
         "source_excerpt": "async loadLayoutFromServerByLayoutId(e,t,i){await(this._loadChartService?.loadChartByUrl(e,!!t,i))}",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "disposable_server_layout_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable_server_layout_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "lockAllDrawingTools": {
         "arity": 0,
@@ -5235,9 +5235,9 @@
         "source_excerpt": "publishChart(e){{const t=this._communityServices.publishChart;if(null!==t)return t(e)}Wt()}",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "isolated_broker_or_destructive_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "isolated_broker_or_destructive_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "redo": {
         "arity": 0,
@@ -5253,9 +5253,9 @@
         "source_excerpt": "removeChartFromServer(e,t){return this._saveLoad.backend.removeChart(e).then((()=>{t?.()}))}",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "isolated_broker_or_destructive_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "isolated_broker_or_destructive_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "replayApi": {
         "arity": 0,
@@ -5298,18 +5298,18 @@
         "source_excerpt": "saveChartOrShowTitleDialog(e,t,i){{const r=this._saveChartService;if(!r)return;r.saveChartOrShowTitleDialog(e,t,i)}}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "disposable_server_layout_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable_server_layout_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "saveChartToServer": {
         "arity": 3,
         "source_excerpt": "saveChartToServer(e,t,i){this._saveChartService&&this._saveChartService.saveChartSilently(e,t,i)}",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "isolated_broker_or_destructive_fixture_required",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "isolated_broker_or_destructive_fixture_required"
+        "next_test": "integration test against disposable backend; mock validates delegation only"
       },
       "searchSymbols": {
         "arity": 1,
