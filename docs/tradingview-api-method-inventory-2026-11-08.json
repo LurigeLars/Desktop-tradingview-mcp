@@ -634,9 +634,9 @@
       "hasModel": "invoked_successfully",
       "id": "invoked_successfully",
       "inactivityGaps": "feature_disabled",
-      "insertAfter": "requires_valid_argument_fixture",
-      "insertBefore": "requires_valid_argument_fixture",
-      "insertStudyWithoutCheck": "requires_valid_argument_fixture",
+      "insertAfter": "mock_contract_verified",
+      "insertBefore": "mock_contract_verified",
+      "insertStudyWithoutCheck": "mock_contract_verified",
       "isMaximized": "invoked_successfully",
       "isPriceToBarRatioLocked": "invoked_successfully",
       "isSelectBarRequested": "invoked_successfully",
@@ -684,7 +684,7 @@
       "setChartType": "invoked_successfully",
       "setDragExportEnabled": "invoked_successfully",
       "setEntityVisibility": "invoked_successfully",
-      "setInactivityGapsSession": "requires_nonnull_session_context",
+      "setInactivityGapsSession": "mock_contract_verified",
       "setPriceToBarRatio": "invoked_successfully",
       "setPriceToBarRatioLocked": "invoked_successfully",
       "setResolution": "invoked_successfully",
@@ -921,7 +921,7 @@
       "alertService": "invoked_successfully",
       "alerts": "invoked_successfully",
       "autosave": "invoked_successfully",
-      "brokerLoginEventsBus": "promise_not_awaited",
+      "brokerLoginEventsBus": "mock_contract_verified",
       "changeSymbol": "invoked_successfully",
       "chart": "invoked_successfully",
       "chartWidgetCollectionSeriesStatuses": "invoked_successfully",
@@ -934,7 +934,7 @@
       "closePublicationViewPopup": "invoked_successfully",
       "colorDependantStudyDefaults": "invoked_successfully",
       "connect": "invoked_successfully",
-      "createGoProDialog": "requires_feature_argument",
+      "createGoProDialog": "mock_contract_verified",
       "createNewLayout": "mock_contract_verified",
       "crosshairSync": "invoked_successfully",
       "currencies": "invoked_successfully",
@@ -947,7 +947,7 @@
       "drawOnAllCharts": "invoked_successfully",
       "drawOnAllChartsEnabled": "invoked_successfully",
       "drawOnAllChartsMode": "invoked_successfully",
-      "dummyBrokerController": "promise_not_awaited",
+      "dummyBrokerController": "mock_contract_verified",
       "exitFullscreen": "invoked_successfully",
       "favoriteDrawingsToolbar": "invoked_successfully",
       "flushBufferedData": "invoked_successfully",
@@ -970,7 +970,7 @@
       "hasChartChanges": "invoked_successfully",
       "hasPendingLineToolsModuleLoading": "invoked_successfully",
       "hasPendingStudiesModuleLoading": "invoked_successfully",
-      "hasVisibleToasts": "throws_null_error",
+      "hasVisibleToasts": "mock_contract_verified",
       "hideAllDrawingTools": "invoked_successfully",
       "hideAllIndicators": "invoked_successfully",
       "intervalSync": "invoked_successfully",
@@ -1062,7 +1062,7 @@
       "unsubscribe": "invoked_successfully",
       "viewMode": "invoked_successfully",
       "viewModeWatchedValue": "invoked_successfully",
-      "waitTrading": "promise_not_awaited",
+      "waitTrading": "mock_contract_verified",
       "watchlist": "throws_not_implemented",
       "watermark": "throws_not_implemented",
       "webview": "throws_not_implemented",
@@ -1071,22 +1071,19 @@
   },
   "status_counts": {
     "invoked_successfully": 448,
-    "mock_contract_verified": 31,
+    "mock_contract_verified": 40,
     "promise_pending_observation": 1,
     "unsupported_runtime_stub": 1,
     "feature_disabled": 1,
-    "requires_valid_argument_fixture": 6,
-    "requires_nonnull_session_context": 1,
     "not_implemented_stub": 1,
     "specific_widget_or_ui_fixture_required": 5,
-    "promise_not_awaited": 4,
+    "promise_not_awaited": 1,
+    "requires_valid_argument_fixture": 3,
     "requires_context_arguments": 1,
     "rejected_invalid_fixture_or_server_response": 2,
     "disposable_server_layout_fixture_required": 1,
     "rejected_clipboard_document_not_focused": 1,
-    "requires_feature_argument": 1,
-    "throws_not_implemented": 17,
-    "throws_null_error": 1
+    "throws_not_implemented": 17
   },
   "method_metadata": {
     "chart": {
@@ -1196,7 +1193,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_createTradingPrimitive": {
         "arity": 1,
@@ -1205,7 +1202,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_destroy": {
         "arity": 0,
@@ -1214,7 +1211,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_getLineDataSourceApi": {
         "arity": 1,
@@ -1583,7 +1580,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "createMultipointShape": {
         "arity": 2,
@@ -1601,7 +1598,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "createPositionLine": {
         "arity": 0,
@@ -1610,7 +1607,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "createShape": {
         "arity": 2,
@@ -1941,27 +1938,27 @@
         "source_excerpt": "insertAfter(e,t){const i=this._chartWidget.model().model(),r=ht(i,e),n=(0,s.ensureNotNull)(i.dataSourceForId(t));this._chartWidget.model().insertAfter(r,n)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "insertBefore": {
         "arity": 2,
         "source_excerpt": "insertBefore(e,t){const i=this._chartWidget.model().model(),r=ht(i,e),n=(0,s.ensureNotNull)(i.dataSourceForId(t));this._chartWidget.model().insertBefore(r,n)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "insertStudyWithoutCheck": {
         "arity": 5,
         "source_excerpt": "insertStudyWithoutCheck(e,t,i,r,s){return this._chartWidget.model().insertStudyWithoutCheck(new x.StudyMetaInfo(e,s),t,i,r)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_valid_argument_fixture",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "isMaximized": {
         "arity": 0,
@@ -2391,9 +2388,9 @@
         "source_excerpt": "setInactivityGapsSession(e){this._chartWidget.model().model().setInactivityGapsSession(e)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_nonnull_session_context",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "setPriceToBarRatio": {
         "arity": 2,
@@ -2656,7 +2653,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_bottomToolbarDestroyer": {
         "arity": 0,
@@ -2683,7 +2680,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_chartWidgetGotoTimeRange": {
         "arity": 4,
@@ -3007,7 +3004,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_isChartsLimitApplied": {
         "arity": 1,
@@ -3187,7 +3184,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_setInitialSizes": {
         "arity": 1,
@@ -3196,7 +3193,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_setLayoutCornerMaximizeChart": {
         "arity": 1,
@@ -3250,7 +3247,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_subscribeToProperties": {
         "arity": 1,
@@ -3268,7 +3265,7 @@
         "risk_screen": "internal_private",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_syncChartsDateRangesWithActiveChartRange": {
         "arity": 1,
@@ -3286,7 +3283,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_updateActiveChartCanBeMoved": {
         "arity": 0,
@@ -3358,7 +3355,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "_updateLinkingGroupCharts": {
         "arity": 0,
@@ -3691,7 +3688,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "destroyReplayWidget": {
         "arity": 0,
@@ -3853,7 +3850,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "maximizedChartWidget": {
         "arity": 0,
@@ -3925,7 +3922,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "replaySessionState": {
         "arity": 0,
@@ -3979,7 +3976,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "setActive": {
         "arity": 1,
@@ -3997,7 +3994,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "setChartFloatingTooltipVisible": {
         "arity": 1,
@@ -4069,7 +4066,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "setSymbol": {
         "arity": 3,
@@ -4492,9 +4489,9 @@
         "source_excerpt": "async brokerLoginEventsBus(){{const e=await this.waitTrading();return(0,s.ensureDefined)(e.brokerLoginEventsBus)}}",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "promise_not_awaited",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mocked broker/account or disposable server fixture"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "changeSymbol": {
         "arity": 3,
@@ -4609,9 +4606,9 @@
         "source_excerpt": "createGoProDialog(e,t={}){(0,Et.openWall)(It.PAYWALL_KIND,e,t)}",
         "access": "public",
         "risk_screen": "state_changing_or_event_subscription",
-        "verification": "requires_feature_argument",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "disposable chart with snapshot and cleanup"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "createNewLayout": {
         "arity": 1,
@@ -4620,7 +4617,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "crosshairSync": {
         "arity": 0,
@@ -4665,7 +4662,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "dialogs": {
         "arity": 0,
@@ -4692,7 +4689,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "drawOnAllCharts": {
         "arity": 1,
@@ -4726,9 +4723,9 @@
         "source_excerpt": "async dummyBrokerController(){if(null!==this._loadDummyBrokerController){const e=await this._loadDummyBrokerController();return e.startBroker=async()=>{const e=(0,s.ensureNotNull)(this.trading());await e.selectBroker(\"DU",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "promise_not_awaited",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mocked broker/account or disposable server fixture"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "exitFullscreen": {
         "arity": 0,
@@ -4933,9 +4930,9 @@
         "source_excerpt": "hasVisibleToasts(){return(0,s.ensureNotNull)(this._hasVisibleToasts,\"hasVisibleToasts\")}",
         "access": "public",
         "risk_screen": "read_or_pure_candidate",
-        "verification": "throws_null_error",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "valid model arguments or read-only probe"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "hideAllDrawingTools": {
         "arity": 0,
@@ -5043,7 +5040,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "loadLayoutFromServerByLayoutId": {
         "arity": 3,
@@ -5052,7 +5049,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "lockAllDrawingTools": {
         "arity": 0,
@@ -5232,7 +5229,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "redo": {
         "arity": 0,
@@ -5250,7 +5247,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "replayApi": {
         "arity": 0,
@@ -5295,7 +5292,7 @@
         "risk_screen": "state_changing_or_event_subscription",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "saveChartToServer": {
         "arity": 3,
@@ -5304,7 +5301,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "searchSymbols": {
         "arity": 1,
@@ -5475,7 +5472,7 @@
         "risk_screen": "account_or_destructive",
         "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mock delegation tested; full integration requires a disposable widget"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "setWatchlistApiPromise": {
         "arity": 1,
@@ -5761,9 +5758,9 @@
         "source_excerpt": "waitTrading(){return this._tradingService?.waitTrading()??new Promise((()=>{}))}",
         "access": "public",
         "risk_screen": "account_or_destructive",
-        "verification": "promise_not_awaited",
+        "verification": "mock_contract_verified",
         "behavior_verified": false,
-        "next_test": "mocked broker/account or disposable server fixture"
+        "next_test": "mock contract validated; no live broker/account mutation"
       },
       "watchlist": {
         "arity": 0,
