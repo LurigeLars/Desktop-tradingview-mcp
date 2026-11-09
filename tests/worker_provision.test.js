@@ -1269,13 +1269,17 @@ test('worker_rebind refreshes only live verified persistent CDP IDs, preserving 
       {type:'page',id:'new-CDP',url:'https://www.tradingview.com/chart/stable-chart/'},
       {type:'page',id:'personal',url:'https://www.tradingview.com/chart/default/'},
     ],
-    inspectTargets:async()=>[
+    inspectTargets:async targets=>{
+      assert.deepEqual(targets.map(t => t.id), ['new-CDP'],
+        'rebind must never inspect unrelated personal charts');
+      return [
       {target_id:'new-CDP',chart_id:'stable-chart',pane_count:2,panes:[
         {resolved_symbol:'EX:AAA',resolution:'5',studies:[]},
         {resolved_symbol:'EX:BBB',resolution:'5',studies:[]},
       ]},
       {target_id:'personal',chart_id:'default',pane_count:1,panes:[]},
-    ],
+    ];
+    },
   };
   const preview=await rebindPersistentWorkers({dry_run:true,_deps:runtime});
   assert.equal(preview.success,true);
