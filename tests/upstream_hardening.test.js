@@ -115,7 +115,7 @@ test('getOhlcv pages history before reading requested bars', async () => {
       delay: async () => {},
       evaluate: async expr => {
         if (expr.includes('return {bars: result')) {
-          return { bars, total_bars: resident, symbol: 'NASDAQ:TEST', resolution: '60', source: 'direct_bars' };
+          return { bars, total_bars: resident, symbol: 'NASDAQ:TEST', source_symbol: 'NASDAQ:TEST', resolution: '60', source: 'direct_bars' };
         }
         if (expr.includes('requestMoreDataAvailable')) return { size: resident, more: true };
         if (expr.includes('requestMoreData(')) { pageRequests++; resident = 5; return true; }

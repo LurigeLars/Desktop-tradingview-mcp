@@ -4,6 +4,7 @@
 import { evaluate, getClient } from '../connection.js';
 import { setSymbol, setTimeframe, getState } from './chart.js';
 import { getOhlcv } from './data.js';
+import { matchesChartSeriesIdentity } from './quote-identity.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -18,7 +19,6 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
   const readOhlcv = _deps.getOhlcv || getOhlcv;
   const runEval = _deps.evaluate || evaluate;
   const sleep = _deps.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
-  const ticker = value => String(value || '').split(':').pop().toUpperCase();
   const interval = value => String(value || '').replace(/^1([DWM])$/, '$1');
   if (!['get_ohlcv', 'screenshot', 'get_strategy_results'].includes(action)) {
     throw new Error('Unsupported batch action: ' + action);
@@ -37,21 +37,26 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
         await changeSymbol({ symbol });
 
         if (tf) {
-          await changeTimeframe({ timeframe: tf });
+          // Skip a redundant interval mutation while a new symbol is loading.
+          const current = await readState();
+          if (interval(current?.resolution) !== interval(tf)) {
+            await changeTimeframe({ timeframe: tf });
+          }
         }
 
         await sleep(delay);
         // A changed chart title alone does not prove its data series is ready.
-        let state, ready = false;
+        let state, ready = false, series;
         for (let attempt = 0; attempt < 20; attempt++) {
           state = await readState();
-          const series = await runEval(`(function() {
+          series = await runEval(`(function() {
             var chart = window.TradingViewApi._activeChartWidgetWV.value();
             var series = chart._chartWidget.model().mainSeries();
             return { symbol: series.symbol(), count: series.bars().size() };
           })()`);
-          if (ticker(state.symbol) === ticker(symbol)
-              && ticker(series?.symbol) === ticker(symbol)
+          if (matchesChartSeriesIdentity(symbol, state?.symbol)
+              && matchesChartSeriesIdentity(symbol, series?.symbol)
+              && matchesChartSeriesIdentity(state?.symbol, series?.symbol)
               && (!tf || interval(state.resolution) === interval(tf))
               && series?.count > 0) {
             ready = true;
@@ -60,7 +65,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
           await sleep(500);
         }
         if (!ready) {
-          throw new Error(`Chart not ready for ${symbol}/${tf || 'current'}; last state ${state?.symbol}/${state?.resolution}`);
+          throw new Error(`Chart not ready for ${symbol}/${tf || 'current'}; last state ${state?.symbol}/${state?.resolution}; source ${series?.symbol || 'unknown'} with ${series?.count ?? 'unknown'} bars`);
         }
 
         let actionResult;
@@ -79,7 +84,9 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
           const limit = Math.min(Math.max(1, Math.floor(Number(ohlcv_count) || 100)), 500);
           const data = await readOhlcv({ count: limit });
           if (!data.success || !data.bars?.length) throw new Error('No OHLCV bars returned');
-          if (ticker(data.symbol) !== ticker(symbol) || (tf && interval(data.resolution) !== interval(tf))) {
+          if (!matchesChartSeriesIdentity(symbol, data.source_symbol)
+              || !matchesChartSeriesIdentity(data.symbol, data.source_symbol)
+              || (tf && interval(data.resolution) !== interval(tf))) {
             throw new Error('OHLCV identity mismatch: ' + data.symbol + '/' + data.resolution);
           }
           actionResult = {
@@ -114,5 +121,6 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
   }
 
   const successCount = results.filter(r => r.success).length;
-  return { success: true, total_iterations: results.length, successful: successCount, failed: results.length - successCount, results };
+  return { success: successCount === results.length, partial: successCount > 0 && successCount < results.length,
+    total_iterations: results.length, successful: successCount, failed: results.length - successCount, results };
 }

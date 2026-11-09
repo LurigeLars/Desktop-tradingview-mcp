@@ -25,3 +25,20 @@ export function resolveQuoteSourceIdentity(candidates) {
   }
   return { symbol: null, source_symbol_verified: false, source_symbol_origin: null };
 }
+
+
+// Compare the visible chart request to the actual resident main-series source.
+// TradingView may lawfully resolve a US equity from NASDAQ/NYSE/AMEX/ARCA to
+// BATS. Do not apply that alias to ECONOMICS/FRED, other exchanges or tickers.
+export function matchesChartSeriesIdentity(chartSymbol, seriesSymbol) {
+  const clean = value => typeof value === 'string' && value.trim() &&
+    !/[\s;{}]/.test(value) ? value.trim().toUpperCase() : null;
+  const chart = clean(chartSymbol);
+  const source = clean(seriesSymbol);
+  if (!chart || !source) return false;
+  if (chart === source) return true;
+  const normalizeUsEquity = value => value.replace(
+    /\b(?:NASDAQ|NYSE|AMEX|ARCA|BATS):([A-Z0-9_.!]+)/g, 'US_EQUITY:$1'
+  );
+  return normalizeUsEquity(chart) === normalizeUsEquity(source);
+}

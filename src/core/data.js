@@ -4,7 +4,7 @@
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
 import { matchWatchlistSymbol } from './watchlist.js';
-import { resolveQuoteSourceIdentity } from './quote-identity.js';
+import { resolveQuoteSourceIdentity, matchesChartSeriesIdentity } from './quote-identity.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -196,7 +196,8 @@ export async function getOhlcv({ count, summary, _deps } = {}) {
     data = await run(`
       (function() {
         var chart = ${CHART_API};
-        var bars = ${BARS_PATH};
+        var series = chart._chartWidget.model().mainSeries();
+        var bars = series && series.bars ? series.bars() : null;
         if (!bars || typeof bars.lastIndex !== 'function') return null;
         var result = [];
         var end = bars.lastIndex();
@@ -205,17 +206,26 @@ export async function getOhlcv({ count, summary, _deps } = {}) {
           var v = bars.valueAt(i);
           if (v) result.push({time: v[0], open: v[1], high: v[2], low: v[3], close: v[4], volume: v[5] || 0});
         }
-        var symbol = null, resolution = null;
+        var symbol = null, resolution = null, sourceSymbol = null;
         try { symbol = chart.symbol(); resolution = chart.resolution(); } catch (e) {}
-        return {bars: result, total_bars: bars.size(), symbol: symbol, resolution: resolution, source: 'direct_bars'};
+        try { sourceSymbol = series.symbol(); } catch (e) {}
+        return {bars: result, total_bars: bars.size(), symbol: symbol, source_symbol: sourceSymbol, resolution: resolution, source: 'direct_bars'};
       })()
     `);
   } catch { data = null; }
 
   if (!data?.bars?.length) throw new Error('Could not extract OHLCV data. The chart may still be loading.');
+  if (!matchesChartSeriesIdentity(data.symbol, data.source_symbol)) {
+    throw new Error('OHLCV_SOURCE_MISMATCH: chart ' + String(data.symbol) +
+      ' is not the loaded series ' + String(data.source_symbol));
+  }
 
   const meta = {
     symbol: data.symbol ?? null,
+    source_symbol: data.source_symbol,
+    source_symbol_verified: true,
+    observation_time: data.bars.at(-1)?.time ?? null,
+    observation_time_semantics: 'chart_bar_time_not_release_time',
     resolution: data.resolution ?? null,
     requested,
     bar_count: data.bars.length,
