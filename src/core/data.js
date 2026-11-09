@@ -24,7 +24,6 @@ function _resolveOhlcv(deps) {
 // sub-cent levels to 0.00 (issue #77).
 const roundPrice = (v) => (v == null ? null : Math.round(v * 1e8) / 1e8);
 const CHART_API = KNOWN_PATHS.chartApi;
-const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
 
 // Serializes getQuote() calls that mutate chart symbol so concurrent callers
 // can't race over the shared chart state. JS is single-threaded but our
