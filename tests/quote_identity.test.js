@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveQuoteSourceIdentity, matchesChartSeriesIdentity } from '../src/core/quote-identity.js';
+import { isChartDataReady, waitForChartReady } from '../src/wait.js';
+import { resolveQuoteSourceIdentity, matchesChartSeriesIdentity, matchesRequestedQuoteIdentity, requireRequestedQuoteIdentity } from '../src/core/quote-identity.js';
 
 test('quote-get uses actual resident series source, never echoes requested NASDAQ alias', () => {
   const proof = resolveQuoteSourceIdentity({
@@ -79,4 +80,52 @@ test('OHLCV source matching allows legitimate BATS US equity alias only', () => 
   assert.equal(matchesChartSeriesIdentity('ECONOMICS:USNFP', 'ECONOMICS:USCPI'), false);
   assert.equal(matchesChartSeriesIdentity('NASDAQ:NVDA', null), false);
   assert.equal(matchesChartSeriesIdentity('NASDAQ:NVDA', { value: 'NASDAQ:NVDA' }), false);
+});
+
+test('quote requests reject a stale Fiserv series even when chart says CPI', () => {
+  assert.throws(
+    () => requireRequestedQuoteIdentity('ECONOMICS:USCPI', 'BATS:FISV'),
+    /QUOTE_SOURCE_MISMATCH/
+  );
+  assert.throws(
+    () => requireRequestedQuoteIdentity('ECONOMICS:USNFP', null),
+    /QUOTE_SOURCE_MISMATCH/
+  );
+  assert.doesNotThrow(() => requireRequestedQuoteIdentity('NASDAQ:NVDA', 'BATS:NVDA'));
+  assert.doesNotThrow(() => requireRequestedQuoteIdentity('NVDA', 'BATS:NVDA'));
+  assert.equal(matchesRequestedQuoteIdentity('ECONOMICS:USCPI', 'BATS:FISV'), false);
+  assert.equal(matchesRequestedQuoteIdentity('ECONOMICS:USCPI', 'ECONOMICS:USCPI'), true);
+});
+
+test('chart readiness verifies actual main-series identity, bar count and timeframe', () => {
+  const state = {
+    isLoading: false, currentSymbol: 'ECONOMICS:USCPI',
+    resolution: '1D', seriesSymbol: 'ECONOMICS:USCPI',
+    seriesInterval: 'D', seriesBarCount: 120,
+  };
+  assert.equal(isChartDataReady(state, 'ECONOMICS:USCPI', 'D'), true);
+  assert.equal(isChartDataReady({...state, seriesSymbol:'BATS:FISV'}, 'ECONOMICS:USCPI'), false);
+  assert.equal(isChartDataReady({...state, seriesBarCount:0}, 'ECONOMICS:USCPI'), false);
+  assert.equal(isChartDataReady({...state, seriesInterval:'60'}, 'ECONOMICS:USCPI', 'D'), false);
+  assert.equal(isChartDataReady({...state, resolution:'60'}, 'ECONOMICS:USCPI', 'D'), false);
+  assert.equal(isChartDataReady({...state, isLoading:true}, 'ECONOMICS:USCPI'), false);
+  assert.equal(isChartDataReady({...state, seriesSymbol:null}, 'ECONOMICS:USCPI'), false);
+  assert.equal(isChartDataReady({...state, currentSymbol:'ECONOMICS:USNFP'}, 'ECONOMICS:USCPI'), false);
+  assert.equal(isChartDataReady({...state, currentSymbol:'NASDAQ:NVDA',seriesSymbol:'BATS:NVDA'},
+    'NASDAQ:NVDA', 'D'), true);
+});
+
+test('chart readiness waits for stable matching source rather than reactive label', async () => {
+  const wrong = {
+    isLoading:false, currentSymbol:'ECONOMICS:USCPI', resolution:'1D',
+    seriesSymbol:'BATS:FISV', seriesInterval:'D', seriesBarCount:300,
+  };
+  const correct = {...wrong, seriesSymbol:'ECONOMICS:USCPI', seriesBarCount:12};
+  let polls = 0;
+  const ready = await waitForChartReady('ECONOMICS:USCPI','D',1000,{
+    evaluate:async()=>++polls<=2?wrong:correct,
+    sleep:async()=>{},
+  });
+  assert.equal(ready,true);
+  assert.ok(polls>=5,'must observe stable loaded macro series before ready');
 });

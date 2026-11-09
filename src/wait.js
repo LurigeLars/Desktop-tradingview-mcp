@@ -1,82 +1,86 @@
 import { evaluate } from './connection.js';
-import { matchWatchlistSymbol } from './core/watchlist.js';
+import { matchesRequestedQuoteIdentity } from './core/quote-identity.js';
 
 const DEFAULT_TIMEOUT = 10000;
 const POLL_INTERVAL = 200;
 
-export async function waitForChartReady(expectedSymbol = null, expectedTf = null, timeout = DEFAULT_TIMEOUT) {
+const normalizedInterval = value => String(value ?? '').toUpperCase()
+  .replace(/^1([DWM])$/, '$1');
+
+/**
+ * A chart's reactive symbol label may update while its loaded main series
+ * still refers to the previous instrument. Require source series identity,
+ * real loaded bars, and source interval; DOM legend/bar counts are not proof.
+ */
+export function isChartDataReady(state, expectedSymbol = null, expectedTf = null) {
+  if (!state || state.isLoading || !Number.isFinite(state.seriesBarCount)
+      || state.seriesBarCount < 1 || !state.seriesSymbol) return false;
+
+  if (expectedSymbol) {
+    if (!matchesRequestedQuoteIdentity(expectedSymbol, state.currentSymbol)) return false;
+    if (!matchesRequestedQuoteIdentity(expectedSymbol, state.seriesSymbol)) return false;
+  } else if (state.currentSymbol &&
+      !matchesRequestedQuoteIdentity(state.currentSymbol, state.seriesSymbol)) {
+    return false;
+  }
+
+  if (expectedTf) {
+    const wanted = normalizedInterval(expectedTf);
+    if (normalizedInterval(state.resolution) !== wanted
+        || normalizedInterval(state.seriesInterval) !== wanted) return false;
+  }
+  return true;
+}
+
+export async function waitForChartReady(expectedSymbol = null, expectedTf = null,
+  timeout = DEFAULT_TIMEOUT, _deps = {}) {
+  const read = _deps.evaluate || evaluate;
+  const sleep = _deps.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
   const start = Date.now();
-  let lastBarCount = -1;
+  let lastSignature = '';
   let stableCount = 0;
 
   while (Date.now() - start < timeout) {
-    const state = await evaluate(`
+    const state = await read(`
       (function() {
-        // Check for loading spinner
         var spinner = document.querySelector('[class*="loader"]')
           || document.querySelector('[class*="loading"]')
           || document.querySelector('[data-name="loading"]');
-        var isLoading = spinner && spinner.offsetParent !== null;
-
-        // Try to get bar count from data window or chart
-        var barCount = -1;
-        try {
-          var bars = document.querySelectorAll('[class*="bar"]');
-          barCount = bars.length;
-        } catch {}
-
-        // Prefer TradingView's actual chart state. DOM legend text may be a
-        // shortened component/description and is unsafe for formulas/spreads.
-        var currentSymbol = '';
+        var isLoading = !!(spinner && spinner.offsetParent !== null);
+        var currentSymbol = null, resolution = null, seriesSymbol = null;
+        var seriesInterval = null, seriesBarCount = -1;
         try {
           var chart = window.TradingViewApi._activeChartWidgetWV.value();
-          currentSymbol = chart && chart.symbol ? chart.symbol() : '';
-        } catch(e) {}
-        if (!currentSymbol) {
-          var symbolEl = document.querySelector('[data-name="legend-source-title"]')
-            || document.querySelector('[class*="title"] [class*="apply-common-tooltip"]');
-          currentSymbol = symbolEl ? symbolEl.textContent.trim() : '';
-        }
-
-        return { isLoading: !!isLoading, barCount: barCount, currentSymbol: currentSymbol };
+          currentSymbol = chart.symbol();
+          resolution = chart.resolution();
+          var main = chart._chartWidget.model().mainSeries();
+          seriesSymbol = main.symbol();
+          seriesInterval = main.interval();
+          seriesBarCount = main.bars().size();
+        } catch (e) {}
+        return {
+          isLoading: isLoading, currentSymbol: currentSymbol,
+          resolution: resolution, seriesSymbol: seriesSymbol,
+          seriesInterval: seriesInterval, seriesBarCount: seriesBarCount
+        };
       })()
     `);
 
-    if (!state) {
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
+    if (!isChartDataReady(state, expectedSymbol, expectedTf)) {
+      stableCount = 0;
+      lastSignature = '';
+      await sleep(POLL_INTERVAL);
       continue;
     }
-
-    // Not ready if still loading
-    if (state.isLoading) {
-      stableCount = 0;
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
-      continue;
-    }
-
-    // Check symbol match if expected
-    if (expectedSymbol && state.currentSymbol && !matchWatchlistSymbol(expectedSymbol, [state.currentSymbol]).matched) {
-      stableCount = 0;
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
-      continue;
-    }
-
-    // Check bar count stability
-    if (state.barCount === lastBarCount && state.barCount > 0) {
-      stableCount++;
-    } else {
-      stableCount = 0;
-    }
-    lastBarCount = state.barCount;
-
-    if (stableCount >= 2) {
-      return true;
-    }
-
-    await new Promise(r => setTimeout(r, POLL_INTERVAL));
+    const signature = [
+      state.currentSymbol, state.resolution, state.seriesSymbol,
+      state.seriesInterval, state.seriesBarCount,
+    ].join('|');
+    if (signature === lastSignature) stableCount++;
+    else { lastSignature = signature; stableCount = 0; }
+    if (stableCount >= 2) return true;
+    await sleep(POLL_INTERVAL);
   }
-
-  // Timeout — return true anyway, caller should verify
   return false;
 }
 
