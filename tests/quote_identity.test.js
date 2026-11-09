@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveQuoteSourceIdentity } from '../src/core/quote-identity.js';
+import { resolveQuoteSourceIdentity, matchesChartSeriesIdentity } from '../src/core/quote-identity.js';
 
 test('quote-get uses actual resident series source, never echoes requested NASDAQ alias', () => {
   const proof = resolveQuoteSourceIdentity({
@@ -65,4 +65,18 @@ test('first exact quote series symbol has precedence over fallback TradingView m
     series_symbol: 'AMEX:SPY',
     info_full_name: 'BATS:SPY',
   }).symbol, 'AMEX:SPY');
+});
+
+
+test('OHLCV source matching allows legitimate BATS US equity alias only', () => {
+  assert.equal(matchesChartSeriesIdentity('NASDAQ:NVDA', 'BATS:NVDA'), true);
+  assert.equal(matchesChartSeriesIdentity('NYSE:VLO', 'BATS:VLO'), true);
+  assert.equal(matchesChartSeriesIdentity('NASDAQ:QQQ/AMEX:SPY', 'BATS:QQQ/BATS:SPY'), true);
+  assert.equal(matchesChartSeriesIdentity('ECONOMICS:USCPI', 'ECONOMICS:USCPI'), true);
+  assert.equal(matchesChartSeriesIdentity('ECONOMICS:USCPI', 'BATS:FISV'), false);
+  assert.equal(matchesChartSeriesIdentity('ECONOMICS:USCPI', 'FRED:CPIAUCSL'), false);
+  assert.equal(matchesChartSeriesIdentity('NASDAQ:NVDA', 'BATS:MSFT'), false);
+  assert.equal(matchesChartSeriesIdentity('ECONOMICS:USNFP', 'ECONOMICS:USCPI'), false);
+  assert.equal(matchesChartSeriesIdentity('NASDAQ:NVDA', null), false);
+  assert.equal(matchesChartSeriesIdentity('NASDAQ:NVDA', { value: 'NASDAQ:NVDA' }), false);
 });
