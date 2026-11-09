@@ -1241,7 +1241,12 @@ export async function inspectTargetPaneCounts(targets) {
       const panes = await readActivePaneStates(client);
       const paneCount = Array.isArray(panes) ? panes.length : 0;
       if (!Number.isInteger(Number(paneCount)) || Number(paneCount) < 1) {
-        throw new Error('Chart target has no active panes');
+        // A loading personal chart still consumes a TradingView connection.
+        // Keep it visible as unverified instead of failing the entire audit.
+        results.push({ target_id: target.id, chart_id: chartIdFromTarget(target),
+          pane_count: 0, panes: [], pane_count_verified: false,
+          diagnostic: 'Chart target has no active panes' });
+        continue;
       }
       results.push({
         target_id: target.id,
@@ -1684,13 +1689,21 @@ export async function provisionWorker({
     externalTargets = [];
   }
 
-  const externalConnections = externalTargets.reduce((sum, item) => sum + Number(item.pane_count || 0), 0);
+  const unknownExternalTargets = externalTargets.filter(item => item.pane_count_verified === false);
+  // Use the maximum eight connections for each unknown external chart in
+  // dry-run projections; never undercount capacity or provision while unknown.
+  const externalConnections = externalTargets.reduce((sum, item) => sum +
+    (item.pane_count_verified === false ? 8 : Number(item.pane_count || 0)), 0);
   const usableCapacity = Number(state.usable_capacity);
   const projectedConnections = externalConnections + Number(state.configured || 0);
   // Read-only planning must remain available even when an already-running
   // Desktop session exceeds the reserved connection budget. Never allocate
   // additional charts above the budget on a mutating provisioning call.
   const overCapacity = projectedConnections > usableCapacity;
+  if (unknownExternalTargets.length && !dry_run) {
+    throw new Error('Unverified external chart pane count; refusing worker provisioning: ' +
+      unknownExternalTargets.map(item => item.target_id).join(','));
+  }
   if (overCapacity && !dry_run) {
     throw new Error(
       'Worker capacity exceeded: ' + projectedConnections + ' projected chart connections (' +
@@ -1759,6 +1772,8 @@ export async function provisionWorker({
         reserve_slots: state.reserve_slots,
         usable_capacity: usableCapacity,
         external_connections: externalConnections,
+        unknown_external_targets: unknownExternalTargets.map(item => item.target_id),
+        unknown_external_estimate: '8 connections per unready chart (upper bound)',
         worker_connections: state.configured,
         projected_connections: projectedConnections,
         over_capacity: overCapacity,
