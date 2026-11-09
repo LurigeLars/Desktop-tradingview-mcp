@@ -4,7 +4,7 @@
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
 import { matchWatchlistSymbol } from './watchlist.js';
-import { resolveQuoteSourceIdentity, matchesChartSeriesIdentity } from './quote-identity.js';
+import { resolveQuoteSourceIdentity, matchesChartSeriesIdentity, requireRequestedQuoteIdentity, matchesRequestedQuoteIdentity } from './quote-identity.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -620,12 +620,17 @@ async function _getQuoteInternal({ symbol } = {}) {
     `);
     if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
     const proof = resolveQuoteSourceIdentity(data._symbol_candidates);
+    // A reactive chart label can advance before its resident source changes.
+    // Fail closed instead of returning the previous instrument's price as a
+    // successful quote, even if a mismatch flag would be visible to a caller.
+    requireRequestedQuoteIdentity(requested, proof.symbol);
     const { _symbol_candidates, ...publicQuote } = data;
     return {
       success: true, ...publicQuote, ...proof,
       requested_symbol: requested || null,
-      requested_symbol_matches_source: proof.symbol != null
-        && requested !== '' && proof.symbol.toUpperCase() === requested.toUpperCase(),
+      requested_symbol_matches_source: requested
+        ? matchesRequestedQuoteIdentity(requested, proof.symbol)
+        : null,
     };
   } finally {
     if (needsRestore && originalSymbol) {
