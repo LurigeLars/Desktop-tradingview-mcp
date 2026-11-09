@@ -562,7 +562,13 @@ export async function rebindPersistentWorkers({ dry_run = true, _deps } = {}) {
   const topology = state.topology_plan;
   const workersByHandle = entryMap(state);
   const targets = await deps.listTargets();
-  const inspected = await deps.inspectTargets(targets);
+  // Only registered stable worker layouts belong in a persistent rebind.
+  // Unready personal chart targets must not abort recovery of owned workers.
+  const ownedChartIds = new Set((state.worker_tabs || [])
+    .map(tab => String(tab.chart_id || '')).filter(Boolean));
+  const ownedTargets = targets.filter(target =>
+    ownedChartIds.has(String(chartIdFromTarget(target) || '')));
+  const inspected = await deps.inspectTargets(ownedTargets);
   const recovery = persistentWorkerRecovery(state, topology, workersByHandle, inspected);
   const expectedSlots = (topology.tabs || []).map(t => Number(t.tab_index));
   const missingSlots = expectedSlots.filter(slot => !recovery.bySlot.has(slot));
