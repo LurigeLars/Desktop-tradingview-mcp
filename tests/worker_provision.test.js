@@ -1599,3 +1599,26 @@ test('duplicate cleanup fails closed on wrong target, mismatching studies, or mi
   }), /not uniquely verified safe/, 'unverified remaining worker must block cleanup');
   assert.equal(closes, 0);
 });
+
+
+test('unready external charts are visible in worker dry-run but block mutation', async () => {
+  const store = makeStore();
+  setUniverse({ capacity: 12, reserve_slots: 1,
+    entries: [{ handle: 'macro', symbol: 'ECONOMICS:USCPI', timeframe: '1D' }],
+    _deps: store.deps });
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    listTargets: async () => [{ id: 'unready-personal',
+      type: 'page', url: 'https://www.tradingview.com/chart/personal/' }],
+    inspectTargets: async () => [{ target_id: 'unready-personal',
+      chart_id: 'personal', pane_count: 0, panes: [],
+      pane_count_verified: false }],
+    newTab: async () => { throw new Error('no allocation permitted'); },
+  };
+  const preview = await provisionWorker({ dry_run: true, _deps: runtime });
+  assert.deepEqual(preview.capacity_projection.unknown_external_targets, ['unready-personal']);
+  assert.equal(preview.capacity_projection.external_connections, 8);
+  assert.equal(preview.capacity_projection.over_capacity, false);
+  await assert.rejects(() => provisionWorker({ dry_run: false, _deps: runtime }),
+    /Unverified external chart pane count/);
+});
