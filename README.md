@@ -643,8 +643,12 @@ The shell and renderer inventories are intentionally distinct. When a shell-to-r
 Interactive symbol, timeframe, indicator, pane and raw-evaluation writes refuse registered
 worker chart IDs, including after CDP IDs rotate. Use resident snapshots for shared reads.
 `batch_run` is serialized with worker snapshots and rotations; it remains an interactive
-operation and cannot repurpose worker layouts. The process lock does not coordinate separate
-Node/CLI processes or manual Desktop actions.
+operation and cannot repurpose worker layouts. For multiple local MCP clients, set `TV_MCP_SHARED_HTTP_URL=http://127.0.0.1:8765/mcp`
+in their stdio launch environment. Those clients forward the existing tool schemas and calls
+to the one managed HTTP backend, sharing its lock. They fail closed when it is unavailable
+and never automatically replay a failed mutation. Standalone stdio mode remains available
+when this variable is unset. Manual Desktop actions and standalone CLI/server processes
+still remain outside that lock.
 
 For a known drifted worker, first call `worker_provision` with `repair_slot` and
 `dry_run=true`. Apply with `dry_run=false` and a small `max_panes` budget, repeating until
