@@ -209,6 +209,9 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
     assert.equal(byName.get('news_flow_get').annotations.readOnlyHint, true);
     assert.equal(byName.get('news_flow_get').annotations.openWorldHint, false);
     assert.equal(byName.get('batch_run').annotations.openWorldHint, false);
+    assert.match(byName.get('batch_run').description, /watchlist\/top-50/);
+    assert.match(byName.get('batch_run').description, /explicitly restore/);
+    assert.match(byName.get('batch_run').description, /not full candle history/);
     assert.equal(byName.get('chart_set_symbol').annotations.openWorldHint, false);
     assert.equal(byName.get('pane_set_symbol').annotations.openWorldHint, false);
 

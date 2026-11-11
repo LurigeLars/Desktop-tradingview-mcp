@@ -31,6 +31,13 @@ export const SERVER_INSTRUCTIONS = `TradingView MCP — 94 tools for reading and
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
+Choose the data workflow before adding workers or changing charts:
+- Resident trading checks: realtime_snapshot with exact handles/groups and the required timeframe.
+- Morning context: morning_brief for resident evidence; consider batch_run for missing supported symbol/timeframe coverage.
+- A finite watchlist, top 50 Nasdaq or multi-timeframe comparison: evaluate batch_run FIRST for supported actions before permanent workers, repeated worker rotations, manual symbol loops or a new scanner. Verify the universe/ranking and data needed for the analysis.
+- One nonresident symbol: worker_rotate_snapshot when its returned timeframe/bar/study coverage is sufficient; verify restoration.
+- batch_run changes the attached chart sequentially. Use one verified non-worker research chart, record original state, explicitly restore symbol/timeframe after success or failure, and check every item. It does not automatically restore charts. get_ohlcv returns counts and last_bar, not full candle history or calculated RSI/EMA. Do not claim simultaneous prices or a complete technical screen from that summary alone.
+
 Reading your chart:
 - chart_get_state → get symbol, timeframe, all indicator names + entity IDs (call first)
 - data_get_study_values → get current numeric values from ALL visible indicators (RSI, MACD, BB, EMA, etc.)
@@ -58,7 +65,7 @@ Pine Script development:
 
 Screenshots: capture_screenshot → regions: "full", "chart", "strategy_tester"
 Replay: replay_start → replay_step → replay_trade → replay_status → replay_stop
-Batch: batch_run → run action across multiple symbols/timeframes
+Batch: batch_run → first candidate for finite multi-symbol/timeframe traversals; supported actions: get_ohlcv, screenshot, get_strategy_results. Research chart only; summary output and explicit restoration required.
 Realtime: realtime_snapshot → read all currently resident open chart panes without symbol switching
 Worker: worker_set_universe / worker_status / worker_provision → configure and reconcile logical resident handles/groups without exposing tabs/panes
 Watch manifest: watch_manifest_apply → reconcile canonical market themes plus bounded dynamic trade/WATCH entries into resident worker groups
