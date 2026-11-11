@@ -1,12 +1,12 @@
 /**
  * Core indicator settings logic.
  */
-import { evaluate, safeString } from '../connection.js';
+import { evaluate, evaluatePersonal, safeString } from '../connection.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 
 function _resolve(deps) {
-  return { evaluate: deps?.evaluate || evaluate };
+  return { evaluate: deps?.evaluate || evaluatePersonal };
 }
 const DIALOG = '[data-name="indicators-dialog"]';
 
@@ -109,6 +109,7 @@ export async function searchStudies({ query, limit } = {}) {
  * matching row is added. Verifies a new study landed on the chart.
  */
 export async function addStudyFromSearch({ query, match, section } = {}) {
+  await evaluatePersonal('true');
   if (!query || !String(query).trim()) throw new Error('query is required.');
   const want = String(match || query).trim();
 
@@ -253,7 +254,7 @@ export async function toggleVisibility({ entity_id, visible }) {
   if (!entity_id) throw new Error('entity_id is required. Use chart_get_state to find study IDs.');
   if (typeof visible !== 'boolean') throw new Error('visible must be a boolean (true or false)');
 
-  const result = await evaluate(`
+  const result = await evaluatePersonal(`
     (function() {
       var chart = ${CHART_API};
       var study = chart.getStudyById(${safeString(entity_id)});

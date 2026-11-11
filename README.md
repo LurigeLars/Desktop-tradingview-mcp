@@ -388,6 +388,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 | "Run my morning brief" | `morning_brief` → interpret the returned evidence with configured rules → `session_save` when the brief is complete |
+| "Check a watchlist / top 50 Nasdaq / several timeframes" | Evaluate `batch_run` first for supported actions on one non-worker research chart; verify coverage, explicitly restore chart state, and obtain extra candle/study data when the summary is insufficient |
 | "What did yesterday's brief say?" | `session_get` |
 
 ## Tool Reference (93 MCP tools)
@@ -637,3 +638,32 @@ CDP `target_id` values and Desktop `shell_tab_id` values must be rediscovered af
 
 After restart, always call `tab_list` again. Do not reuse previous session IDs or infer an exact renderer from a duplicate layout name.
 The shell and renderer inventories are intentionally distinct. When a shell-to-renderer pairing cannot be proven, do not infer it; choose the exact target from the fresh renderer inventory before editing.
+
+### Worker drift repair and isolation
+
+Interactive symbol, timeframe, indicator, pane and raw-evaluation writes refuse registered
+worker chart IDs, including after CDP IDs rotate. Use resident snapshots for shared reads.
+`batch_run` is serialized with worker snapshots and rotations; it remains an interactive
+operation and cannot repurpose worker layouts. For multiple local MCP clients, set `TV_MCP_SHARED_HTTP_URL=http://127.0.0.1:8765/mcp`
+in their stdio launch environment. Those clients forward the existing tool schemas and calls
+to the one managed HTTP backend, sharing its lock. They fail closed when it is unavailable
+and never automatically replay a failed mutation. Standalone stdio mode remains available
+when this variable is unset. Manual Desktop actions and standalone CLI/server processes
+still remain outside that lock.
+
+For a known drifted worker, first call `worker_provision` with `repair_slot` and
+`dry_run=true`. Apply with `dry_run=false` and a small `max_panes` budget, repeating until
+`complete=true`, then run `worker_rebind`. Repair requires one unique registered persistent
+layout, the existing pane count and all required study inputs. It backs up the original
+pane/synchronization state locally, disables symbol and interval synchronization and repairs
+only symbol/timeframe mismatches. Completion requires a successful save and validation of
+the saved symbol/timeframe/sync state, so a restart cannot silently restore the old layout.
+Ordinary provisioning also disables synchronization and saves before recording completion.
+Repair preserves indicators, other panes and personal tabs;
+it never creates/closes tabs or changes the universe. A failed repair can leave verified
+partial progress; inspect the backup and retry rather than rebuilding layouts.
+
+Rotation refuses symbol/interval synchronization and verifies the whole worker layout after
+restoration. A successful snapshot measures data availability; realtime entitlement, quote
+age and completed-candle freshness still need independent checks. Worker capacity is a
+configured budget, not the current number of server connections: count external panes too.

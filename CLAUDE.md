@@ -60,7 +60,11 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 6. `replay_stop` → return to realtime
 
 ### "Screen multiple symbols"
-- `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
+- Evaluate `batch_run` FIRST for a finite watchlist, top 50 Nasdaq or multi-timeframe comparison, before adding permanent workers, repeated worker rotations, manual symbol loops or a new scanner. Verify the universe/ranking and required measures.
+- Supported actions: `get_ohlcv`, `screenshot`, `get_strategy_results`. Use explicit symbols/timeframes and bounded chunks; check partial/per-item failures.
+- Use one exact non-worker research chart. Record and explicitly restore its original symbol/timeframe after completion or failure; batch does not automatically restore state. Never repurpose worker or personal charts.
+- Current batch `get_ohlcv` output contains counts and `last_bar`, not the full inspected history or calculated RSI/EMA. Fetch bounded existing candle/study evidence when a measure needs it; do not claim a complete technical screen from the summary alone.
+- Use `realtime_snapshot` for already resident trading checks and `morning_brief` for resident morning context, with batch for supported coverage gaps. One-off analysis does not justify a permanent worker per symbol.
 
 ### "Draw on the chart"
 - `draw_shape` → horizontal_line, trend_line, rectangle, text (pass point + optional point2)

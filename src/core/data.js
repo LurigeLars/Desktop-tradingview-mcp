@@ -1,7 +1,7 @@
 /**
  * Core data access logic.
  */
-import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { evaluate, evaluatePersonalAsync, KNOWN_PATHS, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
 import { matchWatchlistSymbol } from './watchlist.js';
 import { resolveQuoteSourceIdentity, matchesChartSeriesIdentity, requireRequestedQuoteIdentity, matchesRequestedQuoteIdentity } from './quote-identity.js';
@@ -462,7 +462,7 @@ async function _getQuoteInternal({ symbol } = {}) {
     const currentMatch = matchWatchlistSymbol(requested, [originalSymbol]);
     if (!currentMatch.matched) {
       needsRestore = true;
-      await evaluateAsync(`
+      await evaluatePersonalAsync(`
         (function() {
           var chart = ${CHART_API};
           return new Promise(function(resolve) {
@@ -635,7 +635,7 @@ async function _getQuoteInternal({ symbol } = {}) {
   } finally {
     if (needsRestore && originalSymbol) {
       try {
-        await evaluateAsync(`
+        await evaluatePersonalAsync(`
           (function() {
             var chart = ${CHART_API};
             return new Promise(function(resolve) {

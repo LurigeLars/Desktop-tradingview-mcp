@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
+import { withTopologyMutationLock } from '../core/topology-lock.js';
 import {
   getMorningSession,
   runMorningBrief,
@@ -22,7 +23,7 @@ export function registerMorningTools(server) {
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {
-    try { return jsonResult(await runMorningBrief(args)); }
+    try { return jsonResult(await withTopologyMutationLock('morning_brief', () => runMorningBrief(args), { timeoutMs: 60_000 })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

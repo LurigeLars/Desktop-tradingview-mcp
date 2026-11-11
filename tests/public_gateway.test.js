@@ -195,5 +195,8 @@ describe('public gateway configuration', () => {
       ['chart_get_state', 'ui_evaluate', 'tv_update']
     );
     assert.match(response.result.instructions, /TradingView Desktop MCP/);
+    assert.match(response.result.instructions, /evaluate batch_run FIRST/);
+    assert.match(response.result.instructions, /explicitly restore/);
+    assert.match(response.result.instructions, /counts \+ last_bar, not full candles/);
   });
 });
