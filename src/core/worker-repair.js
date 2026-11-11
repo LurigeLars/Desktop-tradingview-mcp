@@ -5,6 +5,7 @@ import { CDP_HOST, CDP_PORT, listTradingViewChartTargets, withTimeout } from '..
 import { status } from './worker.js';
 import { pendingPaneIndexes, readActivePaneStates } from './worker-provision.js';
 import { requiredStudiesPresent } from './realtime.js';
+import { saveWorkerLayout } from './worker-layout.js';
 
 export async function repairWorker({ slot, max_panes = 1, dry_run = true, _deps = {} } = {}) {
   const state = (_deps.status || status)();
@@ -89,8 +90,10 @@ export async function repairWorker({ slot, max_panes = 1, dry_run = true, _deps 
     }
     const remaining = pendingPaneIndexes(entries, after);
     if (selected.some(index => remaining.includes(index))) throw new Error('Worker repair identity/timeframe verification failed');
+    if (!remaining.length) await saveWorkerLayout(client, { chartId: owner.chart_id, entries, panes: after });
     return { ...report, changed: true, configured_panes: selected,
-      pending_panes: remaining, complete: remaining.length === 0, synchronization: { symbol: false, interval: false } };
+      pending_panes: remaining, complete: remaining.length === 0, persisted: remaining.length === 0,
+      synchronization: { symbol: false, interval: false } };
   } finally {
     await withTimeout(client.close(), 1000, 'Worker repair close').catch(() => {});
   }

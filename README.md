@@ -655,7 +655,10 @@ For a known drifted worker, first call `worker_provision` with `repair_slot` and
 `complete=true`, then run `worker_rebind`. Repair requires one unique registered persistent
 layout, the existing pane count and all required study inputs. It backs up the original
 pane/synchronization state locally, disables symbol and interval synchronization and repairs
-only symbol/timeframe mismatches. It preserves indicators, other panes and personal tabs;
+only symbol/timeframe mismatches. Completion requires a successful save and validation of
+the saved symbol/timeframe/sync state, so a restart cannot silently restore the old layout.
+Ordinary provisioning also disables synchronization and saves before recording completion.
+Repair preserves indicators, other panes and personal tabs;
 it never creates/closes tabs or changes the universe. A failed repair can leave verified
 partial progress; inspect the backup and retry rather than rebuilding layouts.
 

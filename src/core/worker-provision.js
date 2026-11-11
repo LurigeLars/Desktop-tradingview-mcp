@@ -14,6 +14,7 @@ import {
 } from './worker.js';
 import { requiredStudiesPresent } from './realtime.js';
 import { matchTradingViewResolvedSymbol } from './watchlist.js';
+import { saveWorkerLayout } from './worker-layout.js';
 
 const PANE_LAYOUT_CODES = Object.freeze({
   1: 's',
@@ -979,6 +980,11 @@ export async function configureTarget({ target, paneCount, entries, maxPanes = 1
     await client.Runtime.enable();
 
     const layoutCode = layoutCodeForPaneCount(paneCount);
+    await evaluateValue(client, `(()=>{
+      const c=window.TradingViewApi._chartWidgetCollection;
+      c.symbolSyncEnabled().setValue(false);c.intervalSyncEnabled().setValue(false);
+      if(c.symbolSyncEnabled().value()||c.intervalSyncEnabled().value()) throw Error('Worker synchronization still active');
+    })()`);
     let live = await readActivePaneStates(client);
 
     // Never reset an already-correct multi-pane layout on every resumable call.
@@ -1019,6 +1025,9 @@ export async function configureTarget({ target, paneCount, entries, maxPanes = 1
 
     const verified = await readActivePaneStates(client);
     const pending = pendingPaneIndexes(entries, verified);
+    const chartId = chartIdFromTarget(target);
+    // Legacy unsaved targets have no persisted layout to verify.
+    if (!pending.length && chartId) await saveWorkerLayout(client, { chartId, entries, panes: verified });
 
     return {
       success: true,

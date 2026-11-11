@@ -36,12 +36,23 @@ function fixture() {
       intervalSyncEnabled: () => ({ value: () => sync.interval,
         setValue: v => { calls.push('intervalSync'); sync.interval = v; } }) };
       const api = { _chartWidgetCollection: collection, layoutId: () => 'owned', chartsCount: () => 2,
+        hasChartChanges: () => ({ value: () => false }),
+        _saveChartService: { _chartSaver: {} },
+        saveChartToServer: done => {
+          api._saveChartService._chartSaver._prevChartState = { content: JSON.stringify({
+            symbolLock: sync.symbol, intervalLock: sync.interval,
+            charts: panes.map(pane => ({ panes: [{ sources: [{ type: 'MainSeries', state: {
+              symbol: pane.resolved_symbol, interval: pane.resolution,
+            } }] }] })),
+          }) };
+          done();
+        },
         chart: index => ({ setSymbol: value => {
           assert.equal(sync.symbol, false); assert.equal(sync.interval, false);
           calls.push('symbol:' + index); panes[index].resolved_symbol = value;
         }, setResolution: value => { calls.push('interval:' + index); panes[index].resolution = value; } }) };
       const value = await runInNewContext(expression, { window: { TradingViewApi: api },
-        setTimeout: resolve => resolve() });
+        setTimeout: (resolve, delay) => delay === 5000 ? 1 : resolve(), clearTimeout: () => {} });
       return { result: { value } };
     } catch (error) { return { exceptionDetails: { exception: { description: error.message } } }; }
   } }, close: async () => { closes++; } };
