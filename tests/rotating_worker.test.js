@@ -59,6 +59,18 @@ test('missing/suspect quote cannot be returned and original is restored',async()
   assert.equal(x.panes[6].resolved_symbol,'NASDAQ:QQQ');
   assert.equal(x.journal,null);
 });
+
+test('rotation refuses to claim restoration if a sibling pane changed during sampling',async()=>{
+  const x=setup(), snapshot=x.deps.snapshot;
+  x.deps.snapshot=async symbol=>{
+    x.panes[0].resolution='1D';
+    return snapshot(symbol);
+  };
+  const result=await rotateWorkerSnapshot({symbol:'NYSE:IBM',_deps:x.deps});
+  assert.equal(result.success,false);
+  assert.equal(result.error_code,'RESTORATION_PENDING');
+  assert.ok(x.journal);
+});
 test('failed restoration leaves durable journal and blocks future rotations',async()=>{
   const x=setup(),original=x.deps.set;
   x.deps.set=async(...a)=>{if(a[2]==='NASDAQ:QQQ')throw Error('blocked restore');return original(...a)};

@@ -1,12 +1,12 @@
 /**
  * Core UI automation logic.
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate, evaluatePersonal, evaluateAsync, getClient } from '../connection.js';
 import * as tabCore from './tab.js';
 
 export async function click({ by, value }) {
   const escaped = JSON.stringify(value);
-  const result = await evaluate(`
+  const result = await evaluatePersonal(`
     (function() {
       var by = ${JSON.stringify(by)};
       var value = ${escaped};
@@ -33,7 +33,7 @@ export async function openPanel({ panel, action }) {
   const isBottomPanel = panel === 'pine-editor' || panel === 'strategy-tester';
   if (isBottomPanel) {
     const widgetName = panel === 'pine-editor' ? 'pine-editor' : 'backtesting';
-    const result = await evaluate(`
+    const result = await evaluatePersonal(`
       (function() {
         var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
         if (!bwb) return { error: 'bottomWidgetBar not available' };
@@ -72,7 +72,7 @@ export async function openPanel({ panel, action }) {
       'trading': { dataNames: ['trading-button'], ariaLabels: ['Trading Panel'] },
     };
     const sel = selectorMap[panel];
-    const result = await evaluate(`
+    const result = await evaluatePersonal(`
       (function() {
         var dataNames = ${JSON.stringify(sel.dataNames)};
         var ariaLabels = ${JSON.stringify(sel.ariaLabels)};
@@ -99,7 +99,7 @@ export async function openPanel({ panel, action }) {
 }
 
 export async function fullscreen() {
-  const result = await evaluate(`
+  const result = await evaluatePersonal(`
     (function() {
       var btn = document.querySelector('[data-name="header-toolbar-fullscreen"]');
       if (!btn) return { found: false };
@@ -171,6 +171,7 @@ export async function layoutSwitch({ name, _deps } = {}) {
 }
 
 export async function keyboard({ key, modifiers }) {
+  await evaluatePersonal('true');
   const c = await getClient();
   let mod = 0;
   if (modifiers) {
@@ -195,6 +196,7 @@ export async function keyboard({ key, modifiers }) {
 }
 
 export async function typeText({ text }) {
+  await evaluatePersonal('true');
   const c = await getClient();
   await c.Input.insertText({ text });
   return { success: true, typed: text.substring(0, 100), length: text.length };
@@ -227,9 +229,10 @@ export async function hover({ by, value }) {
 }
 
 export async function scroll({ direction, amount }) {
+  await evaluatePersonal('true');
   const c = await getClient();
   const px = amount || 300;
-  const center = await evaluate(`
+  const center = await evaluatePersonal(`
     (function() {
       var el = document.querySelector('[data-name="pane-canvas"]') || document.querySelector('[class*="chart-container"]') || document.querySelector('canvas');
       if (!el) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
@@ -245,6 +248,7 @@ export async function scroll({ direction, amount }) {
 }
 
 export async function mouseClick({ x, y, button, double_click, _deps }) {
+  if (!_deps?.client) await evaluatePersonal('true');
   const c = _deps?.client || await getClient();
   const btn = button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left';
   const buttons = btn === 'left' ? 1 : btn === 'right' ? 2 : 4;
@@ -298,6 +302,6 @@ export async function findElement({ query, strategy }) {
 }
 
 export async function uiEvaluate({ expression }) {
-  const result = await evaluate(expression);
+  const result = await evaluatePersonal(expression);
   return { success: true, result };
 }

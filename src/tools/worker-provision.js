@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import { provisionWorker, rebindPersistentWorkers, auditWorkerTargetCandidates, retireNonmatchingWorkerRenderer, retireVerifiedDuplicateWorker, cleanupRetiredWorkerShell } from '../core/worker-provision.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
+import { repairWorker } from '../core/worker-repair.js';
 
 export function registerWorkerProvisionTools(server) {
   server.registerTool('worker_target_audit', {
@@ -48,7 +49,7 @@ export function registerWorkerProvisionTools(server) {
   });
 
   server.registerTool('worker_rebind', {
-    description: 'Verify all five persisted worker layouts by exact chart IDs and live pane signatures, then refresh rotated CDP IDs WITHOUT opening, closing, saving or changing any chart. Dry-run by default.',
+    description: 'Verify all registered persisted worker layouts by exact chart IDs and live pane signatures, then refresh rotated CDP IDs WITHOUT opening, closing, saving or changing any chart. Dry-run by default.',
     inputSchema: {
       dry_run: z.coerce.boolean().optional().describe('Default true. Set false to atomically refresh verified worker target IDs in local state.'),
     },
@@ -65,6 +66,7 @@ export function registerWorkerProvisionTools(server) {
   server.registerTool('worker_provision', {
     description: 'Reconcile logical worker entries into DTV-owned TradingView tabs/panes using bounded resumable phases. A call may open/recover a worker tab or configure a limited number of panes; repeat until complete=true.',
     inputSchema: {
+      repair_slot: z.coerce.number().int().min(0).max(49).optional().describe('Repair only symbol/timeframe drift on one unique existing worker layout; disables symbol/interval sync and preserves indicators. Dry-run unless dry_run=false; never opens/closes tabs or changes registry.'),
       max_tabs: z.coerce.number().int().min(1).max(8).optional().describe('Maximum topology tabs considered in this call (default 1). Incomplete tab work stops the call for remote-safety.'),
       max_panes: z.coerce.number().int().min(1).max(8).optional().describe('Maximum mismatching panes to configure in one call (default 1). Increase only after latency is validated.'),
       dry_run: z.coerce.boolean().optional().describe('Return pending topology without changing TradingView or worker assignments.'),
@@ -82,6 +84,13 @@ export function registerWorkerProvisionTools(server) {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (args) => {
     try {
+      if (args?.repair_slot !== undefined) {
+        if (args.force || args.adopt_single_existing || args.orphan_target_id || args.stale_shell_tab_id)
+          throw new Error('Worker repair cannot be combined with provisioning or cleanup');
+        return jsonResult(await withTopologyMutationLock('worker_repair', () => repairWorker({
+          slot: args.repair_slot, max_panes: args.max_panes, dry_run: args.dry_run !== false,
+        })));
+      }
       if (args?.stale_shell_tab_id) {
         return jsonResult(await withTopologyMutationLock('worker_cleanup_retired_shell', () =>
           cleanupRetiredWorkerShell({

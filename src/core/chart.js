@@ -1,15 +1,15 @@
 /**
  * Core chart control logic.
  */
-import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite } from '../connection.js';
+import { evaluate as _evaluate, evaluateAsync as _evaluateAsync, safeString, requireFinite, evaluatePersonal, evaluatePersonalAsync } from '../connection.js';
 import { waitForChartReady as _waitForChartReady } from '../wait.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 
-function _resolve(deps) {
+function _resolve(deps, mutation = false) {
   return {
-    evaluate: deps?.evaluate || _evaluate,
-    evaluateAsync: deps?.evaluateAsync || _evaluateAsync,
+    evaluate: deps?.evaluate || (mutation ? evaluatePersonal : _evaluate),
+    evaluateAsync: deps?.evaluateAsync || (mutation ? evaluatePersonalAsync : _evaluateAsync),
     waitForChartReady: deps?.waitForChartReady || _waitForChartReady,
   };
 }
@@ -38,7 +38,7 @@ export async function getState({ _deps } = {}) {
 }
 
 export async function setSymbol({ symbol, _deps }) {
-  const { evaluateAsync, waitForChartReady } = _resolve(_deps);
+  const { evaluateAsync, waitForChartReady } = _resolve(_deps, true);
   await evaluateAsync(`
     (function() {
       var chart = ${CHART_API};
@@ -53,7 +53,7 @@ export async function setSymbol({ symbol, _deps }) {
 }
 
 export async function setTimeframe({ timeframe, _deps }) {
-  const { evaluate, waitForChartReady } = _resolve(_deps);
+  const { evaluate, waitForChartReady } = _resolve(_deps, true);
   await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -65,7 +65,7 @@ export async function setTimeframe({ timeframe, _deps }) {
 }
 
 export async function setType({ chart_type, _deps }) {
-  const { evaluate } = _resolve(_deps);
+  const { evaluate } = _resolve(_deps, true);
   const typeMap = {
     'Bars': 0, 'Candles': 1, 'Line': 2, 'Area': 3,
     'Renko': 4, 'Kagi': 5, 'PointAndFigure': 6, 'LineBreak': 7,
@@ -85,7 +85,7 @@ export async function setType({ chart_type, _deps }) {
 }
 
 export async function manageIndicator({ action, indicator, entity_id, inputs: inputsRaw, _deps }) {
-  const { evaluate } = _resolve(_deps);
+  const { evaluate } = _resolve(_deps, true);
   const inputs = inputsRaw ? (typeof inputsRaw === 'string' ? JSON.parse(inputsRaw) : inputsRaw) : undefined;
 
   if (action === 'add') {
@@ -166,7 +166,7 @@ export async function getVisibleRange({ _deps } = {}) {
 }
 
 export async function setVisibleRange({ from, to, _deps }) {
-  const { evaluate } = _resolve(_deps);
+  const { evaluate } = _resolve(_deps, true);
   const f = requireFinite(from, 'from');
   const t = requireFinite(to, 'to');
 
@@ -215,7 +215,7 @@ export async function setVisibleRange({ from, to, _deps }) {
 }
 
 export async function scrollToDate({ date, _deps } = {}) {
-  const { evaluate } = _resolve(_deps);
+  const { evaluate } = _resolve(_deps, true);
   let timestamp;
   if (/^\d+$/.test(date)) timestamp = Number(date);
   else timestamp = Math.floor(new Date(date).getTime() / 1000);

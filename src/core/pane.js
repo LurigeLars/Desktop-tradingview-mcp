@@ -2,7 +2,7 @@
  * Core pane/layout management logic.
  * Controls multi-chart layouts (split panes) in TradingView.
  */
-import { evaluate, evaluateAsync, safeString } from '../connection.js';
+import { evaluate, evaluatePersonal, evaluatePersonalAsync, safeString } from '../connection.js';
 
 const CWC = 'window.TradingViewApi._chartWidgetCollection';
 
@@ -96,7 +96,7 @@ export async function setLayout({ layout }) {
     throw new Error(`Unknown layout "${layout}". Available layouts:\n${available}`);
   }
 
-  await evaluateAsync(`${CWC}.setLayout(${safeString(resolved)})`);
+  await evaluatePersonalAsync(`${CWC}.setLayout(${safeString(resolved)})`);
   await new Promise(r => setTimeout(r, 500));
 
   const state = await list();
@@ -114,7 +114,7 @@ export async function setLayout({ layout }) {
  */
 export async function focus({ index }) {
   const idx = Number(index);
-  const result = await evaluate(`
+  const result = await evaluatePersonal(`
     (function() {
       var cwc = ${CWC};
       var all = cwc.getAll();
@@ -142,7 +142,7 @@ export async function setSymbol({ index, symbol }) {
   await new Promise(r => setTimeout(r, 300));
 
   // Now set symbol on the now-active chart
-  await evaluateAsync(`
+  await evaluatePersonalAsync(`
     (function() {
       var chart = window.TradingViewApi._activeChartWidgetWV.value();
       return new Promise(function(resolve) {

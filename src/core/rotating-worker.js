@@ -145,7 +145,10 @@ async function setPane(chartId, index, symbol, timeframe, paneCount) {
     const expression = `(async function() {
       var cfg=${JSON.stringify({ index, symbol, timeframe, paneCount })};
       var cwc=window.TradingViewApi&&window.TradingViewApi._chartWidgetCollection;
-      var panes=cwc&&cwc.getAll?cwc.getAll():[];
+      if(!cwc||!cwc.symbolSyncEnabled||!cwc.intervalSyncEnabled
+        ||cwc.symbolSyncEnabled().value()!==false||cwc.intervalSyncEnabled().value()!==false)
+        throw new Error('Worker symbol/interval synchronization must be disabled before rotation');
+      var panes=cwc.getAll();
       var count=cwc&&cwc.inlineChartsCount;
       if(count&&typeof count.value==='function') count=count.value();
       if(Number(count)!==cfg.paneCount||panes.length!==cfg.paneCount||!panes[cfg.index]) throw new Error('Worker pane/layout changed');
@@ -216,8 +219,10 @@ export async function recoverRotatingPane({ dry_run = false, _deps } = {}) {
   if (chosen.chart_id !== journal.chart_id || chosen.pane_index !== journal.pane_index
     || chosen.entry.handle !== journal.handle || chosen.entry.symbol !== journal.original.symbol)
     throw new Error('Worker ownership changed; rotation recovery blocked');
-  const now = (await d.read(chosen.chart_id, chosen.pane_index, chosen.pane_count)).pane;
+  const current = await d.read(chosen.chart_id, chosen.pane_index, chosen.pane_count);
+  const now = current.pane;
   if (matchingEntry(chosen.entry, now)) {
+    assertBaseline(state,chosen,current.all);
     if (!dry_run) d.clearJournal();
     return {success:true,pending:true,restored:true,was_already_original:true};
   }
@@ -226,8 +231,9 @@ export async function recoverRotatingPane({ dry_run = false, _deps } = {}) {
   if (dry_run) return {success:true,pending:true,restored:false,can_restore:true};
   await d.set(chosen.chart_id, chosen.pane_index, chosen.entry.symbol, chosen.entry.timeframe, chosen.pane_count);
   await d.wait(chosen.chart_id, chosen.pane_index, chosen.entry.symbol, chosen.entry.timeframe, chosen.pane_count);
-  const restored = (await d.read(chosen.chart_id,chosen.pane_index, chosen.pane_count)).pane;
-  if (!matchingEntry(chosen.entry,restored)) throw new Error('Could not verify original worker restoration');
+  const restored = await d.read(chosen.chart_id,chosen.pane_index, chosen.pane_count);
+  assertBaseline(state,chosen,restored.all);
+  if (!matchingEntry(chosen.entry,restored.pane)) throw new Error('Could not verify original worker restoration');
   d.clearJournal();
   return {success:true,pending:true,restored:true};
 }
@@ -293,8 +299,9 @@ export async function rotateWorkerSnapshot({ symbol, preferred_handle, dry_run =
       await d.set(chosen.chart_id,chosen.pane_index,chosen.entry.symbol,chosen.entry.timeframe,chosen.pane_count);
       await d.wait(chosen.chart_id,chosen.pane_index,chosen.entry.symbol,chosen.entry.timeframe,chosen.pane_count);
     }
-    const final = (await d.read(chosen.chart_id,chosen.pane_index, chosen.pane_count)).pane;
-    if (!matchingEntry(chosen.entry,final)) throw new Error('Original pane restoration unverifiable');
+    const final = await d.read(chosen.chart_id,chosen.pane_index, chosen.pane_count);
+    assertBaseline(state,chosen,final.all);
+    if (!matchingEntry(chosen.entry,final.pane)) throw new Error('Original pane restoration unverifiable');
     d.clearJournal();
   } catch(restore) {
     return {success:false,error_code:'RESTORATION_PENDING',
