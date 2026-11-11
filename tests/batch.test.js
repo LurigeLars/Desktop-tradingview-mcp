@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { batchRun } from '../src/core/batch.js';
+import { getOhlcv } from '../src/core/data.js';
 
 function harness({ stale = false, wrongData = false } = {}) {
   let symbol = 'BATS:MSFT', resolution = '1D';
@@ -11,7 +12,8 @@ function harness({ stale = false, wrongData = false } = {}) {
     getState: async () => ({ symbol, resolution }),
     evaluate: async () => ({ symbol: stale ? 'BATS:OTHER' : symbol, count: 100 }),
     getOhlcv: async ({ count }) => ({
-      success: true, symbol: wrongData ? 'BATS:OTHER' : symbol, resolution,
+      success: true, symbol: wrongData ? 'BATS:OTHER' : symbol,
+      source_symbol: wrongData ? 'BATS:OTHER' : symbol, resolution,
       bars: [{ time: 1793975400, open: 1, high: 2, low: 1, close: 2, volume: 100 }],
       bar_count: 1, total_available: 100, truncated: count > 1,
     }),
@@ -56,5 +58,55 @@ describe('batch OHLCV identity and failure gates', () => {
 
   it('rejects unknown actions instead of reporting success', async () => {
     await assert.rejects(batchRun({ symbols: ['NVDA'], action: 'export_data' }), /Unsupported batch action/);
+  });
+});
+
+
+describe('economic OHLCV fail-closed regressions', () => {
+  const fakeBar = { time: 1793975400, open: 60.9, high: 63.8,
+    low: 60.8, close: 62.88, volume: 9732959 };
+  function fakeOhlcv({ chartSymbol, sourceSymbol }) {
+    return getOhlcv({ count: 1, _deps: {
+      evaluate: async js => {
+        if (js.includes('var more = true')) return { size: 1, more: false };
+        if (js.includes('var result = []')) return {
+          bars: [fakeBar], total_bars: 1, symbol: chartSymbol,
+          source_symbol: sourceSymbol, resolution: '1D', source: 'direct_bars',
+        };
+        throw new Error('Unexpected script in OHLCV mock');
+      },
+      delay: async () => {},
+    } });
+  }
+  it('rejects Fiserv bars mislabelled as CPI', async () => {
+    await assert.rejects(
+      fakeOhlcv({ chartSymbol: 'ECONOMICS:USCPI', sourceSymbol: 'BATS:FISV' }),
+      /OHLCV_SOURCE_MISMATCH/
+    );
+  });
+  it('accepts actual economic series with source identity and bar-date semantics', async () => {
+    const data = await fakeOhlcv({
+      chartSymbol: 'ECONOMICS:USCPI', sourceSymbol: 'ECONOMICS:USCPI',
+    });
+    assert.equal(data.source_symbol_verified, true);
+    assert.equal(data.observation_time_semantics, 'chart_bar_time_not_release_time');
+    assert.equal(data.observation_time, fakeBar.time);
+  });
+  it('rejects mixed source during a batch even when chart state looks ready', async () => {
+    const { deps } = harness();
+    deps.getOhlcv = async () => ({
+      success: true, symbol: 'ECONOMICS:USCPI', source_symbol: 'BATS:FISV',
+      resolution: '1D', bars: [fakeBar],
+    });
+    deps.setSymbol = async () => {};
+    deps.getState = async () => ({ symbol: 'ECONOMICS:USCPI', resolution: '1D' });
+    deps.evaluate = async () => ({ symbol: 'ECONOMICS:USCPI', count: 3 });
+    const result = await batchRun({
+      symbols: ['ECONOMICS:USCPI'], timeframes: ['1D'], action: 'get_ohlcv',
+      delay_ms: 0, _deps: deps,
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.failed, 1);
+    assert.match(result.results[0].error, /identity mismatch/);
   });
 });

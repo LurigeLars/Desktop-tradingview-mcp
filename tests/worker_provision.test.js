@@ -1269,13 +1269,17 @@ test('worker_rebind refreshes only live verified persistent CDP IDs, preserving 
       {type:'page',id:'new-CDP',url:'https://www.tradingview.com/chart/stable-chart/'},
       {type:'page',id:'personal',url:'https://www.tradingview.com/chart/default/'},
     ],
-    inspectTargets:async()=>[
+    inspectTargets:async targets=>{
+      assert.deepEqual(targets.map(t => t.id), ['new-CDP'],
+        'rebind must never inspect unrelated personal charts');
+      return [
       {target_id:'new-CDP',chart_id:'stable-chart',pane_count:2,panes:[
         {resolved_symbol:'EX:AAA',resolution:'5',studies:[]},
         {resolved_symbol:'EX:BBB',resolution:'5',studies:[]},
       ]},
       {target_id:'personal',chart_id:'default',pane_count:1,panes:[]},
-    ],
+    ];
+    },
   };
   const preview=await rebindPersistentWorkers({dry_run:true,_deps:runtime});
   assert.equal(preview.success,true);
@@ -1594,4 +1598,27 @@ test('duplicate cleanup fails closed on wrong target, mismatching studies, or mi
     slot: 0, target_id: 'b', dry_run: false, _deps: deps,
   }), /not uniquely verified safe/, 'unverified remaining worker must block cleanup');
   assert.equal(closes, 0);
+});
+
+
+test('unready external charts are visible in worker dry-run but block mutation', async () => {
+  const store = makeStore();
+  setUniverse({ capacity: 12, reserve_slots: 1,
+    entries: [{ handle: 'macro', symbol: 'ECONOMICS:USCPI', timeframe: '1D' }],
+    _deps: store.deps });
+  const runtime = {
+    status: () => status({ _deps: store.deps }),
+    listTargets: async () => [{ id: 'unready-personal',
+      type: 'page', url: 'https://www.tradingview.com/chart/personal/' }],
+    inspectTargets: async () => [{ target_id: 'unready-personal',
+      chart_id: 'personal', pane_count: 0, panes: [],
+      pane_count_verified: false }],
+    newTab: async () => { throw new Error('no allocation permitted'); },
+  };
+  const preview = await provisionWorker({ dry_run: true, _deps: runtime });
+  assert.deepEqual(preview.capacity_projection.unknown_external_targets, ['unready-personal']);
+  assert.equal(preview.capacity_projection.external_connections, 8);
+  assert.equal(preview.capacity_projection.over_capacity, false);
+  await assert.rejects(() => provisionWorker({ dry_run: false, _deps: runtime }),
+    /Unverified external chart pane count/);
 });
