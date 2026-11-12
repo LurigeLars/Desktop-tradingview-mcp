@@ -388,7 +388,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 | "Run my morning brief" | `morning_brief` → interpret the returned evidence with configured rules → `session_save` when the brief is complete |
-| "Check a watchlist / top 50 Nasdaq / several timeframes" | Evaluate `batch_run` first for supported actions on one non-worker research chart; verify coverage, explicitly restore chart state, and obtain extra candle/study data when the summary is insufficient |
+| "Check a watchlist / top 50 Nasdaq / several timeframes" | Choose or combine suitable resident reads, `batch_run` on a non-worker research chart, temporary sampling or other bounded reads; verify coverage, explicitly restore chart state, and obtain extra candle/study data when the summary is insufficient |
 | "What did yesterday's brief say?" | `session_get` |
 
 ## Tool Reference (93 MCP tools)

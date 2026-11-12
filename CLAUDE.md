@@ -60,7 +60,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 6. `replay_stop` → return to realtime
 
 ### "Screen multiple symbols"
-- Evaluate `batch_run` FIRST for a finite watchlist, top 50 Nasdaq or multi-timeframe comparison, before adding permanent workers, repeated worker rotations, manual symbol loops or a new scanner. Verify the universe/ranking and required measures.
+- Choose or combine tools according to required evidence, freshness, history/studies, coverage, latency, payload size and chart impact; no mandatory tool order. `batch_run` is an option for finite watchlist/top-50 and multi-timeframe work when its supported actions fit. Verify the universe/ranking and required measures.
 - Supported actions: `get_ohlcv`, `screenshot`, `get_strategy_results`. Use explicit symbols/timeframes and bounded chunks; check partial/per-item failures.
 - Use one exact non-worker research chart. Record and explicitly restore its original symbol/timeframe after completion or failure; batch does not automatically restore state. Never repurpose worker or personal charts.
 - Current batch `get_ohlcv` output contains counts and `last_bar`, not the full inspected history or calculated RSI/EMA. Fetch bounded existing candle/study evidence when a measure needs it; do not claim a complete technical screen from the summary alone.
