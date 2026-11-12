@@ -4,7 +4,7 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/batch.js';
 
 export function registerBatchTools(server) {
-  server.tool('batch_run', 'First candidate for finite watchlist/top-50 or multi-timeframe scans using supported actions. Sequentially changes the attached research chart; never use worker/personal charts. Record and explicitly restore original symbol/timeframe after success or failure. get_ohlcv returns counts and last_bar, not full candle history or indicator calculations. Check per-item failures and coverage.', {
+  server.tool('batch_run', 'Sequential supported actions for finite watchlist/top-50 and multi-timeframe work. Choose when its data and mutation contract fit the task. Sequentially changes the attached research chart; never use worker/personal charts. Record and explicitly restore original symbol/timeframe after success or failure. get_ohlcv returns counts and last_bar, not full candle history or indicator calculations. Check per-item failures and coverage.', {
     symbols: z.array(z.string()).describe('Array of symbols to iterate (e.g., ["BTCUSD", "ETHUSD", "AAPL"])'),
     timeframes: z.array(z.string()).optional().describe('Array of timeframes (e.g., ["D", "60", "15"])'),
     action: z.string().describe('Supported actions: screenshot, get_ohlcv (counts + last_bar only), get_strategy_results'),
