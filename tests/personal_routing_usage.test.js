@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {planPersonalLayoutOpen} from '../src/core/personal-routing.js';
 import {recordWorkerUsage,workerUsageReport,usageFromSnapshot} from '../src/core/worker-usage.js';
 
-test('personal chart reuse never opens duplicate and refuses worker/ambiguity',()=>{
+test('personal chart reuse never opens duplicate, reuses the first of duplicates and refuses workers',()=>{
  const mk=(id,chart_id)=>({id,chart_id,is_chart:true});
  const worker={worker_tabs:[{chart_id:'worker',target_id:'worker-id'}]};
  const tabState={tabs:[mk('personal1','stocks'),mk('worker-id','worker')]};
@@ -14,11 +14,11 @@ test('personal chart reuse never opens duplicate and refuses worker/ambiguity',(
  assert.deepEqual(planPersonalLayoutOpen({chartId:'unknown',tabState,workerState:worker}),
    {action:'open',matched_count:0});
  assert.throws(()=>planPersonalLayoutOpen({chartId:'worker',tabState,workerState:worker}),/protected worker/);
- assert.throws(()=>planPersonalLayoutOpen({
+ assert.deepEqual(planPersonalLayoutOpen({
    chartId:'stocks',
    tabState:{tabs:[mk('personal1','stocks'),mk('personal2','stocks')]},
    workerState:worker,
- }),/Multiple personal tabs/);
+ }),{action:'reuse',target_id:'personal1',matched_count:2});
 });
 
 test('usage counts only actual matching live worker panes and has no price data',()=>{

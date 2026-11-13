@@ -114,6 +114,13 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `data_get_ohlcv` (100 bars) | ~8 KB |
 | `capture_screenshot` | ~300 bytes (returns file path, not image data) |
 
+## Safety Model
+
+- **Protected:** only the resident worker layouts (`DTV Market 01–05`, `DTV Worker 06`). Consumers such as TradeAlert read them continuously. Don't change or close them by hand; a duplicate worker instance is removed with `worker_target_audit` → `worker_retire_nonmatching` → `worker_cleanup_retired_shell`.
+- **Disposable:** personal/test charts, the Pine editor buffer and drawings on non-worker charts. Only AI uses them, layouts are saved and unsaved changes never persist. `tab_close` discards unsaved changes by default.
+- Don't add new guards for disposable state; a guard is justified only where a mistake breaks a worker or returns wrong market data.
+- `npm test` is the offline unit suite. `npm run test:e2e` is live and manages its own disposable chart tab.
+
 ## Tool Conventions
 
 - All tools return `{ success: true/false, ... }`

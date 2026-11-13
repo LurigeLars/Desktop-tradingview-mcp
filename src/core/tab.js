@@ -244,6 +244,16 @@ export async function switchShellTab({ shell_tab_id, expected_layout_name, _deps
 const pendingUnsavedClose = new Map();
 const UNSAVED_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
 
+/** True for a shell tab showing a DTV worker layout, by React name or by visible label ("… / DTV Market 01"). */
+export function isWorkerShellTab(tab, protectedNames = []) {
+  const names = new Set(protectedNames.map(x => String(x || '').trim()).filter(Boolean));
+  const name = String(tab?.layout_name || '').trim();
+  const label = String(tab?.label || '').replace(/\s+/g, ' ').trim();
+  return names.has(name) || /^DTV (?:Market|Worker)\b/i.test(name) ||
+    [...names].some(n => label.endsWith(' ' + n) || label.endsWith('/' + n)) ||
+    /\/\s*DTV (?:Market|Worker)\b/i.test(label);
+}
+
 export async function closeShellTabById({
   shell_tab_id, expected_layout_name, protected_layout_names = [],
   discard_unsaved_changes = false, _deps,
@@ -254,9 +264,8 @@ export async function closeShellTabById({
   const tabs = await listShellTabs({ _deps: {withShell:shell} });
   if (tabs.length <= 1) throw new Error('Cannot close the last Desktop tab.');
   const tab = requireShellTab(tabs, shell_tab_id, expected_layout_name);
-  if (!tab.layout_name) throw new Error('Layout identity missing; refusing shell-only close.');
-  const owned = new Set(protected_layout_names.map(x => String(x || '').trim()));
-  if (owned.has(tab.layout_name) || /^DTV (?:Market|Worker)\b/i.test(tab.layout_name)) {
+  // Only worker layouts are protected; personal/test tabs need no layout name to be closed.
+  if (isWorkerShellTab(tab, protected_layout_names)) {
     throw new Error('Refusing to close a DTV worker-owned layout.');
   }
   return shell(async evalIn => {
@@ -270,11 +279,9 @@ export async function closeShellTabById({
     const fresh = await evalIn("(function(){const tab=document.getElementById("+id+");" +
       "if(!tab||!tab.matches('.tabs-container .tab'))return null;" +
       "return {name:("+readName+")(),label:String(tab.textContent||'').replace(/\\s+/g,' ').trim()};})()");
-    if (!fresh || !(fresh.name === tab.layout_name ||
-      (fresh.name === null &&
-        (fresh.label.endsWith(' ' + tab.layout_name) ||
-          (tab.layout_name === 'New tab' && fresh.label === 'New tab'))))) {
-      throw new Error('Shell layout identity changed before close.');
+    if (!fresh) throw new Error('Shell tab is gone; refresh tab_list.');
+    if (isWorkerShellTab({layout_name: fresh.name, label: fresh.label}, protected_layout_names)) {
+      throw new Error('Refusing to close a DTV worker-owned layout.');
     }
     await selectShellTab(evalIn, tab.shell_tab_id, wait);
     const snapshot=_deps?.closeTargetSnapshot
@@ -1725,7 +1732,7 @@ async function selectShellTab(evalIn, id, wait) {
 async function closeShellTarget(target, deps = {}) {
   // Electron visibility is unreliable for background renderers; map identity before clicking.
   const id = await resolveShellTabId(target, deps);
-  if (!id) throw new Error('Exact Desktop tab identity unavailable; refusing renderer-only close.');
+  if (!id) throw new Error('This target cannot be mapped to one Desktop tab (duplicate layout?); call tab_close with shell_tab_id from tab_list instead.');
   const shell = deps.withShell || withShell;
   const wait = deps.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
   return shell(async evalIn => {
@@ -1782,7 +1789,8 @@ export async function closeTabByTargetId({ target_id, _deps } = {}) {
   do {
     const remaining = await listTargets();
     if (!remaining.some(item => String(item.id) === targetId)) {
-      try { await getClient(); } catch { /* next tool call will reconnect */ }
+      // Injected deps mean a unit test: never open a real CDP connection to a running Desktop.
+      if (!_deps) try { await getClient(); } catch { /* next tool call will reconnect */ }
       return {
         success: true,
         action: 'tab_closed',

@@ -569,9 +569,11 @@ The key flag: `--remote-debugging-port=9222`
 ## Testing
 
 ```bash
-# Requires TradingView running with --remote-debugging-port=9222
-npm test
+npm test          # offline unit suite (same as CI's test:unit); no TradingView needed
+npm run test:e2e  # live: requires TradingView running with --remote-debugging-port=9222
 ```
+
+`test:e2e` drives a real chart. It opens its own disposable chart tab, refuses DTV worker layouts, restores the Pine editor buffer and closes the tab afterwards. Set `TV_E2E_TARGET=<CDP target id>` to use a specific non-worker chart instead.
 
 The test suite covers Pine Script analysis/compilation, CLI routing, HTTP transport and session pressure, public-gateway behavior, realtime reads, tab/worker reconciliation, and related regression cases.
 

@@ -2,7 +2,10 @@
  * Comprehensive E2E tests for all 70 TradingView MCP tools.
  * Requires TradingView Desktop running with --remote-debugging-port=9222
  *
- * Run: node --test tests/e2e.test.js
+ * Run: npm run test:e2e   (not part of `npm test`)
+ * It opens its own disposable chart tab, never runs on a DTV worker layout,
+ * restores the Pine editor buffer and closes the tab afterwards.
+ * Set TV_E2E_TARGET=<CDP target id> to run against a specific non-worker chart instead.
  *
  * Coverage: 70+ tests across 12 tool modules
  * - Health & Connection (4 tools)
@@ -24,6 +27,10 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import CDP from 'chrome-remote-interface';
+import { newTab, listShellTabs, closeShellTabById } from '../src/core/tab.js';
+import { isWorkerOwnedTab, status as workerStatus } from '../src/core/worker.js';
+
+let createdShellTabId = null;
 
 let client;
 let Runtime;
@@ -73,9 +80,19 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
 
   before(async () => {
     try {
+      let targetId = process.env.TV_E2E_TARGET;
+      if (!targetId) {
+        // Never test on whichever chart happens to be first: open a disposable tab.
+        targetId = (await newTab({ symbol: 'AMEX:SPY', as_chart: true })).target_id;
+        createdShellTabId = (await listShellTabs()).find(t => t.active)?.shell_tab_id || null;
+      }
       const targets = await CDP.List({ host: 'localhost', port: 9222 });
-      const chartTarget = targets.find(t => t.url && t.url.includes('tradingview.com/chart'));
-      if (!chartTarget) throw new Error('No TradingView chart target found');
+      const chartTarget = targets.find(t => t.id === targetId && t.url && t.url.includes('tradingview.com/chart'));
+      if (!chartTarget) throw new Error('E2E chart target not found: ' + targetId);
+      const chart_id = chartTarget.url.match(/\/chart\/([^/?]+)/)?.[1];
+      if (isWorkerOwnedTab({ id: chartTarget.id, chart_id }, workerStatus())) {
+        throw new Error('Refusing to run e2e on a DTV worker layout');
+      }
 
       client = await CDP({ host: 'localhost', port: 9222, target: chartTarget.id });
       await client.Runtime.enable();
@@ -85,13 +102,17 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       Input = client.Input;
       Page = client.Page;
     } catch (err) {
-      console.error('Cannot connect to TradingView. Make sure it is running with --remote-debugging-port=9222');
+      console.error('E2E setup failed (TradingView must run with --remote-debugging-port=9222): ' + err.message);
       process.exit(1);
     }
   });
 
   after(async () => {
     if (client) try { await client.close(); } catch {}
+    if (createdShellTabId) {
+      try { await closeShellTabById({ shell_tab_id: createdShellTabId, discard_unsaved_changes: true }); }
+      catch (err) { console.error('Could not close the e2e test tab; close it with tab_close: ' + err.message); }
+    }
   });
 
   // ─── 1. HEALTH & CONNECTION (4 tools) ─────────────────────────────────
@@ -666,6 +687,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
 
   describe('Pine Script', () => {
     let editorWasOpen = false;
+    let originalPineSource = null;
 
     before(async () => {
       // Check if editor is already open
@@ -674,6 +696,10 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
 
     after(async () => {
       // Restore editor state
+      if (originalPineSource !== null) {
+        // The original stays in the page (window.__e2eOriginalPine); never splice it into evaluated code.
+        await evaluate(`(function(){ var m = ${FIND_MONACO}; if (m && typeof window.__e2eOriginalPine === 'string') m.editor.setValue(window.__e2eOriginalPine); delete window.__e2eOriginalPine; })()`);
+      }
       if (!editorWasOpen) {
         await evaluate(`try { ${CLOSE_BOTTOM('pine-editor')} } catch(e) {}`);
         await sleep(300);
@@ -747,6 +773,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       const ready = await ensureEditor();
       if (!ready) return;
       const testCode = '//@version=6\nindicator("E2E Test", overlay=true)\nplot(close)';
+      originalPineSource = await evaluate(`(function(){ var m = ${FIND_MONACO}; if (!m) return null; window.__e2eOriginalPine = m.editor.getValue(); return window.__e2eOriginalPine; })()`);
       const set = await evaluate(`
         (function() {
           var m = ${FIND_MONACO};
@@ -828,13 +855,11 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       assert.ok(typeof entries === 'number', 'Console row count returned');
     });
 
-    it('pine_save — Ctrl+S dispatch', async () => {
+    it('pine_save — key dispatch is available (no real Ctrl+S)', async () => {
       const ready = await ensureEditor();
       if (!ready) return;
-      // Just verify key dispatch doesn't throw
-      await Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
-      await Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
-      await sleep(300);
+      // A real Ctrl+S would save the test stub over a cloud Pine script or save the layout.
+      assert.equal(typeof Input.dispatchKeyEvent, 'function');
     });
 
     it('pine_new — find "New" menu items', async () => {

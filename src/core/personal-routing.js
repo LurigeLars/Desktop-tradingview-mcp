@@ -8,10 +8,8 @@ export function planPersonalLayoutOpen({chartId,tabState,workerState,forceNew=fa
   if(workerRegistered||matched.some(t=>workerTargetIds.has(String(t.id)))) {
     throw new Error('Cannot open or reuse a protected worker layout using interactive tab_new.');
   }
-  if(!forceNew&&matched.length>1) {
-    throw new Error('Multiple personal tabs for this saved layout already exist; tab_attach by exact target_id and close duplicates explicitly.');
-  }
-  return !forceNew&&matched.length===1
-    ? {action:'reuse',target_id:matched[0].id,matched_count:1}
+  // Duplicate personal tabs are interchangeable copies of one saved layout: reuse the first.
+  return !forceNew&&matched.length
+    ? {action:'reuse',target_id:matched[0].id,matched_count:matched.length}
     : {action:'open',matched_count:matched.length};
 }

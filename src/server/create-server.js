@@ -29,6 +29,11 @@ export const SERVER_INFO = {
 
 export const SERVER_INSTRUCTIONS = `TradingView MCP — 94 tools for reading and controlling live TradingView Desktop charts.
 
+SAFETY MODEL — what needs protection and what does not:
+- Protected: the resident worker layouts ("DTV Market 01–05", "DTV Worker 06"). TradeAlert and other consumers read them continuously. Never change symbols/studies there or close them by hand; worker tools own them. A duplicate instance of a worker layout is closed with worker_target_audit → worker_retire_nonmatching → worker_cleanup_retired_shell, which keep the registered instance alive.
+- Not protected: personal and test charts, the Pine editor buffer and drawings on non-worker charts. Only AI uses them; every layout is saved and unsaved changes never persist (a reopen or Desktop restart restores the saved state). Open, change, discard and close them freely; tab_close discards unsaved changes by default and accepts any non-worker shell_tab_id from tab_list.
+- For experiments open a disposable chart (tab_new with symbol + as_chart) instead of reusing a chart someone may be reading.
+
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
 Choose or combine tools to fit the task; no mandatory tool order. Weigh required evidence, freshness, history/studies, coverage, latency, payload size and impact on shared charts:
@@ -75,7 +80,7 @@ Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
 Alerts: alert_create, alert_list, alert_delete
 Lifecycle: tv_health_check → tv_launch when needed → tv_close when finished. tv_close exits the entire verified MCP-managed TradingView Desktop application, including after an MCP-server restart.
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
-Tabs: tab_list → inspect open tabs; tab_new → open additional tabs; tab_switch → select a tab; tab_close → close only the active tab while keeping TradingView Desktop running.
+Tabs: tab_list → inspect open tabs; tab_new → open additional tabs; tab_switch → select a tab; tab_close(shell_tab_id) → close any non-worker tab while keeping TradingView Desktop running.
 
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
