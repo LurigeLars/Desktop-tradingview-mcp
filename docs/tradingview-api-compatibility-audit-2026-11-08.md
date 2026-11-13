@@ -175,3 +175,14 @@ The 523-method inventory is now fully status-classified, but **428 remain presen
 - Reproduced `_openRestoreLayoutPaywall` arrow closure with an isolated layout count and fake paywall/analytics services. Verified `restoreLayout` tracking and forwarded paywall limit; no actual paywall was opened.
 - CDP mock runner now contains **21 assertions** including these six new contracts and a source-level replay callback-order regression guard. The replay watcher remains **partial** because its loaded-widget path can throw a temporal-dead-zone error.
 - Remaining 17: 13 direct `Wt()` failures, `chart.setVisibleRange` throwing `Not implemented`, `chart.exportData` rejecting `Data export is not supported`, one chart-widget constructor fixture, and one partial replay watcher. The 15 direct stubs cannot be made functional by simply changing MCP test fixtures.
+
+## Desktop 3.5 drift check — 2026-11-13
+
+TradingView Desktop `3.5.0.8375`, personal non-worker chart, read-only probes plus `scripts/audit-live-api.mjs`.
+
+- **Method inventory unchanged.** chart 166, TradingViewApi 173, collection 185 methods. The only difference from 2026-11-08 is one new private collection method, `_discardLinesBeingCreated`. No public method was removed or renamed.
+- **Replay is lazy.** `TradingViewApi._replayApi` is `null` until the async `TradingViewApi.replayApi()` has loaded the replay controller; loading starts no replay. All 19 methods DTV calls (`isReplayAvailable`, `selectDate`, `doStep`, `buy`, `goToRealtime` etc.) exist on the loaded object. Fix: `getReplayApi()` calls `replayApi()` first; `tv_ui_state` uses `chart.replayStatus()` (0 = off) when the controller is not loaded.
+- **`createShape` is async.** It now delegates to `async _createMultipointShape` and returns a Promise. DTV's drawing tools already await it; only the e2e test did not.
+- **`bottomWidgetBar`.** It exists, but `activateScriptEditorTab` and `hideWidget` are gone. `showWidget`, `close`, `activateWidget` and `toggleWidget` remain. The dead fallback branches were removed. On a freshly opened tab `window.TradingView.bottomWidgetBar` is briefly `null`, so the e2e test waits for it.
+- **Removed from `tv_discover`.** `window.ChartApiInstance` no longer exists. `TradingViewApi._alertService` is `null`; `alertService()` only returns that field, and no DTV tool uses it.
+- **`tv_launch` path.** Production resolves the Windows Store install (`Get-AppxPackage`). The e2e check tested macOS paths only; it now calls the same `resolveTradingViewPath()`.

@@ -37,9 +37,8 @@ const KNOWN_PATHS = {
   chartApi: 'window.TradingViewApi._activeChartWidgetWV.value()',
   chartWidgetCollection: 'window.TradingViewApi._chartWidgetCollection',
   bottomWidgetBar: 'window.TradingView.bottomWidgetBar',
+  // Lazily created: null until TradingViewApi.replayApi() has loaded the replay controller (Desktop 3.5).
   replayApi: 'window.TradingViewApi._replayApi',
-  alertService: 'window.TradingViewApi._alertService',
-  chartApiInstance: 'window.ChartApiInstance',
   mainSeriesBars: 'window.TradingViewApi._activeChartWidgetWV.value()._chartWidget.model().mainSeries().bars()',
   strategyStudy: 'chart._chartWidget.model().model().dataSources()',
   layoutManager: 'window.TradingViewApi.getSavedCharts',
@@ -252,5 +251,9 @@ async function verifyAndReturn(path, name) {
 export async function getChartApi() { return verifyAndReturn(KNOWN_PATHS.chartApi, 'Chart API'); }
 export async function getChartCollection() { return verifyAndReturn(KNOWN_PATHS.chartWidgetCollection, 'Chart Widget Collection'); }
 export async function getBottomBar() { return verifyAndReturn(KNOWN_PATHS.bottomWidgetBar, 'Bottom Widget Bar'); }
-export async function getReplayApi() { return verifyAndReturn(KNOWN_PATHS.replayApi, 'Replay API'); }
+export async function getReplayApi() {
+  // Loads the replay controller (no replay is started); _replayApi stays null until this has run once.
+  await evaluate('window.TradingViewApi.replayApi().then(function() { return true; })', { awaitPromise: true });
+  return verifyAndReturn(KNOWN_PATHS.replayApi, 'Replay API');
+}
 export async function getMainSeriesBars() { return verifyAndReturn(KNOWN_PATHS.mainSeriesBars, 'Main Series Bars'); }

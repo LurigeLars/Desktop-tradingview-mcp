@@ -101,25 +101,16 @@ export async function discover() {
         results.chartWidgetCollection = { available: !!col, path: 'window.TradingViewApi._chartWidgetCollection', methodCount: colMethods.length, methods: colMethods.slice(0, 30) };
       } catch(e) { results.chartWidgetCollection = { available: false, error: e.message }; }
       try {
-        var ws = window.ChartApiInstance;
-        var wsMethods = [];
-        for (var k in ws) { if (typeof ws[k] === 'function') wsMethods.push(k); }
-        results.chartApiInstance = { available: !!ws, path: 'window.ChartApiInstance', methodCount: wsMethods.length, methods: wsMethods.slice(0, 30) };
-      } catch(e) { results.chartApiInstance = { available: false, error: e.message }; }
-      try {
         var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
         var bwbMethods = [];
         if (bwb) { for (var k in bwb) { if (typeof bwb[k] === 'function') bwbMethods.push(k); } }
         results.bottomWidgetBar = { available: !!bwb, path: 'window.TradingView.bottomWidgetBar', methodCount: bwbMethods.length, methods: bwbMethods.slice(0, 20) };
       } catch(e) { results.bottomWidgetBar = { available: false, error: e.message }; }
       try {
-        var replay = window.TradingViewApi._replayApi;
-        results.replayApi = { available: !!replay, path: 'window.TradingViewApi._replayApi' };
+        // Lazy since Desktop 3.5: replayApi() loads the controller; _replayApi is null until then.
+        results.replayApi = { available: typeof window.TradingViewApi.replayApi === 'function',
+          loaded: !!window.TradingViewApi._replayApi, path: 'window.TradingViewApi.replayApi()' };
       } catch(e) { results.replayApi = { available: false, error: e.message }; }
-      try {
-        var alerts = window.TradingViewApi._alertService;
-        results.alertService = { available: !!alerts, path: 'window.TradingViewApi._alertService' };
-      } catch(e) { results.alertService = { available: false, error: e.message }; }
       return results;
     })()
   `);
@@ -192,7 +183,11 @@ export async function uiState() {
       try {
         var replay = window.TradingViewApi._replayApi;
         function unwrap(v) { return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; }
-        ui.replay = { available: unwrap(replay.isReplayAvailable()), started: unwrap(replay.isReplayStarted()) };
+        // The replay controller is lazy since Desktop 3.5; chart.replayStatus() (0 = off) works without it.
+        var status = unwrap(window.TradingViewApi._activeChartWidgetWV.value().replayStatus());
+        ui.replay = replay
+          ? { loaded: true, available: unwrap(replay.isReplayAvailable()), started: unwrap(replay.isReplayStarted()), status: status }
+          : { loaded: false, started: status !== 0, status: status };
       } catch(e) { ui.replay = { error: e.message }; }
       return ui;
     })()
@@ -301,16 +296,8 @@ function _copyMsixPackageLocal(tvPath, { cpSync, rmSync, readdirSync, existsSync
   return dstExe;
 }
 
-export async function launch({ port, kill_existing, _deps } = {}) {
-  const deps = _resolveLaunchDeps(_deps);
-  const cdpPort = Number(port ?? CDP_PORT);
-  if (!Number.isInteger(cdpPort) || cdpPort < 1024 || cdpPort > 65535) {
-    throw new Error('CDP port must be an integer from 1024 to 65535');
-  }
-  const killFirst = kill_existing !== false;
-  const platform = deps.platform;
-
-  const userHome = deps.homeDir();
+/** Candidate install paths per platform (Windows Store installs are resolved separately). */
+function tradingViewPathCandidates(platform, userHome) {
   const pathMap = {
     darwin: [
       '/Applications/TradingView.app/Contents/MacOS/TradingView',
@@ -329,13 +316,17 @@ export async function launch({ port, kill_existing, _deps } = {}) {
       '/snap/tradingview/current/tradingview',
     ],
   };
+  return pathMap[platform] || pathMap.linux;
+}
 
+/** Locate the TradingView Desktop executable, or null. Shared by tv_launch and the e2e test. */
+export function resolveTradingViewPath(_deps) {
+  const deps = _resolveLaunchDeps(_deps);
+  const platform = deps.platform;
   let tvPath = null;
-  const candidates = pathMap[platform] || pathMap.linux;
-  for (const p of candidates) {
+  for (const p of tradingViewPathCandidates(platform, deps.homeDir())) {
     if (p && deps.existsSync(p)) { tvPath = p; break; }
   }
-
   if (!tvPath && platform === 'win32') {
     // MSIX/Windows Store install — resolve the package via a fixed command and
     // accept only the expected TradingView.exe child of the returned package root.
@@ -355,7 +346,21 @@ export async function launch({ port, kill_existing, _deps } = {}) {
     } catch { /* ignore */ }
   }
 
+  return tvPath;
+}
+
+export async function launch({ port, kill_existing, _deps } = {}) {
+  const deps = _resolveLaunchDeps(_deps);
+  const cdpPort = Number(port ?? CDP_PORT);
+  if (!Number.isInteger(cdpPort) || cdpPort < 1024 || cdpPort > 65535) {
+    throw new Error('CDP port must be an integer from 1024 to 65535');
+  }
+  const killFirst = kill_existing !== false;
+  const platform = deps.platform;
+
+  let tvPath = resolveTradingViewPath(_deps);
   if (!tvPath) {
+    const candidates = tradingViewPathCandidates(platform, deps.homeDir());
     throw new Error(`TradingView not found on ${platform}. Searched: ${candidates.join(', ')}. Launch manually with: /path/to/TradingView --remote-debugging-port=${cdpPort}`);
   }
 

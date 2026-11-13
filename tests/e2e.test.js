@@ -24,11 +24,10 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import os from 'node:os';
-import path from 'node:path';
 import CDP from 'chrome-remote-interface';
 import { newTab, listShellTabs, closeShellTabById } from '../src/core/tab.js';
 import { isWorkerOwnedTab, status as workerStatus } from '../src/core/worker.js';
+import { resolveTradingViewPath } from '../src/core/health.js';
 
 let createdShellTabId = null;
 
@@ -101,6 +100,8 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       Runtime = client.Runtime;
       Input = client.Input;
       Page = client.Page;
+      // A freshly opened tab needs a moment before its UI singletons (bottomWidgetBar) exist.
+      for (let i = 0; i < 40 && !(await evaluate(`!!(window.TradingView && window.TradingView.bottomWidgetBar)`)); i++) await sleep(500);
     } catch (err) {
       console.error('E2E setup failed (TradingView must run with --remote-debugging-port=9222): ' + err.message);
       process.exit(1);
@@ -146,7 +147,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     it('tv_discover — report available API paths', async () => {
       const chartApi = await apiExists(CHART_API);
       const bwb = await apiExists(BOTTOM_BAR);
-      const replay = await apiExists(REPLAY_API);
+      const replay = await evaluate(`typeof window.TradingViewApi.replayApi === 'function'`);
       assert.ok(chartApi, 'Chart API available');
       assert.ok(bwb, 'bottomWidgetBar available');
       assert.ok(replay, 'replayApi available');
@@ -169,14 +170,9 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     });
 
     it('tv_launch — auto-detect binary (verify path resolution only)', async () => {
-      // tv_launch is destructive (kills TradingView), so we only test path detection
-      const { existsSync } = await import('fs');
-      const paths = [
-        '/Applications/TradingView.app/Contents/MacOS/TradingView',
-        path.join(os.homedir(), 'Applications', 'TradingView.app', 'Contents', 'MacOS', 'TradingView'),
-      ];
-      const found = paths.some(p => existsSync(p));
-      assert.ok(found, 'TradingView binary found on disk');
+      // tv_launch is destructive (kills TradingView), so only its path resolution is tested.
+      const found = resolveTradingViewPath();
+      assert.ok(found, 'TradingView binary found on disk (incl. Windows Store install)');
     });
   });
 
@@ -973,9 +969,9 @@ val = array.get(a, 5)`;
       if (!quote) return;
 
       const result = await evaluate(`
-        (function() {
+        (async function() {
           var api = ${CHART_API};
-          var id = api.createShape(
+          var id = await api.createShape(
             { time: ${quote.time}, price: ${quote.price} },
             { shape: 'horizontal_line', overrides: {} }
           );
@@ -1037,7 +1033,7 @@ val = array.get(a, 5)`;
         })()
       `);
       if (quote) {
-        await evaluate(`${CHART_API}.createShape({ time: ${quote.time}, price: ${quote.price} }, { shape: 'horizontal_line' })`);
+        await evaluate(`Promise.resolve(${CHART_API}.createShape({ time: ${quote.time}, price: ${quote.price} }, { shape: 'horizontal_line' }))`);
       }
 
       await evaluate(`${CHART_API}.removeAllShapes()`);
@@ -1183,6 +1179,9 @@ val = array.get(a, 5)`;
   // ─── 7. REPLAY MODE (6 tools) ─────────────────────────────────────────
 
   describe('Replay Mode', () => {
+
+    // Desktop 3.5 creates _replayApi lazily; load the controller (does not start replay).
+    before(async () => { await evaluate(`window.TradingViewApi.replayApi().then(function(){ return true; })`); });
 
     after(async () => {
       // Ensure replay is stopped
