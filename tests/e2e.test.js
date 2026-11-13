@@ -854,13 +854,11 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       assert.ok(typeof entries === 'number', 'Console row count returned');
     });
 
-    it('pine_save — Ctrl+S dispatch', async () => {
+    it('pine_save — key dispatch is available (no real Ctrl+S)', async () => {
       const ready = await ensureEditor();
       if (!ready) return;
-      // Just verify key dispatch doesn't throw
-      await Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
-      await Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
-      await sleep(300);
+      // A real Ctrl+S would save the test stub over a cloud Pine script or save the layout.
+      assert.equal(typeof Input.dispatchKeyEvent, 'function');
     });
 
     it('pine_new — find "New" menu items', async () => {
