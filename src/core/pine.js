@@ -66,7 +66,6 @@ export async function ensurePineEditorOpen() {
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
       if (bwb) {
         try { if (typeof bwb.open === 'function') bwb.open('scripteditor'); } catch (e) {}
-        try { if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); } catch (e) {}
         try { if (typeof bwb.show === 'function') bwb.show(); } catch (e) {}
         try { if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor'); } catch (e) {}
       }
