@@ -697,7 +697,8 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
     after(async () => {
       // Restore editor state
       if (originalPineSource !== null) {
-        await evaluate(`(function(){ var m = ${FIND_MONACO}; if (m) m.editor.setValue(${JSON.stringify(originalPineSource)}); })()`);
+        // The original stays in the page (window.__e2eOriginalPine); never splice it into evaluated code.
+        await evaluate(`(function(){ var m = ${FIND_MONACO}; if (m && typeof window.__e2eOriginalPine === 'string') m.editor.setValue(window.__e2eOriginalPine); delete window.__e2eOriginalPine; })()`);
       }
       if (!editorWasOpen) {
         await evaluate(`try { ${CLOSE_BOTTOM('pine-editor')} } catch(e) {}`);
@@ -772,7 +773,7 @@ describe('TradingView MCP — Full E2E (70 tools)', () => {
       const ready = await ensureEditor();
       if (!ready) return;
       const testCode = '//@version=6\nindicator("E2E Test", overlay=true)\nplot(close)';
-      originalPineSource = await evaluate(`(function(){ var m = ${FIND_MONACO}; return m ? m.editor.getValue() : null; })()`);
+      originalPineSource = await evaluate(`(function(){ var m = ${FIND_MONACO}; if (!m) return null; window.__e2eOriginalPine = m.editor.getValue(); return window.__e2eOriginalPine; })()`);
       const set = await evaluate(`
         (function() {
           var m = ${FIND_MONACO};
