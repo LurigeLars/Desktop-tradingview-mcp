@@ -168,15 +168,15 @@ export function registerTabTools(server) {
   });
 
   server.registerTool('tab_close', {
-    description: 'Close one verified non-worker Desktop tab. Unsaved changes are preserved unless discard_unsaved_changes=true is explicitly requested; ambiguous confirmations always fail closed. Worker layouts are protected.',
+    description: 'Close one non-worker Desktop tab. Personal and test tabs are disposable: saved layouts reload from their saved state, so unsaved changes are discarded by default. Worker layouts are protected. Prefer shell_tab_id from tab_list (works for duplicate layouts and tabs without a readable layout name).',
     inputSchema: {
-      target_id: z.string().optional().describe('Exact live CDP target ID from tab_list, for uniquely mappable shell tabs.'),
+      target_id: z.string().optional().describe('Exact live CDP target ID from tab_list, for uniquely mappable shell tabs. With duplicate layouts use shell_tab_id instead.'),
       shell_tab_id: z.string().optional().describe('Physical Desktop shell_tab_id from a fresh tab_list. Supports duplicate layouts.'),
-      expected_layout_name: z.string().optional().describe('Expected layout name from shell_tabs to prevent stale-identity mistakes.'),
-      discard_unsaved_changes: z.coerce.boolean().optional().describe('Explicitly discard unsaved changes ONLY in the exact identified tab, when TradingView presents its matching close confirmation (default false).'),
+      expected_layout_name: z.string().optional().describe('Optional layout name check; not required.'),
+      discard_unsaved_changes: z.coerce.boolean().optional().describe('Discard unsaved changes in the closed tab (default true; set false to keep a tab with unsaved changes open).'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  }, async ({ target_id, shell_tab_id, expected_layout_name, discard_unsaved_changes = false }) => {
+  }, async ({ target_id, shell_tab_id, expected_layout_name, discard_unsaved_changes = true }) => {
     try {
       return jsonResult(await withTopologyMutationLock('tab_close', async () => {
         if (target_id && shell_tab_id) throw new Error('Use either target_id or shell_tab_id, not both.');
@@ -184,17 +184,13 @@ export function registerTabTools(server) {
         if (shell_tab_id) {
           const current = tabs.shell_tabs.find(tab => tab.shell_tab_id === shell_tab_id);
           if (!current) throw new Error('Shell tab missing; refresh tab_list.');
-          const expected = expected_layout_name || current.layout_name;
-          if (!expected) {
-            throw new Error('React layout name is unavailable. Supply expected_layout_name from the visible shell tab label.');
-          }
           const state = workerStatus();
           const workerNames = (state.worker_tabs || []).map(tab => tab.layout_name).filter(Boolean);
-          if (workerNames.includes(expected) || /^DTV (?:Market|Worker)\b/i.test(expected)) {
+          if (core.isWorkerShellTab({...current, layout_name: expected_layout_name || current.layout_name}, workerNames)) {
             throw new Error('Refusing to close a DTV worker-owned layout.');
           }
           return core.closeShellTabById({
-            shell_tab_id, expected_layout_name: expected,
+            shell_tab_id, expected_layout_name,
             protected_layout_names: workerNames,
             discard_unsaved_changes,
           });
@@ -221,9 +217,6 @@ export function registerTabTools(server) {
           );
         }
 
-        if (discard_unsaved_changes) {
-          throw new Error('discard_unsaved_changes requires a verified physical shell_tab_id and expected_layout_name; target-only mapping is ambiguous.');
-        }
         return core.closeTabByTargetId({ target_id: target.id });
       }));
     }

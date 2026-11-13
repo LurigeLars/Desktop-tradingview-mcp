@@ -39,8 +39,8 @@ If you're unsure whether a feature fits, open an issue to discuss before submitt
 ```bash
 npm install
 npm run lint      # eslint — the no-undef guard catches unfinished refactors
-npm run test:unit # offline unit tests (no TradingView needed)
-npm run test:e2e  # requires TradingView running with CDP on port 9222
+npm test          # = test:unit, offline unit tests (no TradingView needed)
+npm run test:e2e  # live; opens its own disposable chart tab (see README "Testing")
 tv status         # verify CDP connection (TradingView must be running)
 ```
 

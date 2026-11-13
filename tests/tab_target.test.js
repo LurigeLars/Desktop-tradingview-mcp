@@ -835,7 +835,7 @@ test('new-tab close uses its exact Desktop ID even when every renderer appears v
       assert.deepEqual(selected, ['wanted']);
     } else {
       await assert.rejects(closeTabByTargetId({ target_id: 'target', _deps: deps }),
-        mode === 'missing' ? /shell tab not found/ : mode === 'chart' ? /refusing renderer-only close/ : /unsaved changes/);
+        mode === 'missing' ? /shell tab not found/ : mode === 'chart' ? /cannot be mapped to one Desktop tab/ : /unsaved changes/);
       assert.equal(closed, false);
     }
   }
@@ -1030,11 +1030,33 @@ test('shell close selects one duplicate layout by physical ID and preserves its 
   assert.deepEqual(tabs.map(x=>x.shell_tab_id),['keep','other']);
 });
 
-test('shell close fails closed for workers, unknown layouts and mismatched stale identities', async () => {
+test('shell close without a readable layout name closes a personal tab', async () => {
+  const tabs=[
+    {shell_tab_id:'keep',layout_name:null,label:'SPY 757.12 Stocks'},
+    {shell_tab_id:'close-this',layout_name:null,label:'SPY 757.12 Stocks'},
+  ];
+  const shell=async fn=>fn(async expression=>{
+    if(expression.includes('Array.from(document.querySelectorAll'))return tabs.map((x,i)=>({...x,index:i}));
+    if(expression.includes('return {name:'))return {name:null,label:'SPY 757.13 Stocks'};
+    if(expression.includes("const close=tab.querySelector")) {
+      const id=JSON.parse(expression.match(/getElementById\(("[^"]+")\)/)[1]);
+      tabs.splice(tabs.findIndex(x=>x.shell_tab_id===id),1);return true;
+    }
+    if(expression.includes('.tab.active'))return true;
+    if(expression.includes('tab.click()'))return true;
+    if(expression.startsWith('!!document.getElementById'))return tabs.some(x=>expression.includes(JSON.stringify(x.shell_tab_id)));
+    throw new Error('Unexpected shell expression: '+expression);
+  });
+  const result=await closeShellTabById({shell_tab_id:'close-this',_deps:{withShell:shell,wait:async()=>{}}});
+  assert.equal(result.success,true);
+  assert.deepEqual(tabs.map(x=>x.shell_tab_id),['keep']);
+});
+
+test('shell close refuses workers by name or label and mismatched explicit identities', async () => {
   for (const row of [
     {shell_tab_id:'a',layout_name:'DTV Market 01'},
     {shell_tab_id:'a',layout_name:'Private Worker'},
-    {shell_tab_id:'a',layout_name:null},
+    {shell_tab_id:'a',layout_name:null,label:'QQQ▼ 688.17−0.32%/ DTV Market 01'},
     {shell_tab_id:'a',layout_name:'Stocks'},
   ]) {
     const shell=async fn=>fn(async()=>[row,{shell_tab_id:'b',layout_name:'Stocks'}]);
@@ -1042,7 +1064,7 @@ test('shell close fails closed for workers, unknown layouts and mismatched stale
       shell_tab_id:'a',expected_layout_name:row.layout_name==='Stocks'?'Something Else':undefined,
       protected_layout_names:['Private Worker'],
       _deps:{withShell:shell},
-    }),/worker-owned|missing|changed/);
+    }),/worker-owned|changed/);
   }
 });
 
@@ -1068,7 +1090,7 @@ test('exact chart target attachment disambiguates identical chart URLs', async (
 });
 
 
-test('duplicate tabs without React layout name require exact visible suffix and explicit name', async () => {
+test('duplicate tabs without React layout name close by physical ID; workers stay protected by label', async () => {
   const rows=[
     {shell_tab_id:'keep',layout_name:null,label:'CRWV 62.20 ▲ +1.77% Stocks'},
     {shell_tab_id:'remove',layout_name:null,label:'MMM 171.08 ▲ +5.6% Stocks'},
@@ -1089,8 +1111,8 @@ test('duplicate tabs without React layout name require exact visible suffix and 
     throw new Error('Unexpected shell eval '+expression);
   });
   await assert.rejects(closeShellTabById({
-    shell_tab_id:'remove',_deps:{withShell:shell},
-  }),/Layout identity missing/);
+    shell_tab_id:'worker',protected_layout_names:['DTV Worker 06'],_deps:{withShell:shell},
+  }),/worker-owned/);
   await assert.rejects(closeShellTabById({
     shell_tab_id:'worker',expected_layout_name:'Stocks',_deps:{withShell:shell},
   }),/Layout name changed/);
