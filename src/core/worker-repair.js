@@ -1,6 +1,4 @@
 import CDP from 'chrome-remote-interface';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import { CDP_HOST, CDP_PORT, listTradingViewChartTargets, withTimeout } from '../connection.js';
 import { status } from './worker.js';
 import { pendingPaneIndexes, readActivePaneStates } from './worker-provision.js';
@@ -53,13 +51,8 @@ export async function repairWorker({ slot, max_panes = 1, dry_run = true, _deps 
       opened_tabs: 0, indicators_preserved: true };
     if (dry_run) return report;
     const selected = pending.slice(0, max_panes);
-    const backup = { chart_id: owner.chart_id, target_id: targets[0].id, sync, panes: before };
-    if (_deps.backup) _deps.backup(backup);
-    else {
-      const root = resolve(process.env.LOCALAPPDATA || process.env.HOME || '.', 'tradingview-mcp');
-      mkdirSync(root, { recursive: true });
-      writeFileSync(join(root, 'worker-repair-' + Date.now() + '.json'), JSON.stringify(backup), { flag: 'wx' });
-    }
+    // The worker registry is the restore source; the pre-repair state only travels in a failure message.
+    const before_state = JSON.stringify({ chart_id: owner.chart_id, target_id: targets[0].id, sync, panes: before });
     await evaluate(`(async()=>{
       const api=window.TradingViewApi,c=api._chartWidgetCollection;
       if(api.layoutId()!==${JSON.stringify(owner.chart_id)}||api.chartsCount()!==${owner.pane_count})
@@ -85,11 +78,13 @@ export async function repairWorker({ slot, max_panes = 1, dry_run = true, _deps 
       if (JSON.stringify(before[index].studies) !== JSON.stringify(after[index]?.studies)
           || (!selected.includes(index) && (before[index].resolved_symbol !== after[index]?.resolved_symbol
             || before[index].resolution !== after[index]?.resolution))) {
-        throw new Error('Worker repair changed unrelated pane or indicators; inspect saved backup');
+        throw new Error('Worker repair changed unrelated pane or indicators; state before repair: ' + before_state);
       }
     }
     const remaining = pendingPaneIndexes(entries, after);
-    if (selected.some(index => remaining.includes(index))) throw new Error('Worker repair identity/timeframe verification failed');
+    if (selected.some(index => remaining.includes(index))) {
+      throw new Error('Worker repair identity/timeframe verification failed; state before repair: ' + before_state);
+    }
     if (!remaining.length) await saveWorkerLayout(client, { chartId: owner.chart_id, entries, panes: after });
     return { ...report, changed: true, configured_panes: selected,
       pending_panes: remaining, complete: remaining.length === 0, persisted: remaining.length === 0,
