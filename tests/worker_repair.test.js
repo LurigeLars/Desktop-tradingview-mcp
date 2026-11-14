@@ -28,7 +28,7 @@ function fixture() {
       assignment: { worker_slot: 0, pane_index: i, chart_id: 'owned' } })) };
   const sync = { symbol: true, interval: true };
   const calls = [];
-  let backups = 0, closes = 0;
+  let closes = 0;
   const client = { Runtime: { evaluate: async ({ expression }) => {
     try {
       const collection = { symbolSyncEnabled: () => ({ value: () => sync.symbol,
@@ -58,19 +58,19 @@ function fixture() {
   } }, close: async () => { closes++; } };
   const deps = { status: () => state, listTargets: async () => [{ id: 'new', url: 'https://www.tradingview.com/chart/owned/' }],
     connect: async () => client, read: async () => structuredClone(panes),
-    backup: () => { assert.equal(calls.length, 0); backups++; }, wait: async () => {} };
-  return { panes, state, deps, calls, get backups() { return backups; }, get closes() { return closes; } };
+    wait: async () => {} };
+  return { panes, state, deps, calls, get closes() { return closes; } };
 }
 
 test('repair defaults to preview; applying disables sync before changing only the mismatched pane', async () => {
   const f = fixture(), originalStudies = structuredClone(f.panes[0].studies);
   const preview = await repairWorker({ slot: 0, _deps: f.deps });
   assert.deepEqual(preview.pending_panes, [0]);
-  assert.equal(f.backups, 0); assert.equal(f.calls.length, 0);
+  assert.equal(f.calls.length, 0);
   const result = await repairWorker({ slot: 0, dry_run: false, _deps: f.deps });
   assert.equal(result.complete, true); assert.equal(result.opened_tabs, 0);
   assert.deepEqual(f.calls, ['symbolSync', 'intervalSync', 'symbol:0', 'interval:0']);
-  assert.equal(f.backups, 1); assert.equal(f.closes, 2);
+  assert.equal(f.closes, 2);
   assert.deepEqual(f.panes[0].studies, originalStudies);
   assert.equal(f.panes[1].resolved_symbol, 'NYSE:SECOND');
 });
@@ -83,14 +83,15 @@ test('repair rejects ambiguous targets, missing studies and invalid ownership be
     if (fault === 'studies') f.panes[0].studies = [];
     if (fault === 'assignment') f.state.entries[0].assignment.pane_index = 1;
     await assert.rejects(() => repairWorker({ slot: 0, dry_run: false, _deps: f.deps }));
-    assert.equal(f.calls.length, 0); assert.equal(f.backups, 0);
+    assert.equal(f.calls.length, 0);
   }
 });
 
-test('failed pane verification retains backup and does not report repair success', async () => {
+test('failed pane verification reports the pre-repair state and no success', async () => {
   const f = fixture();
   const before = structuredClone(f.panes);
   f.deps.read = async () => structuredClone(before);
-  await assert.rejects(() => repairWorker({ slot: 0, dry_run: false, _deps: f.deps }), /verification failed/);
-  assert.equal(f.backups, 1); assert.equal(f.closes, 1);
+  await assert.rejects(() => repairWorker({ slot: 0, dry_run: false, _deps: f.deps }),
+    /verification failed; state before repair: {"chart_id":"owned"/);
+  assert.equal(f.closes, 1);
 });

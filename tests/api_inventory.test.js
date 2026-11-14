@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs';
 
 const inventory = JSON.parse(readFileSync(new URL('../docs/tradingview-api-method-inventory-2026-11-08.json', import.meta.url), 'utf8'));
 const owners = ['chart', 'collection', 'api'];
-const known = new Set(['invoked_successfully','present_not_behavior_tested']);
 
 test('API inventory contains exactly the three independently enumerated runtime roots', () => {
   assert.deepEqual(Object.keys(inventory.methods).sort(), owners.slice().sort());
