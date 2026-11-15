@@ -7,7 +7,7 @@ name: tradingview-mcp-public
 services:
   gateway:
     image: node:26.13.0-alpine
-    container_name: tradingview-mcp-gateway
+    container_name: dtv-mcp-gateway
     command: ["node", "/app/gateway.mjs"]
     user: node
     env_file: public/gateway.env
@@ -24,6 +24,7 @@ services:
       edge:
         aliases:
           - tradingview-gateway
+          - tradingview-mcp-gateway
     read_only: true
     cap_drop: [ALL]
     security_opt:
