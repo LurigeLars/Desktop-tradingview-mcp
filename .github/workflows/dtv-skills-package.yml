@@ -1,0 +1,52 @@
+name: DTV skills package
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "skills/**"
+      - "scripts/build_chatgpt_plugin.py"
+      - ".github/workflows/dtv-skills-package.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "skills/**"
+      - "scripts/build_chatgpt_plugin.py"
+      - ".github/workflows/dtv-skills-package.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build installation package
+        run: python3 scripts/build_chatgpt_plugin.py --app-id asdk_app_ci_test --output /tmp/dtv-plugin-test.zip
+      - name: Validate manifest, app binding, skills and quote rules
+        run: |
+          python3 - <<'PY'
+          import json
+          from zipfile import ZipFile
+          with ZipFile("/tmp/dtv-plugin-test.zip") as z:
+              names = set(z.namelist())
+              required = {
+                  ".codex-plugin/plugin.json",
+                  ".app.json",
+                  "skills/realtime-market-data/SKILL.md",
+                  "skills/desktop-operations/SKILL.md",
+              }
+              assert required <= names, required - names
+              manifest = json.loads(z.read(".codex-plugin/plugin.json"))
+              app = json.loads(z.read(".app.json"))
+              assert manifest["skills"] == "./skills"
+              assert manifest["apps"] == "./.app.json"
+              assert app["apps"]["dtv"]["id"] == "asdk_app_ci_test"
+              skill = z.read("skills/realtime-market-data/SKILL.md").decode()
+              for term in ("rtc_age_at_retrieval_ms", "rtc_timestamp", "current_session", "pre_market", "post_market", "source_timestamp"):
+                  assert term in skill, f"Missing quote rule: {term}"
+              for name in ("realtime-market-data", "desktop-operations"):
+                  assert z.read(f"skills/{name}/SKILL.md").startswith(b"---\n")
+          print("DTV plugin package validated")
+          PY
