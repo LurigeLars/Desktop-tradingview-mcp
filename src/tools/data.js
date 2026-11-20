@@ -40,7 +40,7 @@ async function readVerifiedHistory(args) {
 }
 
 export function registerDataTools(server) {
-  server.tool('data_get_ohlcv', 'Get OHLCV bar data from the chart. Use summary=true for compact stats instead of all bars (saves context).', {
+  server.tool('data_get_ohlcv', 'TradingView Desktop OHLCV is the primary chart-data source for intraday technical analysis and backtests when its selected feed covers the symbol/session. Normal calls return at most 500 bars; for deeper history use history={expected_symbol, expected_resolution, count:1000}, then page with the returned next_cursor. Only use a verified non-worker research chart. Verify exact chart_get_state identity (exchange aliases such as BATS may differ), timestamps and coverage; use other providers only to cross-check or fill verified gaps. Set summary=true only for short compact stats.', {
     count: z.coerce.number().optional().describe('Number of bars to retrieve (max 500, default 100)'),
     summary: z.coerce.boolean().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
     history: historySchema.optional().describe('Explicit opt-in to paginated history on a verified non-worker research chart. Leave omitted for the unchanged 500-bar OHLCV behavior. Pass expected_symbol and expected_resolution from chart_get_state; continue with cursor returned by a previous page.'),
