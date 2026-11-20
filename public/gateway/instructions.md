@@ -1,21 +1,9 @@
-TradingView Desktop MCP. The authenticated connector preserves the full TradingView tool surface while the gateway compacts repeated tool metadata to reduce context use.
+TradingView Desktop MCP. Use the Desktop bridge only. Official TradingView MCP/API is retired.
 
-- Start with tv_health_check. If TradingView is not running with CDP, use tv_launch.
-- Read chart state once with chart_get_state and reuse returned entity IDs.
-- For OHLCV, prefer data_get_ohlcv with summary=true unless individual bars are required.
-- For low-latency reads across already-open chart panes, use realtime_snapshot instead of serial symbol switching.
-- Choose or combine tools to fit the task; no mandatory tool order. Weigh required evidence, freshness, history/studies, coverage, latency, payload size and impact on shared charts. For finite watchlists/top-50 or multiple timeframes, batch_run is one option for supported sequential actions, alongside resident reads, temporary sampling and other bounded reads. Verify the universe/ranking; missing resident workers are not a capability limit.
-- batch_run supports get_ohlcv, screenshot and get_strategy_results. It sequentially changes one attached non-worker research chart; record and explicitly restore its original symbol/timeframe after success or failure. Never repurpose worker or personal charts. Use bounded chunks and check per-item failures/coverage. Current get_ohlcv output is counts + last_bar, not full candles or calculated indicators; sequential prices are not synchronized snapshots.
-- For a one-off nonresident qualified symbol, prefer worker_rotate_snapshot; it borrows one lower-priority worker pane and restores the original before returning. Never manually switch a worker pane or alter a personal layout to sample a symbol.
-- If rotation reports RESTORATION_PENDING, call worker_rotation_recover and fail closed until restoration is verified. worker_usage can audit observed reads; unused capacity and unused read history are not the same thing.
-- The deprecated worker_dynamic_ensure must remain unavailable: no sixth worker window should be opened.
-- Prefer watch_manifest_apply for the canonical market-regime universe; add only current trade/WATCH entries as bounded dynamic extras. Use worker_set_universe only for lower-level manual configuration. Reconcile DTV-owned tabs with worker_provision and inspect state with worker_status; tabs/panes are backend details.
-- For a daily session scan, use morning_brief (compact evidence by default) to collect resident evidence plus configured rules; consider batch_run for missing supported symbol/timeframe coverage on a research chart. Keep evidence separate from interpretation; use session_save only after the completed brief is ready, and session_get for comparisons.
-- For custom Pine drawings, use the data_get_pine_* tools with a study filter when known.
-- Prefer typed chart, Pine, indicator, pane, alert, watchlist and replay tools over generic UI automation.
-- capture_screenshot is preferable when visual context is enough.
-- ui_evaluate is a powerful fallback/debug tool; use it only when a typed tool is insufficient.
-- tv_update is maintenance functionality and should be used only for explicit update work.
-- tv_close exits the whole MCP-managed TradingView Desktop app. tab_close closes only the active tab.
-
-- Use `news_flow_get` for one authenticated aggregated TradingView News Flow tied to a numeric watchlist; pass `since` when incremental freshness must be proven.
+- Read chart_get_state for exact symbol, resolution and study IDs. Use tv_health_check if connectivity is uncertain and tv_launch if Desktop needs starting.
+- Use realtime_snapshot for existing pane resolutions. Workers are optional for ad hoc research. For other symbols, timeframes or full candles, attach a task-owned non-worker research layout and use data_get_ohlcv. Direct chart tools require no worker preflight. Use summary=true only when aggregate stats suffice. Verify feed, session, timezone and completed candles.
+- About 300 initially loaded bars is not a history cap. Use data_get_ohlcv with history.expected_symbol and history.expected_resolution from chart_get_state and history.count=1000. Omit top-level count/summary. While has_more=true, pass next_cursor as history.cursor on the same target, or history.before_time equal to the previous first_time in Unix UTC seconds. If paging stops early, try one targeted chart_set_visible_range or chart_scroll_to_date, then retry that boundary. Verify coverage.
+- There is no mandatory tool order. batch_run changes one research chart sequentially and OHLCV returns counts + last_bar, not full candles. Check each item. Keep worker and personal charts untouched, and explicitly restore research symbol, resolution and visible range even after failure. Opening by symbol alone may inherit a worker layout.
+- worker_rotate_snapshot can sample one nonresident symbol when its resolution and study coverage suffice. On RESTORATION_PENDING use worker_rotation_recover and verify restoration. Use watch_manifest_apply for the canonical universe and bounded dynamic watch entries. Use worker_status, worker_usage and worker_provision for lifecycle evidence. Do not use deprecated worker_dynamic_ensure.
+- morning_brief collects compact resident evidence. Use session_save for the completed brief and session_get for comparisons. Use news_flow_get for one watchlist and pass since for incremental freshness.
+- Narrow Pine drawing output with study_filter. Prefer typed tools and screenshots before generic UI evaluation. Use tv_update only for explicit maintenance. tv_close exits the managed Desktop app. tab_close closes a verified individual tab.

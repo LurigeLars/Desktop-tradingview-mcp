@@ -27,67 +27,14 @@ export const SERVER_INFO = {
   description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
 };
 
-export const SERVER_INSTRUCTIONS = `TradingView MCP — 94 tools for reading and controlling live TradingView Desktop charts.
+export const SERVER_INSTRUCTIONS = `Read and control TradingView Desktop charts. Use the realtime-market-data and desktop-operations skills for workflows.
 
-SAFETY MODEL — what needs protection and what does not:
-- Protected: the resident worker layouts ("DTV Market 01–05", "DTV Worker 06"). TradeAlert and other consumers read them continuously. Never change symbols/studies there or close them by hand; worker tools own them. A duplicate instance of a worker layout is closed with worker_target_audit → worker_retire_nonmatching → worker_cleanup_retired_shell, which keep the registered instance alive.
-- Not protected: personal and test charts, the Pine editor buffer and drawings on non-worker charts. Only AI uses them; every layout is saved and unsaved changes never persist (a reopen or Desktop restart restores the saved state). Open, change, discard and close them freely; tab_close discards unsaved changes by default and accepts any non-worker shell_tab_id from tab_list.
-- For experiments open a disposable chart (tab_new with symbol + as_chart) instead of reusing a chart someone may be reading.
-
-TOOL SELECTION GUIDE — use this to pick the right tool:
-
-Choose or combine tools to fit the task; no mandatory tool order. Weigh required evidence, freshness, history/studies, coverage, latency, payload size and impact on shared charts:
-- Resident trading checks: realtime_snapshot with exact handles/groups and the required timeframe.
-- Morning context: morning_brief for resident evidence; consider batch_run for missing supported symbol/timeframe coverage.
-- A finite watchlist, top 50 Nasdaq or multi-timeframe comparison: batch_run is one option for supported sequential actions. Compare its data/mutation contract with resident reads, temporary sampling or other bounded reads and choose the best fit. Verify the universe/ranking; missing resident workers are not a capability limit.
-- One nonresident symbol: worker_rotate_snapshot when its returned timeframe/bar/study coverage is sufficient; verify restoration.
-- batch_run changes the attached chart sequentially. Use one verified non-worker research chart, record original state, explicitly restore symbol/timeframe after success or failure, and check every item. It does not automatically restore charts. get_ohlcv returns counts and last_bar, not full candle history or calculated RSI/EMA. Do not claim simultaneous prices or a complete technical screen from that summary alone.
-
-Reading your chart:
-- chart_get_state → get symbol, timeframe, all indicator names + entity IDs (call first)
-- data_get_study_values → get current numeric values from ALL visible indicators (RSI, MACD, BB, EMA, etc.)
-- quote_get → get real-time price snapshot (last, OHLC, volume)
-- data_get_ohlcv → get price bars. ALWAYS pass summary=true unless you need individual bars
-
-Reading custom Pine indicator output (line.new/label.new/table.new/box.new drawings):
-- data_get_pine_lines → horizontal price levels from custom indicators (deduplicated, sorted)
-- data_get_pine_labels → text annotations with prices ("PDH 24550", "Bias Long", etc.)
-- data_get_pine_tables → table data as formatted rows (session stats, analytics dashboards)
-- data_get_pine_boxes → price zones as {high, low} pairs
-- ALWAYS pass study_filter to target a specific indicator by name (e.g., study_filter="Profiler")
-- Indicators must be VISIBLE on chart for these to work
-
-Changing the chart:
-- chart_set_symbol, chart_set_timeframe, chart_set_type → change ticker/resolution/style
-- chart_manage_indicator → add/remove studies. USE FULL NAMES: "Relative Strength Index" not "RSI"
-- chart_scroll_to_date → jump to a date (ISO format)
-- indicator_set_inputs → change indicator settings (length, source, etc.)
-
-Pine Script development:
-- pine_set_source → inject code, pine_smart_compile → compile + check errors
-- pine_get_errors → read errors, pine_get_console → read log output
-- WARNING: pine_get_source can return 200KB+ for complex scripts — avoid unless editing
-
-Screenshots: capture_screenshot → regions: "full", "chart", "strategy_tester"
-Replay: replay_start → replay_step → replay_trade → replay_status → replay_stop
-Batch: batch_run → an option for finite multi-symbol/timeframe traversals when its contract fits; supported actions: get_ohlcv, screenshot, get_strategy_results. Research chart only; summary output and explicit restoration required.
-Realtime: realtime_snapshot → read all currently resident open chart panes without symbol switching
-Worker: worker_set_universe / worker_status / worker_provision → configure and reconcile logical resident handles/groups without exposing tabs/panes
-Watch manifest: watch_manifest_apply → reconcile canonical market themes plus bounded dynamic trade/WATCH entries into resident worker groups
-Morning brief: morning_brief → collect compact resident decision evidence + configured rules; session_save / session_get → persist and compare completed briefs
-News Flow: news_flow_get → aggregated authenticated news for one TradingView watchlist; use since to prove cursor freshness
-Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
-Alerts: alert_create, alert_list, alert_delete
-Lifecycle: tv_health_check → tv_launch when needed → tv_close when finished. tv_close exits the entire verified MCP-managed TradingView Desktop application, including after an MCP-server restart.
-Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
-Tabs: tab_list → inspect open tabs; tab_new → open additional tabs; tab_switch → select a tab; tab_close(shell_tab_id) → close any non-worker tab while keeping TradingView Desktop running.
-
-CONTEXT MANAGEMENT:
-- ALWAYS use summary=true on data_get_ohlcv
-- ALWAYS use study_filter on pine tools when you know which indicator you want
-- NEVER use verbose=true unless user specifically asks for raw data
-- Prefer capture_screenshot for visual context over pulling large datasets
-- Call chart_get_state ONCE at start, reuse entity IDs`;
+- Protect DTV Market/Worker layouts shared by resident consumers. Leave changes to worker tools. For a duplicate worker layout use worker_target_audit, then worker_retire_nonmatching and worker_cleanup_retired_shell only when the registered instance is verified.
+- For research use an attached task-owned non-worker layout. Opening by symbol alone may inherit a worker layout. Check chart_get_state first. Capture and restore the symbol, resolution and visible range after chart mutations, including failures. Close only the intended test tab using its verified shell_tab_id.
+- Use realtime_snapshot for existing pane resolutions, morning_brief for compact resident context, and worker_rotate_snapshot for temporary coverage when its contract fits. Check actual resolution, freshness and restoration. Workers are optional for ad hoc research. A missing resident symbol or timeframe calls for a safe DTV chart read. Direct chart tools require no worker preflight.
+- Use data_get_ohlcv for actual candles, summary=true for stats, and history for older pages. batch_run changes a research chart sequentially and returns counts/last_bar for OHLCV. Choose it for finite watchlists or multi-timeframe work when that suffices; verify per-item coverage.
+- Keep Pine studies visible for their drawing outputs and narrow with study_filter. Use full study names to add indicators, and avoid pine_get_source unless needed. Prefer bounded results and screenshots for visual questions.
+- tv_close exits the entire MCP-managed TradingView Desktop app. Use tab_close for one tab. Official TradingView MCP/API is retired; use the Desktop bridge.`;
 
 export function createTradingViewServer() {
   const server = new McpServer(

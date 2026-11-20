@@ -26,11 +26,11 @@ export function verifyHistoryResearchTarget(info, snapshot, state) {
 
 
 const historySchema = z.object({
-  expected_symbol: z.string().min(1),
-  expected_resolution: z.string().min(1),
-  before_time: z.coerce.number().int().optional(),
-  cursor: z.string().optional(),
-  count: z.coerce.number().int().min(1).max(1000).optional(),
+  expected_symbol: z.string().min(1).describe('Exact symbol from chart_get_state.'),
+  expected_resolution: z.string().min(1).describe('Exact resolution from chart_get_state, e.g. 1 or 5.'),
+  before_time: z.coerce.number().int().optional().describe('Exclusive Unix UTC seconds; use the previous first_time. Excludes cursor.'),
+  cursor: z.string().optional().describe('Previous next_cursor, bound to the same chart target and instrument. Excludes before_time.'),
+  count: z.coerce.number().int().min(1).max(1000).optional().describe('Bars per page; default 500, maximum 1000.'),
 }).strict();
 
 async function readVerifiedHistory(args) {
@@ -40,10 +40,10 @@ async function readVerifiedHistory(args) {
 }
 
 export function registerDataTools(server) {
-  server.tool('data_get_ohlcv', 'Get OHLCV bar data from the chart. Use summary=true for compact stats instead of all bars (saves context).', {
+  server.tool('data_get_ohlcv', 'Read actual chart candles. Use history.count=1000 on a non-worker research chart. Use summary=true for stats. ~300 initially loaded bars is not a history cap.', {
     count: z.coerce.number().optional().describe('Number of bars to retrieve (max 500, default 100)'),
     summary: z.coerce.boolean().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
-    history: historySchema.optional().describe('Explicit opt-in to paginated history on a verified non-worker research chart. Leave omitted for the unchanged 500-bar OHLCV behavior. Pass expected_symbol and expected_resolution from chart_get_state; continue with cursor returned by a previous page.'),
+    history: historySchema.optional().describe('Page older bars. Omit top-level count/summary. While has_more, pass cursor or before_time.'),
   }, async ({ count, summary, history }) => {
     try {
       if (history) {
@@ -56,13 +56,7 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('data_get_ohlcv_history', 'Read paginated historical candles from the ATTACHED TradingView Desktop chart without changing it. Use chart_get_state for the exact observed symbol/resolution; BATS aliases may differ from the requested exchange. For older data, pass next_cursor back with the same identity. No partial/stale data is returned on failed loading.', {
-    expected_symbol: z.string().min(1).describe('Exact chart_get_state symbol, e.g. BATS:NVDA (required, identity checked before and after every history read)'),
-    expected_resolution: z.string().min(1).describe('Exact chart_get_state resolution, e.g. 1, 3, 5, 15 (required)'),
-    before_time: z.coerce.number().int().optional().describe('UNIX UTC seconds. Return bars strictly earlier than this time; omit for most recent bars. Do not combine with cursor.'),
-    cursor: z.string().optional().describe('Opaque next_cursor from previous successful page; do not combine with before_time'),
-    count: z.coerce.number().int().min(1).max(1000).optional().describe('Number of bars per page, 1–1000, default 500'),
-  }, async (args) => {
+  server.tool('data_get_ohlcv_history', 'Page older candles on an attached non-worker research chart; equivalent to data_get_ohlcv(history=...). Repeat while has_more=true.', historySchema.shape, async (args) => {
     try {
       return jsonResult(await readVerifiedHistory(args));
     }
