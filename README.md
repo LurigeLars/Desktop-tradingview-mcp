@@ -414,7 +414,7 @@ returning**. The resident registry and physical chart topology remain
 unchanged; a quote is not an Avanza executable broker bid/ask.
 
 If the quote is missing or stale the result exposes that fact and restores
-the original. Trade Alert's `research:brent_nq_event` workers and explicitly
+the original. Workers in the `research:brent_nq_event` group and explicitly
 retained/leased entries remain excluded from the borrowable pool. `worker_status`
 shows physical capacity separately from registry-eligible borrowable panes.
 If restoration fails, the durable pending-rotation journal
