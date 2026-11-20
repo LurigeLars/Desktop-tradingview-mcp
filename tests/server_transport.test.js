@@ -212,6 +212,13 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
     assert.match(byName.get('batch_run').description, /watchlist\/top-50/);
     assert.match(byName.get('batch_run').description, /explicitly restore/);
     assert.match(byName.get('batch_run').description, /not full candle history/);
+    const candles = byName.get('data_get_ohlcv');
+    assert.match(candles.description, /history\.count=1000.*non-worker research chart/);
+    const history = candles.inputSchema.properties.history;
+    assert.deepEqual(history.required, ['expected_symbol', 'expected_resolution']);
+    assert.match(history.properties.before_time.description, /previous first_time/);
+    assert.match(byName.get('realtime_snapshot').description, /existing resolutions/);
+    assert.match(byName.get('worker_status').description, /Direct chart reads do not require worker_status/);
     assert.equal(byName.get('chart_set_symbol').annotations.openWorldHint, false);
     assert.equal(byName.get('pane_set_symbol').annotations.openWorldHint, false);
 

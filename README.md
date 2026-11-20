@@ -397,7 +397,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 
 `watch-manifest.json` is the canonical resident-market configuration for this fork. It groups broad regime, rates/FX, AI/semis, volatility/credit, energy, refiners, gold and current tactical context without duplicating equivalent symbol/timeframe workers.
 
-Use `watch_manifest_apply` with no theme arguments to load the defaults. Optional `extra_entries` are intended for temporary active trades or WATCH candidates and are tagged as `watch:dynamic`. The manifest reserves connection capacity for ad-hoc/event work instead of filling the worker budget completely.
+Use `watch_manifest_apply` with no theme arguments to load the defaults. Optional `extra_entries` are intended for temporary active trades or WATCH candidates and are tagged as `watch:dynamic`. The manifest reserves capacity in the worker allocation. Check actual Desktop tab/pane usage when opening a research chart. For ad hoc quotes, candles and studies use a task-owned chart directly when appropriate. No worker status, registration or rotation is required.
 
 After applying the manifest, run `worker_provision` until it reports `complete: true`.
 
@@ -414,7 +414,7 @@ returning**. The resident registry and physical chart topology remain
 unchanged; a quote is not an Avanza executable broker bid/ask.
 
 If the quote is missing or stale the result exposes that fact and restores
-the original. Trade Alert's `research:brent_nq_event` workers and explicitly
+the original. Workers in the `research:brent_nq_event` group and explicitly
 retained/leased entries remain excluded from the borrowable pool. `worker_status`
 shows physical capacity separately from registry-eligible borrowable panes.
 If restoration fails, the durable pending-rotation journal
