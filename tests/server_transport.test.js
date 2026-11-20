@@ -218,6 +218,7 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
     assert.deepEqual(history.required, ['expected_symbol', 'expected_resolution']);
     assert.match(history.properties.before_time.description, /previous first_time/);
     assert.match(byName.get('realtime_snapshot').description, /existing resolutions/);
+    assert.match(byName.get('worker_status').description, /Direct chart reads do not require worker_status/);
     assert.equal(byName.get('chart_set_symbol').annotations.openWorldHint, false);
     assert.equal(byName.get('pane_set_symbol').annotations.openWorldHint, false);
 

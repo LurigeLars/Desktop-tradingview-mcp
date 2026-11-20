@@ -5,7 +5,9 @@ description: Use for TradingView Desktop quotes, resident snapshots, morning bri
 
 # DTV market-data routing
 
-Choose or combine existing capabilities to fit the task. There is no mandatory tool order or blanket preference for batch, snapshots or workers. Weigh required evidence, freshness, history/studies, coverage, latency, payload size and impact on shared charts. Keep batch visible as an available option rather than prescribing it for every multi-symbol request. Explain a material tradeoff briefly when it affects the result.
+Start from the requested symbol, resolution and evidence. Workers keep selected charts ready for recurring reads. An ad hoc request can go straight to an attached task-owned non-worker chart with the standard DTV tools. Use `worker_status` only when you need worker handles, groups or maintenance evidence. A worker miss, full worker allocation or failed rotation describes that route only. Check the direct chart path before concluding Desktop lacks the data.
+
+Choose or combine the available routes based on freshness, coverage, latency, payload and shared-chart impact. There is no mandatory tool order.
 
 ## Quote session and freshness — mandatory
 

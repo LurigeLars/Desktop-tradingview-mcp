@@ -92,7 +92,7 @@ export function registerWorkerTools(server) {
   });
 
   server.registerTool('worker_status', {
-    description: 'Read the logical realtime worker registry, capacity, groups and current physical-assignment status.',
+    description: 'Inspect resident worker handles, groups and assignments for monitoring or maintenance. Direct chart reads do not require worker_status.',
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
