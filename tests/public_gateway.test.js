@@ -198,5 +198,7 @@ describe('public gateway configuration', () => {
     assert.match(response.result.instructions, /no mandatory tool order/);
     assert.match(response.result.instructions, /explicitly restore/);
     assert.match(response.result.instructions, /counts \+ last_bar, not full candles/);
+    assert.match(response.result.instructions, /history\.count=1000/);
+    assert.match(response.result.instructions, /history\.before_time.*first_time/);
   });
 });

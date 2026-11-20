@@ -50,7 +50,7 @@ export function registerChartTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('chart_set_visible_range', 'Zoom the chart to a specific date range (unix timestamps)', {
+  server.tool('chart_set_visible_range', 'Set or restore the visible date range on a research chart; may load older bars.', {
     from: z.coerce.number().describe('Start of range (unix timestamp in seconds)'),
     to: z.coerce.number().describe('End of range (unix timestamp in seconds)'),
   }, async ({ from, to }) => {
@@ -58,7 +58,7 @@ export function registerChartTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('chart_scroll_to_date', 'Jump the chart view to center on a specific date', {
+  server.tool('chart_scroll_to_date', 'Center a research chart on a date; may load older bars.', {
     date: z.string().describe('ISO date string (e.g., "2024-01-15") or unix timestamp as a string'),
   }, async ({ date }) => {
     try { return jsonResult(await withTopologyMutationLock('chart_scroll_to_date', () => core.scrollToDate({ date }))); }
