@@ -40,7 +40,7 @@ async function readVerifiedHistory(args) {
 }
 
 export function registerDataTools(server) {
-  server.tool('data_get_ohlcv', 'Read actual chart candles. Use history.count=1000 on a non-worker research chart. Use summary=true for stats. ~300 initially loaded bars is not a history cap.', {
+  server.tool('data_get_ohlcv', 'Primary TradingView Desktop candles for intraday analysis and backtests when the selected feed covers the symbol and session. Standard reads return up to 500 bars. For deeper history, use history.count=1000 on a verified non-worker research chart with the exact expected_symbol and expected_resolution. Continue with next_cursor. Verify chart identity and coverage. Use summary=true for compact stats.', {
     count: z.coerce.number().optional().describe('Number of bars to retrieve (max 500, default 100)'),
     summary: z.coerce.boolean().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
     history: historySchema.optional().describe('Page older bars. Omit top-level count/summary. While has_more, pass cursor or before_time.'),
