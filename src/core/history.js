@@ -8,6 +8,7 @@ import { evaluate, getTargetInfo, KNOWN_PATHS } from '../connection.js';
 const API = KNOWN_PATHS.chartApi;
 const BARS = KNOWN_PATHS.mainSeriesBars;
 const MAX_ROWS = 1000;
+const MAX_COLUMNS = 8000;
 const MAX_LOADS = 30;
 const LOAD_ROWS = 1000;
 const POLL_ROUNDS = 12;
@@ -88,14 +89,16 @@ function makeRead(before, count) {
 }
 
 /** Serialized against other history reads; detects chart switching by any other tool. */
-async function fetchHistory({ count = 500, before_time, cursor, expected_symbol, expected_resolution, _deps } = {}) {
+async function fetchHistory({ count = 500, format = 'rows', before_time, cursor, expected_symbol, expected_resolution, _deps } = {}) {
   const run = _deps?.evaluate || evaluate;
   const delay = _deps?.delay || (ms => new Promise(resolve => setTimeout(resolve, ms)));
   const readTarget = _deps?.getTargetInfo || getTargetInfo;
   const symbol = requireId(expected_symbol, 'expected_symbol');
   const resolution = requireId(expected_resolution, 'expected_resolution');
   const rows = Number(count);
-  if (!Number.isInteger(rows) || rows < 1 || rows > MAX_ROWS) throw new Error('count must be an integer from 1 to ' + MAX_ROWS);
+  if (format !== 'rows' && format !== 'columns') throw new Error('format must be rows or columns');
+  const limit = format === 'columns' ? MAX_COLUMNS : MAX_ROWS;
+  if (!Number.isInteger(rows) || rows < 1 || rows > limit) throw new Error('count must be an integer from 1 to ' + limit + ' for ' + format);
   if (cursor !== undefined && cursor !== null && before_time !== undefined && before_time !== null) {
     throw new Error('Specify cursor OR before_time, not both');
   }
@@ -189,7 +192,14 @@ async function fetchHistory({ count = 500, before_time, cursor, expected_symbol,
     requested:rows, returned:final.bars.length, first_time:firstTime, last_time:lastTime,
     total_loaded:final.loaded, pages_loaded:loads,
     has_more:hasMore, next_cursor:hasMore ? encodeCursor(symbol, resolution, firstTime, originalTarget.id) : null,
-    feed_may_have_more:state.more, bars:final.bars
+    feed_may_have_more:state.more,
+    ...(format === 'columns' ? {
+      format:'columns', bars:{
+        t:final.bars.map(b => b.time), o:final.bars.map(b => b.open),
+        h:final.bars.map(b => b.high), l:final.bars.map(b => b.low),
+        c:final.bars.map(b => b.close), v:final.bars.map(b => b.volume),
+      }
+    } : {bars:final.bars})
   };
 }
 
