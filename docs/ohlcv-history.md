@@ -22,7 +22,8 @@ The tool caches no history locally and never edits chart studies, Pine scripts, 
 
 ## Limits and failure modes
 
-* Up to 1,000 bars per response; request 20+ pages to retrieve 20,000 bars. Larger **account-side** history limits do not automatically mean the feed offers this much history.
+* Default row format retains the 1,000-bar maximum (500 default). Opt in with `history:{expected_symbol:"BATS:NVDA",expected_resolution:"1",count:8000,format:"columns"}` (or the same fields directly on the standalone history tool). `bars` then contains equal-length arrays `t,o,h,l,c,v` in ascending timestamp order; the cursor and all other metadata have the same meaning. Values are not rounded or interpolated. Larger **account-side** history limits do not automatically mean the feed offers this much history.
+* Compact column responses have a conservative 512 KiB UTF-8 JSON payload limit; if `HISTORY_OUTPUT_TOO_LARGE` is returned, retry the same cursor or exclusive boundary with a smaller count. This is a DTV output guard, not a verified ChatGPT transport limit. No silent clipping. For large datasets use a local consumer rather than sending every candle into model context.
 * Each request may initiate at most 30 provider history loads; retry with explicit `before_time` or another valid cursor only after investigating a `HISTORY_PAGE_LIMIT` failure.
 * A halted feed returns `HISTORY_STALLED`, an empty/out-of-range page returns `HISTORY_OUT_OF_RANGE`, and switched target/symbol returns `TARGET_CHANGED` / `CHART_CHANGED` (no partial-success data).
 * Bar data are from the TradingView **chart's selected feed**, not a consolidated trade tape. BATS feeds may have materially different intraday volume than NASDAQ/CTA full-market data.
@@ -30,7 +31,7 @@ The tool caches no history locally and never edits chart studies, Pine scripts, 
 
 ## Tests
 
-`npm test` includes `tests/ohlcv_history.test.js`. The mocked suite covers 22,500 unique 1m bars, cursor paging, strict time boundaries, zero-fetch when cache is sufficient, source switching, target switching, stalled loading, invalid/duplicate bars and UTC identity. These are **unit tests**, not a live Premium entitlement test.
+`npm test` includes `tests/ohlcv_history.test.js`. The mocked suite covers 22,500 unique 1m bars, cursor paging, strict time boundaries, zero-fetch when cache is sufficient, source switching, target switching, stalled loading, invalid/duplicate bars and UTC identity. The column-format tests cover 8,000-bar lossless conversion, cursor continuation, count validation and an explicit payload-size rejection. These are **unit tests**, not a live Premium entitlement or ChatGPT transport test.
 
 ## Live smoke evidence, 2026-10-23
 
