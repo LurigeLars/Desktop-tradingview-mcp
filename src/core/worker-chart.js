@@ -231,7 +231,15 @@ function applyExpression(cfg) {
       added.push(id);
     }
     let visible_range=null;
-    if(cfg.visible_range){await chart.setVisibleRange(cfg.visible_range);await sleep(300);visible_range=chart.getVisibleRange();}
+    // Per-pane setVisibleRange is "Not implemented" in Desktop 3.5; zoom by loaded bars like chart_set_visible_range.
+    // shortcut: no history paging, so a range older than the loaded bars clamps to the first loaded bar.
+    if(cfg.visible_range){
+      const m=chart._chartWidget.model(),bars=m.mainSeries().bars(),first=bars.firstIndex(),last=bars.lastIndex();
+      let from=first,to=last;
+      for(let i=first;i<=last;i++){const v=bars.valueAt(i);if(v&&v[0]>=cfg.visible_range.from&&from===first)from=i;if(v&&v[0]<=cfg.visible_range.to)to=i;}
+      if(to<=from) throw Error('visible_range covers no loaded bars');
+      m.timeScale().zoomToBarsRange(from,to);await sleep(300);visible_range=chart.getVisibleRange();
+    }
     return {added_ids:added,visible_range};
   })()`;
 }
