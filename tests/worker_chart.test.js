@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { validateChange, planChange, workerChartControl } from '../src/core/worker-chart.js';
+import { validateChange, planChange, workerChartControl, jsLiteral } from '../src/core/worker-chart.js';
 import { replaceWorkerEntry } from '../src/core/worker.js';
 
 test('validation is a strict allowlist: no formulas, code, URLs, unknown studies or object inputs', () => {
@@ -176,4 +176,12 @@ test('unknown study inputs fail before the registry is written', async () => {
   await assert.rejects(workerChartControl({ ...target, operation: 'update', _deps: f.deps,
     configure_studies: [{ name: 'EMA', match_inputs: { length: 20 }, inputs: { nope: 1 } }] }), /Unknown study input/);
   assert.equal(f.recorded.length, 0);
+});
+
+test('embedded literals cannot close a script context and round-trip exactly', () => {
+  const ls = String.fromCharCode(0x2028);
+  const value = { a: '</script><x>' + ls, b: 'quote" back' + String.fromCharCode(92) };
+  const literal = jsLiteral(value);
+  assert.equal(/[<>]/.test(literal) || literal.includes(ls), false);
+  assert.deepEqual(runInNewContext('(' + literal + ')'), value);
 });

@@ -103,8 +103,14 @@ export function validateChange(change = {}) {
   return out;
 }
 
+// Validated data -> JS literal; escapes characters that could close a script context.
+const UNSAFE_CHARS = { '<': '\\u003C', '>': '\\u003E', [String.fromCharCode(0x2028)]: '\\u2028', [String.fromCharCode(0x2029)]: '\\u2029' };
+export function jsLiteral(value) {
+  return JSON.stringify(value).replace(/[<>\u{2028}\u{2029}]/gu, c => UNSAFE_CHARS[c]);
+}
+
 // Live studies with entity ids. Inputs come back unwrapped; encrypted/meta blobs are dropped.
-const LIST_STUDIES = index => `(()=>{const chart=window.TradingViewApi.chart(${JSON.stringify(index)});
+const LIST_STUDIES = index => `(()=>{const chart=window.TradingViewApi.chart(${Number(index)});
   const skip=/^(text|pineId|pineVersion|pineFeatures|__)/;
   return chart.getAllStudies().map(s=>{const inputs={};
     try{for(const i of chart.getStudyById(s.id).getInputValues()){if(!skip.test(i.id))inputs[i.id]=i.value;}}catch(e){}
@@ -186,7 +192,7 @@ export function planChange(entry, change, liveStudies) {
 
 function applyExpression(cfg) {
   return `(async()=>{
-    const cfg=${JSON.stringify(cfg)};
+    const cfg=${jsLiteral(cfg)};
     const api=window.TradingViewApi,c=api._chartWidgetCollection;
     if(api.layoutId()!==cfg.chart_id||api.chartsCount()!==cfg.pane_count) throw Error('Worker layout identity changed before mutation');
     c.symbolSyncEnabled().setValue(false);c.intervalSyncEnabled().setValue(false);
@@ -265,7 +271,7 @@ export async function workerChartControl({ operation = 'read', handle, slot, pan
       target_id: target.id, layout_name: owner.layout_name || null };
 
     if (operation === 'read') {
-      const visible = await evaluate(`window.TradingViewApi.chart(${pane_index}).getVisibleRange()`);
+      const visible = await evaluate(`window.TradingViewApi.chart(${Number(pane_index)}).getVisibleRange()`);
       return { ...base, registry: { symbol: entry.symbol, timeframe: entry.timeframe, studies: entry.studies,
         groups: entry.groups, extended_hours: workerRequiresExtendedHours(entry) },
       live: { ...compactPane(before[pane_index]), studies: studiesBefore, visible_range: visible },
