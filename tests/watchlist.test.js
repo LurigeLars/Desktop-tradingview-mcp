@@ -84,3 +84,10 @@ test('Trade Alert watchlist is refused unless the user explicitly allows it', as
   assert.doesNotThrow(() => refuseTradeAlertWatchlist(null, true, '341892775'));
   assert.doesNotThrow(() => refuseTradeAlertWatchlist(null, false, null));
 });
+
+test('watchlist symbols come from list state when rows are not rendered', async () => {
+  const { symbolsFromListState } = await import('../src/core/watchlist.js');
+  assert.deepEqual(symbolsFromListState({ symbols: ['###Energy', 'NYMEX:CL1!', '', 'NASDAQ:NVDA'] }).map(s => s.symbol),
+    ['NYMEX:CL1!', 'NASDAQ:NVDA']);
+  assert.deepEqual(symbolsFromListState(null), []);
+});

@@ -195,20 +195,23 @@ async function getActiveListInfo() {
     (function() {
       var panel = document.querySelector('[class*="layout__area--right"]');
       if (!panel) return null;
-      var rows = panel.querySelectorAll('[data-symbol-full]');
-      if (!rows.length) return null;
-      var row = rows[0];
-      var reactKey = Object.keys(row).find(function(k) { return k.indexOf('__reactFiber') === 0; });
-      if (!reactKey) return null;
-      var fiber = row[reactKey];
-      var count = 0;
-      while (fiber && count < 45) {
-        if (fiber.memoizedProps && fiber.memoizedProps.current && fiber.memoizedProps.current.id) {
-          var cur = fiber.memoizedProps.current;
-          return { id: cur.id, name: cur.name, symbols: cur.symbols || [] };
+      // Rows are only rendered while the tab is on screen, so fall back to the
+      // watchlist widget's own elements, which carry the same list state.
+      var widget = panel.querySelector('[class*="widgetbar-widget-watchlist"]');
+      var starts = [].slice.call(panel.querySelectorAll('[data-symbol-full]'), 0, 1);
+      if (widget) starts = starts.concat([widget], [].slice.call(widget.querySelectorAll('*'), 0, 200));
+      for (var s = 0; s < starts.length; s++) {
+        var reactKey = Object.keys(starts[s]).find(function(k) { return k.indexOf('__reactFiber') === 0; });
+        var fiber = reactKey ? starts[s][reactKey] : null;
+        var count = 0;
+        while (fiber && count < 45) {
+          if (fiber.memoizedProps && fiber.memoizedProps.current && fiber.memoizedProps.current.id) {
+            var cur = fiber.memoizedProps.current;
+            return { id: cur.id, name: cur.name, symbols: cur.symbols || [] };
+          }
+          fiber = fiber.return;
+          count++;
         }
-        fiber = fiber.return;
-        count++;
       }
       return null;
     })()
@@ -251,13 +254,21 @@ export async function get() {
   `);
 
   const listInfo = await getActiveListInfo();
+  const symbols = data?.symbols?.length ? data.symbols : symbolsFromListState(listInfo);
   return {
     success: true,
-    count: data?.symbols?.length || 0,
-    source: data?.source || 'unknown',
+    count: symbols.length,
+    source: data?.symbols?.length ? data.source : symbols.length ? 'list_state' : (data?.source || 'unknown'),
     ...(listInfo && { list_id: listInfo.id, list_name: listInfo.name }),
-    symbols: data?.symbols || [],
+    symbols,
   };
+}
+
+/** Symbols from the list's own state when no rows are rendered; prices are only on screen. */
+export function symbolsFromListState(listInfo) {
+  return (listInfo?.symbols || [])
+    .filter(sym => typeof sym === 'string' && sym && !sym.startsWith('###'))
+    .map(symbol => ({ symbol, last: null, change: null, change_percent: null, volume: null }));
 }
 
 async function readVisibleWatchlistSymbols() {
