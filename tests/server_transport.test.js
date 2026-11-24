@@ -12,6 +12,10 @@ import {
 } from '../src/server/http.js';
 import { launchManaged, closeManaged } from '../src/core/managed-lifecycle.js';
 
+const TOKEN = 't'.repeat(64);
+process.env.TV_MCP_HTTP_TOKEN = TOKEN;
+const AUTH = { authorization: `Bearer ${TOKEN}` };
+
 test('project CDP default is 9222', () => {
   assert.equal(CDP_PORT, 9222);
 });
@@ -40,12 +44,13 @@ test('HTTP transport uses a shorter default idle threshold only under session pr
   assert.equal(resolveHttpConfig().sessionPressureIdleMs, 30 * 1000);
 });
 
-async function initializeTestSession(runtime, clientName = 'session-test') {
+async function initializeTestSession(runtime, clientName = 'session-test', extraHeaders = AUTH) {
   const response = await fetch(runtime.url, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
+      ...extraHeaders,
     },
     body: JSON.stringify({
       jsonrpc: '2.0',
@@ -64,6 +69,27 @@ async function initializeTestSession(runtime, clientName = 'session-test') {
     body: await response.json(),
   };
 }
+
+test('HTTP transport requires the shared bearer token before any MCP handling', async () => {
+  const runtime = await startTradingViewHttpServer({ host: '127.0.0.1', port: 0 });
+  try {
+    for (const headers of [{}, { authorization: 'Bearer wrong' }, { authorization: TOKEN },
+      { authorization: `Bearer ${TOKEN}x` }]) {
+      const denied = await initializeTestSession(runtime, 'no-token', headers);
+      assert.equal(denied.status, 401);
+      assert.equal(denied.sessionId, null);
+    }
+    assert.equal(runtime.sessionCount(), 0);
+    const allowed = await initializeTestSession(runtime, 'token');
+    assert.equal(allowed.status, 200);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('HTTP transport refuses to start with a short token', async () => {
+  await assert.rejects(startTradingViewHttpServer({ port: 0, token: 'short' }), /at least 32/);
+});
 
 test('HTTP transport rejects new sessions at the configured capacity', async () => {
   const runtime = await startTradingViewHttpServer({
@@ -157,7 +183,7 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
     { name: 'transport-test', version: '1.0.0' },
     { capabilities: {} }
   );
-  const transport = new StreamableHTTPClientTransport(new URL(runtime.url));
+  const transport = new StreamableHTTPClientTransport(new URL(runtime.url), { requestInit: { headers: AUTH } });
 
   try {
     await client.connect(transport);

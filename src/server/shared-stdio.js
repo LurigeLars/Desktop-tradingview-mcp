@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { SERVER_INFO, SERVER_INSTRUCTIONS } from './create-server.js';
+import { readHttpToken } from './http.js';
 
 export function createSharedStdioServer(url, { connect } = {}) {
   const endpoint = new URL(url);
@@ -12,7 +13,8 @@ export function createSharedStdioServer(url, { connect } = {}) {
   let pending;
   const attach = connect || (async () => {
     const client = new Client({ name: 'dtv-shared-stdio', version: SERVER_INFO.version });
-    try { await client.connect(new StreamableHTTPClientTransport(endpoint)); }
+    const headers = { authorization: `Bearer ${readHttpToken()}` };
+    try { await client.connect(new StreamableHTTPClientTransport(endpoint, { requestInit: { headers } })); }
     catch (error) { await client.close().catch(() => {}); throw error; }
     return client;
   });

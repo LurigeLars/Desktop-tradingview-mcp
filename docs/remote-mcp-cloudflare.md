@@ -15,7 +15,10 @@ remote MCP client
 
 No Docker service publishes a host port. The gateway connects to the host MCP through
 `host.docker.internal`, but rewrites the upstream `Host` header to `localhost:8765`
-so the MCP server's DNS-rebinding/loopback guard remains intact.
+so the MCP server's DNS-rebinding/loopback guard remains intact. Every container can reach
+that port, so the host MCP also requires a bearer token: the gateway replaces any client
+`Authorization` header with `Bearer $UPSTREAM_TOKEN`, the contents of
+`%LOCALAPPDATA%\tradingview-mcp\http-token`.
 
 ## Security requirements
 
@@ -48,7 +51,7 @@ change this profile themselves.
 
 1. Start the host HTTP transport with `npm run start:http` and verify it listens only
    on `127.0.0.1:8765/mcp`.
-2. Copy `public/gateway.env.example` to `public/gateway.env` and replace the placeholders with your own deployment values. Keep the real file out of Git.
+2. Copy `public/gateway.env.example` to `public/gateway.env` and replace the placeholders with your own deployment values, including `UPSTREAM_TOKEN`. Keep the real file out of Git.
 3. Configure the shared tunnel route and Cloudflare Access application for your own hostname.
 4. Start the edge stack with:
    `docker compose -f compose.public.yaml up -d`.

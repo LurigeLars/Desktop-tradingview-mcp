@@ -5,6 +5,8 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createSharedStdioServer } from '../src/server/shared-stdio.js';
 import { startTradingViewHttpServer } from '../src/server/http.js';
 
+process.env.TV_MCP_HTTP_TOKEN = 's'.repeat(64);
+
 async function frontend(server) {
   const [a,b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);

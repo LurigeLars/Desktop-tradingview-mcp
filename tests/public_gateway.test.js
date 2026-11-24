@@ -21,6 +21,7 @@ const baseEnv = {
   UPSTREAM_PORT: '8765',
   UPSTREAM_PATH: '/mcp',
   UPSTREAM_HOST_HEADER: 'localhost',
+  UPSTREAM_TOKEN: 'u'.repeat(64),
 };
 
 describe('public gateway configuration', () => {
@@ -29,6 +30,8 @@ describe('public gateway configuration', () => {
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_TEAM_DOMAIN: 'http://127.0.0.1' }), /Cloudflare Access team domain/);
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_TEAM_DOMAIN: 'evil.example.com' }), /Cloudflare Access team domain/);
     assert.throws(() => loadConfig({ ...baseEnv, ACCESS_ALLOWED_EMAILS: '' }), /ACCESS_ALLOWED_EMAILS/);
+    assert.throws(() => loadConfig({ ...baseEnv, UPSTREAM_TOKEN: '' }), /UPSTREAM_TOKEN is required/);
+    assert.throws(() => loadConfig({ ...baseEnv, UPSTREAM_TOKEN: 'short' }), /UPSTREAM_TOKEN is required/);
   });
 
   it('does not write authenticated email identities to gateway logs', () => {
@@ -64,7 +67,7 @@ describe('public gateway configuration', () => {
 
     assert.equal(config.upstreamHost, 'host.docker.internal');
     assert.equal(headers.host, 'localhost:8765');
-    assert.equal(headers.authorization, undefined);
+    assert.equal(headers.authorization, `Bearer ${'u'.repeat(64)}`);
     assert.equal(headers.cookie, undefined);
     assert.equal(headers['cf-access-jwt-assertion'], undefined);
     assert.equal(headers['cf-connecting-ip'], undefined);
