@@ -7,7 +7,7 @@ import { evaluate, getTargetInfo, KNOWN_PATHS } from '../connection.js';
 
 const API = KNOWN_PATHS.chartApi;
 const BARS = KNOWN_PATHS.mainSeriesBars;
-const MAX_ROWS = 1000;
+const MAX_ROWS = 5000;
 const MAX_COLUMNS = 8000;
 const MAX_LOADS = 30;
 const LOAD_ROWS = 1000;

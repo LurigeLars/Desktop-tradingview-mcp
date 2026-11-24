@@ -97,11 +97,28 @@ describe('DTV paginated OHLCV history', () => {
     await assert.rejects(getOhlcvHistory({...args,format:'rows'}),/count/);
     await assert.rejects(getOhlcvHistory({...args,format:'unknown'}),/format/);
   });
+  it('returns up to 5000 exact rows in compact JSON with stable pagination',async()=>{
+    const h=createHarness({total:6200,initiallyLoaded:100});
+    const args={expected_symbol:h.expected_symbol,expected_resolution:'1',format:'rows',count:5000,_deps:h._deps};
+    const first=await getOhlcvHistory(args);
+    assert.equal(first.returned,5000);
+    assert.deepEqual(first.bars,h.all.slice(-5000));
+    const wire=historyResult(first).content[0].text;
+    assert.deepEqual(JSON.parse(wire),first);
+    assert.ok(!wire.includes('\n'));
+    const next=await getOhlcvHistory({...args,cursor:first.next_cursor});
+    assert.equal(next.returned,1200);
+    assert.deepEqual(next.bars,h.all.slice(0,1200));
+    assert.equal(next.has_more,false);
+    await assert.rejects(getOhlcvHistory({...args,count:5001}),/count/);
+  });
   it('preserves legacy row encoding and rejects oversized compact payloads explicitly',()=>{
-    const row={success:true,bars:[{time:ORIGIN,open:1,high:2,low:1,close:2,volume:3}]};
+    const row={success:true,requested:1000,bars:[{time:ORIGIN,open:1,high:2,low:1,close:2,volume:3}]};
     assert.equal(historyResult(row).content[0].text,JSON.stringify(row,null,2));
     const values=Array(8000).fill(1.2345678901234567e-100);
     assert.throws(()=>historyResult({format:'columns',bars:{t:values,o:values,h:values,l:values,c:values,v:values}}),/HISTORY_OUTPUT_TOO_LARGE/);
+    const bar={time:ORIGIN,open:values[0],high:values[0],low:values[0],close:values[0],volume:values[0]};
+    assert.throws(()=>historyResult({requested:5000,bars:Array(5000).fill(bar)}),/HISTORY_OUTPUT_TOO_LARGE/);
   });
   it('rejects invalid candles before column conversion',async()=>{
     const h=createHarness({duplicate:true});
@@ -129,7 +146,7 @@ describe('DTV paginated OHLCV history', () => {
     const first=await getOhlcvHistory({expected_symbol:h.expected_symbol,expected_resolution:'1',count:10,_deps:h._deps});
     await assert.rejects(getOhlcvHistory({expected_symbol:'BATS:TSLA',expected_resolution:'1',cursor:first.next_cursor,_deps:h._deps}),/CURSOR_IDENTITY_MISMATCH/);
     await assert.rejects(getOhlcvHistory({expected_symbol:h.expected_symbol,expected_resolution:'1',before_time:1000,_deps:h._deps}),/UNIX timestamp/);
-    await assert.rejects(getOhlcvHistory({expected_symbol:h.expected_symbol,expected_resolution:'1',count:1001,_deps:h._deps}),/count/);
+    await assert.rejects(getOhlcvHistory({expected_symbol:h.expected_symbol,expected_resolution:'1',count:5001,_deps:h._deps}),/count/);
   });
   it('fails closed when the attached symbol changes while loading',async()=>{
     const h=createHarness({breakIdentity:true});
