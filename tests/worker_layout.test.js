@@ -15,3 +15,15 @@ test('worker persistence refuses old saved intervals, sync flags or incomplete p
   const client = { Runtime: { evaluate: async () => ({ result: { value: valid } }) } };
   assert.deepEqual(await saveWorkerLayout(client, { chartId: 'worker', entries }), { persisted: true });
 });
+
+
+test('worker persistence verifies the saved extended session', async () => {
+  const entries = [{ symbol: 'NYSE:IBM', timeframe: '1', groups: ['session:extended'] }];
+  for (const session of [undefined, 'regular', 'extended']) {
+    const saved = { chart_id: 'worker', dirty: false, symbol_sync: false, interval_sync: false,
+      panes: [{ symbol: 'NYSE:IBM', timeframe: '1', chart_session: session }] };
+    const client = { Runtime: { evaluate: async () => ({ result: { value: saved } }) } };
+    if (session === 'extended') assert.deepEqual(await saveWorkerLayout(client, {chartId:'worker', entries}), {persisted:true});
+    else await assert.rejects(() => saveWorkerLayout(client, {chartId:'worker', entries}), /Saved worker layout/);
+  }
+});

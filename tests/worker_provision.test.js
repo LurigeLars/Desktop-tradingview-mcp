@@ -1622,3 +1622,13 @@ test('unready external charts are visible in worker dry-run but block mutation',
   await assert.rejects(() => provisionWorker({ dry_run: false, _deps: runtime }),
     /Unverified external chart pane count/);
 });
+
+
+test('session-pinned workers require verified extended chart session', () => {
+  const entry = { symbol: 'NASDAQ:NVDA', timeframe: '1', groups: ['session:extended'] };
+  const pane = { resolved_symbol: 'NASDAQ:NVDA', resolution: '1', studies: [] };
+  assert.deepEqual(pendingPaneIndexes([entry], [pane]), [0]);
+  assert.deepEqual(pendingPaneIndexes([entry], [{...pane, chart_session: 'regular'}]), [0]);
+  assert.deepEqual(pendingPaneIndexes([entry], [{...pane, chart_session: 'extended'}]), []);
+  assert.deepEqual(pendingPaneIndexes([{...entry, groups: []}], [pane]), []);
+});

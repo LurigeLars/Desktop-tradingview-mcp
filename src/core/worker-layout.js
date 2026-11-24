@@ -1,5 +1,5 @@
 import { withTimeout } from '../connection.js';
-import { normalizeWorkerTimeframe } from './worker.js';
+import { normalizeWorkerTimeframe, workerRequiresExtendedHours } from './worker.js';
 import { matchTradingViewResolvedSymbol } from './watchlist.js';
 
 export async function saveWorkerLayout(client, { chartId, entries, panes = [] }) {
@@ -16,7 +16,7 @@ export async function saveWorkerLayout(client, { chartId, entries, panes = [] })
             symbol_sync:!!state.symbolLock,interval_sync:!!state.intervalLock,
             panes:state.charts.map(chart=>{const series=chart.panes.flatMap(p=>p.sources)
               .find(source=>source.type==='MainSeries');
-              return {symbol:series?.state.symbol,timeframe:series?.state.interval};})});
+              return {symbol:series?.state.symbol,timeframe:series?.state.interval,chart_session:series?.state.sessionId};})});
         }catch(error){reject(error);}
       },error=>{clearTimeout(timer);reject(Error('Worker layout save failed: '+String(error?.message||error)));});
     })`,
@@ -27,7 +27,8 @@ export async function saveWorkerLayout(client, { chartId, entries, panes = [] })
       || entries.some((entry, index) => !(matchTradingViewResolvedSymbol(entry.symbol, saved.panes[index].symbol).matched
           || (saved.panes[index].symbol === panes[index]?.resolved_symbol
             && matchTradingViewResolvedSymbol(entry.symbol, panes[index].resolved_symbol, panes[index].symbol_identity).matched))
-        || normalizeWorkerTimeframe(entry.timeframe) !== normalizeWorkerTimeframe(saved.panes[index].timeframe))) {
+        || normalizeWorkerTimeframe(entry.timeframe) !== normalizeWorkerTimeframe(saved.panes[index].timeframe)
+        || (workerRequiresExtendedHours(entry) && saved.panes[index].chart_session !== 'extended'))) {
     throw new Error('Saved worker layout does not match the verified registry; no completed assignment recorded');
   }
   return { persisted: true };

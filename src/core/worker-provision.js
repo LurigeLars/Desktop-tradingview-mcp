@@ -9,6 +9,7 @@ import { CDP_HOST, CDP_PORT, listTradingViewChartTargets } from '../connection.j
 import * as tabCore from './tab.js';
 import {
   normalizeWorkerTimeframe,
+  workerRequiresExtendedHours,
   recordWorkerProvision,
   status as workerStatus,
 } from './worker.js';
@@ -739,12 +740,14 @@ async function waitForPaneCount(client, expected, timeoutMs = 8000) {
   throw new Error('TradingView pane layout did not reach ' + expected + ' charts');
 }
 
-function configurePaneExpression(index, entry) {
+function configurePaneExpression(index, entry, sessionOnly = false) {
   const config = JSON.stringify({
     index,
     symbol: entry.symbol,
     timeframe: entry.timeframe,
     studies: entry.studies || [],
+    extended: workerRequiresExtendedHours(entry),
+    sessionOnly,
   });
 
   return `
@@ -763,6 +766,21 @@ function configurePaneExpression(index, entry) {
       var chart = window.TradingViewApi._activeChartWidgetWV.value();
       if (!chart) throw new Error('Active chart unavailable after focusing pane ' + cfg.index);
 
+      // Session-only changes must preserve all existing indicators.
+      var setExtended = function() {
+        var series = chart._chartWidget.model().mainSeries();
+        var info = series.symbolInfo();
+        if (!Array.isArray(info && info.subsessions) || !info.subsessions.some(function(s) { return s.id === 'extended'; })) {
+          throw new Error('Extended session is not supported for ' + cfg.symbol);
+        }
+        series.sessionIdProxyProperty().setValue('extended');
+        if (series.sessionId() !== 'extended') throw new Error('Extended session did not apply');
+      };
+      if (cfg.sessionOnly) {
+        setExtended();
+        return { success: true, studies: [], session_only: true };
+      }
+
       // Worker-owned layouts are dedicated. Re-provisioning starts from a
       // clean study surface so stale indicator instances cannot survive.
       try {
@@ -776,6 +794,7 @@ function configurePaneExpression(index, entry) {
       await sleep(600);
       chart.setResolution(cfg.timeframe, {});
       await sleep(600);
+      if (cfg.extended) setExtended();
 
       var studyResults = [];
       for (var si = 0; si < cfg.studies.length; si++) {
@@ -868,6 +887,13 @@ function readPaneStatesExpression() {
               type: info.type || null,
             };
           } catch(e) {}
+          var chartSession = null;
+          try {
+            var sessionId = series.sessionId();
+            var sessionInfo = series.symbolInfo();
+            if (sessionInfo && typeof sessionInfo.value === 'function') sessionInfo = sessionInfo.value();
+            if (sessionInfo && sessionInfo.subsession_id === sessionId) chartSession = sessionId;
+          } catch(e) {}
           var studies = [];
 
           var sources = model && model.model ? model.model().dataSources() : [];
@@ -892,6 +918,7 @@ function readPaneStatesExpression() {
             resolved_symbol: symbol,
             resolution: resolution,
             symbol_identity: symbolIdentity,
+            chart_session: chartSession,
             studies: studies,
           });
         } catch(e) {
@@ -930,7 +957,8 @@ function paneMatchesEntry(entry, pane) {
   } catch {
     return false;
   }
-  return requiredStudiesPresent(entry, pane);
+  return requiredStudiesPresent(entry, pane)
+    && (!workerRequiresExtendedHours(entry) || pane.chart_session === 'extended');
 }
 
 export function pendingPaneIndexes(entries, panes) {
@@ -1006,7 +1034,8 @@ export async function configureTarget({ target, paneCount, entries, maxPanes = 1
     for (const index of selected) {
       const result = await evaluateValue(
         client,
-        configurePaneExpression(index, entries[index]),
+        configurePaneExpression(index, entries[index], workerRequiresExtendedHours(entries[index])
+          && paneMatchesEntry({ ...entries[index], groups: [] }, live[index])),
         { awaitPromise: true },
       );
       if (!result?.success) {

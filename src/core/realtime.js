@@ -6,7 +6,7 @@
  */
 import CDP from 'chrome-remote-interface';
 import { CDP_HOST, CDP_PORT, listTradingViewChartTargets } from '../connection.js';
-import { normalizeWorkerTimeframe, resolveWorkerSelection, status as workerStatus } from './worker.js';
+import { workerRequiresExtendedHours, normalizeWorkerTimeframe, resolveWorkerSelection, status as workerStatus } from './worker.js';
 import { recordWorkerUsage } from './worker-usage.js';
 import { matchTradingViewResolvedSymbol, matchWatchlistSymbol } from './watchlist.js';
 
@@ -232,7 +232,8 @@ export function selectSnapshotsForWorkerEntries(entries, snapshots) {
         snapshot.resolved_symbol,
         snapshot._symbol_identity || {},
       ).matched
-      && normalizedResolution(snapshot.resolution) === wantedTimeframe;
+      && normalizedResolution(snapshot.resolution) === wantedTimeframe
+      && (!workerRequiresExtendedHours(entry) || snapshot.metadata?.chart_session === 'extended');
 
     if (
       entry?.assignment?.pane_index != null
@@ -249,7 +250,8 @@ export function selectSnapshotsForWorkerEntries(entries, snapshots) {
       });
     }
 
-    if (!candidates.length) {
+    // A session-pinned worker may not silently fall back to another chart.
+    if (!candidates.length && !(workerRequiresExtendedHours(entry) && entry.assignment)) {
       candidates = available.filter(({ snapshot, index }) =>
         !claimed.has(index) && contentMatches(snapshot)
       );
@@ -414,6 +416,11 @@ function buildTargetExpression({ bars, includeStudies, studyFilters }) {
             type: info.type || null,
           };
 
+          var chartSession = null;
+          try {
+            var sessionId = series.sessionId();
+            if (info.subsession_id === sessionId) chartSession = sessionId;
+          } catch(e) {}
           var delayMinutes = finiteOrNull(info.delay);
           var barsObj = null;
           try { barsObj = series.bars ? series.bars() : null; } catch(e) {}
@@ -524,6 +531,7 @@ function buildTargetExpression({ bars, includeStudies, studyFilters }) {
               exchange: info.exchange || info.listed_exchange || null,
               instrument_type: info.type || null,
               market_session: currentSession || info.session || null,
+              chart_session: chartSession,
               timezone: info.timezone || null,
               delay_minutes: delayMinutes,
               realtime_status: realtimeStatus,
