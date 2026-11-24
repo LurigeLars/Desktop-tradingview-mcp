@@ -5,8 +5,8 @@ import { pendingPaneIndexes, readActivePaneStates } from './worker-provision.js'
 import { requiredStudiesPresent } from './realtime.js';
 import { saveWorkerLayout } from './worker-layout.js';
 
-export async function repairWorker({ slot, max_panes = 1, dry_run = true, _deps = {} } = {}) {
-  const state = (_deps.status || status)();
+/** Registry-verified worker slot: one unique persistent layout whose panes are assigned in order. */
+export function registeredWorkerTab(state, slot) {
   const owner = state.worker_tabs.find(tab => tab.slot === slot);
   const plan = state.topology_plan.tabs.find(tab => tab.tab_index === slot);
   const entries = (plan?.handles || []).map(handle => state.entries.find(entry => entry.handle === handle));
@@ -15,26 +15,39 @@ export async function repairWorker({ slot, max_panes = 1, dry_run = true, _deps 
         || entry.assignment?.worker_slot !== slot || entry.assignment?.pane_index !== index
         || entry.assignment?.chart_id !== owner.chart_id)
       || state.worker_tabs.filter(tab => tab.chart_id === owner.chart_id).length !== 1) {
-    throw new Error('Repair requires one uniquely registered persistent worker layout');
+    throw new Error('Requires one uniquely registered persistent worker layout');
   }
-  if (!Number.isInteger(max_panes) || max_panes < 1 || max_panes > 8)
-    throw new Error('max_panes must be from 1 to 8');
+  return { owner, entries };
+}
+
+/** Attach to the single live renderer of a registered worker layout (exact chart URL identity). */
+export async function attachWorkerTarget(owner, _deps = {}, label = 'Worker') {
   const targets = (await (_deps.listTargets || listTradingViewChartTargets)()).filter(target => {
     try { return new URL(target.url).pathname === '/chart/' + owner.chart_id + '/'; }
     catch { return false; }
   });
-  if (targets.length !== 1) throw new Error('Worker repair target missing or ambiguous');
+  if (targets.length !== 1) throw new Error(label + ' target missing or ambiguous');
   const client = await withTimeout((_deps.connect || (target => CDP({
     host: CDP_HOST, port: CDP_PORT, target: target.id,
-  })))(targets[0]), 5000, 'Worker repair attach');
-  const read = () => withTimeout((_deps.read || readActivePaneStates)(client), 8000, 'Worker repair read');
-  const evaluate = async expression => {
+  })))(targets[0]), 5000, label + ' attach');
+  const read = () => withTimeout((_deps.read || readActivePaneStates)(client), 8000, label + ' read');
+  const evaluate = async (expression, timeoutMs = 8000) => {
     const result = await withTimeout(client.Runtime.evaluate({
       expression, returnByValue: true, awaitPromise: true,
-    }), 8000, 'Worker repair evaluation');
-    if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || 'Worker repair failed');
+    }), timeoutMs, label + ' evaluation');
+    if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || label + ' failed');
     return result.result?.value;
   };
+  return { target: targets[0], client, read, evaluate };
+}
+
+export async function repairWorker({ slot, max_panes = 1, dry_run = true, _deps = {} } = {}) {
+  const state = (_deps.status || status)();
+  const { owner, entries } = registeredWorkerTab(state, slot);
+  if (!Number.isInteger(max_panes) || max_panes < 1 || max_panes > 8)
+    throw new Error('max_panes must be from 1 to 8');
+  const { target, client, read, evaluate } = await attachWorkerTarget(owner, _deps, 'Worker repair');
+  const targets = [target];
   try {
     const before = await read();
     if (before.length !== owner.pane_count || entries.some((entry, index) =>

@@ -30,7 +30,8 @@ export const FULL_ALLOWED_TOOLS = [
   'watchlist_get', 'watchlist_add', 'watchlist_add_bulk', 'watchlist_remove', 'news_flow_get',
   'ui_click', 'ui_open_panel', 'ui_fullscreen', 'layout_list', 'layout_switch',
   'ui_keyboard', 'ui_type_text', 'ui_hover', 'ui_scroll', 'ui_mouse_click', 'ui_find_element',
-  'ui_evaluate',
+  // ui_evaluate (arbitrary page JavaScript in the signed-in TradingView session) is never public.
+  'worker_chart_control',
   'pane_list', 'pane_set_layout', 'pane_focus', 'pane_set_symbol',
   'tab_list', 'tab_new', 'layout_new', 'tab_close', 'tab_switch', 'tab_attach',
 ].join(',');
@@ -46,6 +47,7 @@ export const CORE_ALLOWED_TOOLS = [
   'data_get_pine_tables', 'data_get_pine_boxes', 'data_get_study_values', 'realtime_snapshot',
   'worker_set_universe', 'worker_status', 'worker_provision', 'worker_rebind',
   'worker_rotate_snapshot', 'worker_rotation_recover', 'worker_usage', 'watch_manifest_apply',
+  'worker_chart_control',
   'morning_brief', 'session_save', 'session_get',
   'capture_screenshot',
   'alert_create', 'alert_list', 'alert_delete',
@@ -58,7 +60,15 @@ export const CORE_ALLOWED_TOOLS = [
 
 export const DEFAULT_ALLOWED_TOOLS = FULL_ALLOWED_TOOLS;
 
+const NEVER_PUBLIC = new Set(['ui_evaluate']);
+
 export function parseAllowedTools(value) {
+  const allowed = parseConfiguredTools(value);
+  for (const name of NEVER_PUBLIC) allowed.delete(name);
+  return allowed;
+}
+
+function parseConfiguredTools(value) {
   const configured = String(value ?? '').trim();
   if (!configured || configured.toLowerCase() === 'full') {
     return new Set(FULL_ALLOWED_TOOLS.split(',').map(s => s.trim()).filter(Boolean));

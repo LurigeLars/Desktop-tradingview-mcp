@@ -944,7 +944,7 @@ export async function readActivePaneStates(client) {
   return activePaneStates(runtime);
 }
 
-function paneMatchesEntry(entry, pane) {
+export function paneMatchesEntry(entry, pane) {
   if (!pane || pane.error) return false;
   const symbolMatch = matchTradingViewResolvedSymbol(
     entry.symbol,

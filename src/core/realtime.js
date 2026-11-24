@@ -172,7 +172,7 @@ function studySpecName(value) {
 // TradingView's UI exposes descriptions and typed Pine inputs, while worker
 // manifests use indicator names and human-readable input keys. Keep mappings
 // narrow: an unknown indicator/parameter must never match by approximation.
-function canonicalStudyName(value) {
+export function canonicalStudyName(value) {
   const name = String(value || '').trim().replace(/[-_]+/g, ' ')
     .replace(/\s+/g, ' ').toUpperCase();
   if (name === 'VWAP' || name === 'VOLUME WEIGHTED AVERAGE PRICE') return 'VWAP';
@@ -185,7 +185,7 @@ function unwrappedStudyInput(value) {
     && Object.prototype.hasOwnProperty.call(value, 'v') ? value.v : value;
 }
 
-function studyInputsMatch(requiredInputs, actualInputs, studyName) {
+export function studyInputsMatch(requiredInputs, actualInputs, studyName) {
   if (!requiredInputs || Object.keys(requiredInputs).length === 0) return true;
   if (!actualInputs || typeof actualInputs !== 'object') return false;
   return Object.entries(requiredInputs).every(([key, value]) => {

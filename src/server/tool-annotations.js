@@ -12,7 +12,8 @@ const OPEN_DESTRUCTIVE = Object.freeze({ readOnlyHint: false, destructiveHint: t
  * The public ChatGPT connector is deliberately bounded to the TradingView
  * Desktop/account surface, so all public app operations are closed-world.
  * ui_evaluate is the one legacy escape hatch capable of arbitrary page-context
- * JavaScript and remains open-world locally; the public gateway does not expose it.
+ * JavaScript and remains open-world locally; the public gateway policy strips it
+ * from every profile (public/gateway/policy.mjs NEVER_PUBLIC).
  *
  * Every entry is explicit because MCP defaults are intentionally pessimistic.
  * A missing entry is a registration error so new tools cannot silently inherit
