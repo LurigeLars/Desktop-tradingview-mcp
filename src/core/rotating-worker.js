@@ -9,7 +9,7 @@ import CDP from 'chrome-remote-interface';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { CDP_HOST, CDP_PORT, listTradingViewChartTargets } from '../connection.js';
-import { status as workerStatus, normalizeWorkerTimeframe } from './worker.js';
+import { status as workerStatus, normalizeWorkerTimeframe, workerRequiresExtendedHours } from './worker.js';
 import { readActivePaneStates } from './worker-provision.js';
 import { realtimeSnapshot, requiredStudiesPresent } from './realtime.js';
 import { matchTradingViewResolvedSymbol } from './watchlist.js';
@@ -33,7 +33,8 @@ function matchingEntry(entry, pane) {
   try {
     return normalizeWorkerTimeframe(entry.timeframe)
       === normalizeWorkerTimeframe(pane.resolution)
-      && requiredStudiesPresent(entry, pane);
+      && requiredStudiesPresent(entry, pane)
+      && (!workerRequiresExtendedHours(entry) || pane.chart_session === 'extended');
   } catch { return false; }
 }
 function exactSymbol(symbol) {
@@ -72,7 +73,7 @@ export function rotationCandidates(state) {
   const owners = state?.worker_tabs || [];
   const result = [];
   for (const entry of entries) {
-    if (isExclusive(entry) || !Array.isArray(entry.studies) || entry.studies.length) continue;
+    if (isExclusive(entry) || workerRequiresExtendedHours(entry) || !Array.isArray(entry.studies) || entry.studies.length) continue;
     const slot = entry.assignment?.worker_slot;
     const index = entry.assignment?.pane_index;
     if (!Number.isInteger(slot) || slot < 0 || !Number.isInteger(index) || index < 0) continue;

@@ -543,3 +543,12 @@ test('Desktop 3.4.x VWAP/EMA indicators verify against manifest aliases and type
     { name: 'EMA', inputs: { unknown_param: 20 } },
   ] }, present), false, 'unknown input keys must fail closed');
 });
+
+
+test('extended session worker does not silently read regular or nonworker candles', () => {
+  const entry = { handle:'nvda', symbol:'NASDAQ:NVDA', timeframe:'1', groups:['session:extended'], assignment:{target_id:'worker',pane_index:0} };
+  const worker = { target_id:'worker',pane_index:0,resolved_symbol:'NASDAQ:NVDA',resolution:'1', metadata:{chart_session:'regular'} };
+  const personal = {...worker,target_id:'personal',metadata:{chart_session:'extended'}};
+  assert.equal(selectSnapshotsForWorkerEntries([entry],[worker,personal]).unmatched.length,1);
+  assert.equal(selectSnapshotsForWorkerEntries([entry],[{...worker,metadata:{chart_session:'extended'}},personal]).snapshots[0].target_id,'worker');
+});

@@ -1,6 +1,6 @@
 import CDP from 'chrome-remote-interface';
 import { CDP_HOST, CDP_PORT, listTradingViewChartTargets, withTimeout } from '../connection.js';
-import { status } from './worker.js';
+import { status, workerRequiresExtendedHours } from './worker.js';
 import { pendingPaneIndexes, readActivePaneStates } from './worker-provision.js';
 import { requiredStudiesPresent } from './realtime.js';
 import { saveWorkerLayout } from './worker-layout.js';
@@ -50,6 +50,9 @@ export async function repairWorker({ slot, max_panes = 1, dry_run = true, _deps 
       pending_panes: pending, synchronization: sync, complete: pending.length === 0,
       opened_tabs: 0, indicators_preserved: true };
     if (dry_run) return report;
+    if (pending.some(index => workerRequiresExtendedHours(entries[index]))) {
+      throw new Error('Session-pinned worker requires worker_provision to reconcile symbol, timeframe and extended session');
+    }
     const selected = pending.slice(0, max_panes);
     // The worker registry is the restore source; the pre-repair state only travels in a failure message.
     const before_state = JSON.stringify({ chart_id: owner.chart_id, target_id: targets[0].id, sync, panes: before });

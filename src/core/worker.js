@@ -5,6 +5,11 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
+export const EXTENDED_HOURS_GROUP = 'session:extended';
+export function workerRequiresExtendedHours(entry) {
+  return (entry?.groups || []).includes(EXTENDED_HOURS_GROUP);
+}
+
 const STATE_VERSION = 1;
 const STATE_ROOT = resolve(process.env.LOCALAPPDATA || process.env.HOME || '.', 'tradingview-mcp');
 const STATE_FILE = join(STATE_ROOT, 'worker-state.json');
