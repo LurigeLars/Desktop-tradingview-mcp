@@ -1,4 +1,5 @@
 import CDP from 'chrome-remote-interface';
+import { protectedChartIds } from './core/worker.js';
 
 let client = null;
 let targetInfo = null;
@@ -69,7 +70,15 @@ async function invalidateCachedClient() {
   if (stale) { try { await stale.close(); } catch { /* transport already gone */ } }
 }
 
+// Protected worker tabs belong to a fixed consumer; reads go through realtime_snapshot's own clients.
+function isProtectedTarget(target) {
+  let id = null;
+  try { id = new URL(String(target?.url)).pathname.match(/^\/chart\/([^/]+)/)?.[1] || null; } catch { /* not a chart */ }
+  return !!id && protectedChartIds().has(id);
+}
+
 export async function getClient() {
+  if (client && isProtectedTarget(targetInfo)) await invalidateCachedClient();
   if (client) {
     try {
       await withTimeout(
@@ -95,12 +104,15 @@ export async function connect(targetId = null) {
 }
 
 async function _doConnect(targetId) {
+  if (targetId && isProtectedTarget(await findTargetById(targetId))) {
+    throw new Error('PROTECTED_WORKER_TAB: this worker tab belongs to a fixed consumer; read it with realtime_snapshot');
+  }
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const candidates = targetId
         ? [await findTargetById(targetId)].filter(Boolean)
-        : await findChartTargets();
+        : (await findChartTargets()).filter(target => !isProtectedTarget(target));
 
       if (candidates.length === 0) {
         throw new Error(targetId

@@ -20,6 +20,12 @@ const NEW_TAB_URL_RE = /app\.asar\/app\/new-tab\/index\.html/i;
 const SHELL_TITLE_RE = /^tabbed-window$/i;
 const SHELL_URL_RE = /\/window\/index\.html/i;
 
+// Worker provisioning may open a protected tab; it uses its own CDP client, so the shared one just stays detached.
+async function attachUnlessProtected(targetId) {
+  try { await reconnectTo(targetId); }
+  catch (error) { if (!String(error?.message).startsWith('PROTECTED_WORKER_TAB')) throw error; }
+}
+
 export async function withDeadline(promise, timeoutMs, label = 'Operation') {
   const ms = Number(timeoutMs);
   if (!Number.isFinite(ms) || ms < 0) throw new Error('timeoutMs must be a non-negative number');
@@ -1362,7 +1368,7 @@ export async function newTab({
       throw new Error('New tab target was found and navigated, but no ready chart target became discoverable.');
     }
 
-    await reconnectTo(chartTarget.id);
+    await attachUnlessProtected(chartTarget.id);
     return {
       success: true,
       action: 'new_chart_tab_opened',
@@ -1511,7 +1517,7 @@ export async function newTab({
     throw new Error(`Picked "${picked}" but no ready chart target became discoverable.`);
   }
 
-  await reconnectTo(chartTarget.id);
+  await attachUnlessProtected(chartTarget.id);
   // Apply the requested symbol only AFTER creating and attaching the new layout.
   const symbolResult = wantNew && symbol ? await setChartSymbol({symbol:String(symbol)}) : null;
   if (symbolResult && (!symbolResult.success || !symbolResult.chart_ready))

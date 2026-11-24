@@ -5,7 +5,25 @@
  * mirroring the proven alerts REST pattern. Add drives the Add-symbol
  * search UI so bare tickers resolve the same way they do for a human.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+
+/** Trade Alert watches the news of the list named in its own config, so editing that list changes Trade Alert. */
+export function tradeAlertWatchlistId({ readConfig } = {}) {
+  try {
+    const text = readConfig ? readConfig()
+      : readFileSync(join(process.env.LOCALAPPDATA || '', 'TradeAlert', 'config.json'), 'utf8');
+    const id = JSON.parse(String(text).replace(/^﻿/, '')).dtv_watchlist_id;
+    return id == null || id === '' ? null : String(id);
+  } catch { return null; }
+}
+
+export function refuseTradeAlertWatchlist(listInfo, allow, protectedId = tradeAlertWatchlistId()) {
+  if (allow || !protectedId || !listInfo || String(listInfo.id) !== protectedId) return;
+  throw new Error('TRADE_ALERT_WATCHLIST: the active watchlist "' + (listInfo.name || listInfo.id)
+    + '" is what Trade Alert watches. Change it only when the user explicitly asks, with allow_trade_alert_watchlist=true.');
+}
 
 const SIMPLE_BARE_SYMBOL_RE = /^[A-Z0-9_.!]+$/i;
 const SIMPLE_QUALIFIED_SYMBOL_RE = /^[A-Z0-9_.]+:[A-Z0-9_.!]+$/i;
@@ -260,11 +278,12 @@ async function dismissSymbolSearch(client) {
   }
 }
 
-export async function add({ symbol }) {
+export async function add({ symbol, allow_trade_alert_watchlist = false }) {
   const requested = String(symbol ?? '').trim();
   if (!requested) throw new Error('Symbol must not be empty');
 
   await ensureWatchlistOpen();
+  refuseTradeAlertWatchlist(await getActiveListInfo(), allow_trade_alert_watchlist);
 
   const before = await readVisibleWatchlistSymbols();
   const existing = matchWatchlistSymbol(requested, before);
@@ -321,11 +340,13 @@ export async function add({ symbol }) {
   };
 }
 
-export async function addBulk({ symbols }) {
+export async function addBulk({ symbols, allow_trade_alert_watchlist = false }) {
+  await ensureWatchlistOpen();
+  refuseTradeAlertWatchlist(await getActiveListInfo(), allow_trade_alert_watchlist);
   const results = [];
   for (const symbol of symbols) {
     try {
-      const r = await add({ symbol });
+      const r = await add({ symbol, allow_trade_alert_watchlist });
       results.push({
         symbol,
         success: r.success,
@@ -349,10 +370,11 @@ export async function addBulk({ symbols }) {
   };
 }
 
-export async function remove({ symbols }) {
+export async function remove({ symbols, allow_trade_alert_watchlist = false }) {
   await ensureWatchlistOpen();
   const listInfo = await getActiveListInfo();
   if (!listInfo) throw new Error('Cannot read active watchlist metadata (React fiber probe failed)');
+  refuseTradeAlertWatchlist(listInfo, allow_trade_alert_watchlist);
 
   // Match requested symbols (bare or EXCHANGE:SYMBOL) against the list.
   const toRemove = [];
