@@ -37,6 +37,9 @@ export function loadConfig(env = process.env) {
   }
   if (!accessAud) throw new Error('ACCESS_AUD is required');
   if (allowedEmails.size === 0) throw new Error('ACCESS_ALLOWED_EMAILS must contain at least one address');
+  // DTV-only: the host MCP requires the shared bearer token from %LOCALAPPDATA%\tradingview-mcp\http-token.
+  const upstreamToken = String(env.UPSTREAM_TOKEN ?? '').trim();
+  if (upstreamToken.length < 32) throw new Error('UPSTREAM_TOKEN is required');
 
   const upstreamPort = Number(env.UPSTREAM_PORT ?? 8765);
   const port = Number(env.PORT ?? 8080);
@@ -62,6 +65,7 @@ export function loadConfig(env = process.env) {
     upstreamPort,
     upstreamPath: env.UPSTREAM_PATH ?? '/mcp',
     upstreamHostHeader: env.UPSTREAM_HOST_HEADER ?? 'localhost',
+    upstreamToken,
     port,
     ratePerMin,
     maxBodyBytes,
@@ -98,6 +102,7 @@ export function buildUpstreamHeaders(headers, config, bodyLength = null) {
   }
 
   if (bodyLength !== null) out['content-length'] = String(bodyLength);
+  if (config.upstreamToken) out.authorization = `Bearer ${config.upstreamToken}`;
   return out;
 }
 

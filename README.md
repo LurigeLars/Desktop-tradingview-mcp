@@ -284,6 +284,10 @@ node src/server/http.js
 ```
 
 By default it listens on `http://127.0.0.1:8765/mcp` and refuses non-loopback bind hosts.
+Every request needs `Authorization: Bearer <token>`. Docker containers reach host loopback
+through `host.docker.internal`, so loopback alone is not private. The token is
+`TV_MCP_HTTP_TOKEN` or the file `%LOCALAPPDATA%\tradingview-mcp\http-token`, which the
+server creates on first start; the stdio proxy (`TV_MCP_SHARED_HTTP_URL`) reads the same file.
 
 **Windows managed HTTP task:** To make Docker MCP's allowlisted `restart` reliably
 restart the actual Node listener (rather than an old detached launcher), use the

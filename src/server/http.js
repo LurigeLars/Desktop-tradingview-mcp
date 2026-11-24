@@ -1,6 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -13,6 +14,36 @@ export const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_MAX_SESSIONS = 32;
 export const DEFAULT_SESSION_IDLE_MS = 5 * 60 * 1000;
 export const DEFAULT_SESSION_PRESSURE_IDLE_MS = 30 * 1000;
+
+export const HTTP_TOKEN_FILE = resolve(
+  process.env.LOCALAPPDATA || process.env.HOME || '.', 'tradingview-mcp', 'http-token'
+);
+
+// Loopback is not private: every Docker container reaches it via host.docker.internal,
+// so each local client must send this shared secret as a bearer token.
+export function readHttpToken({ create = false } = {}) {
+  const fromEnv = process.env.TV_MCP_HTTP_TOKEN?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    return readFileSync(HTTP_TOKEN_FILE, 'utf8').trim();
+  } catch (error) {
+    if (error.code !== 'ENOENT' || !create) throw error;
+  }
+  mkdirSync(dirname(HTTP_TOKEN_FILE), { recursive: true });
+  const token = randomBytes(32).toString('hex');
+  writeFileSync(HTTP_TOKEN_FILE, token, { flag: 'wx', mode: 0o600 });
+  return token;
+}
+
+function digest(value) {
+  return createHash('sha256').update(String(value)).digest();
+}
+
+function hasBearerToken(authorization, expectedDigest) {
+  const match = /^Bearer (\S+)$/i.exec(String(authorization || ''));
+  // Hashing first makes the compare constant-time regardless of length.
+  return Boolean(match) && timingSafeEqual(digest(match[1]), expectedDigest);
+}
 
 export function isSessionReclaimable(entry, now, idleMs) {
   return (entry.activeRequests ?? 0) === 0 && now - entry.lastSeen > idleMs;
@@ -164,6 +195,11 @@ export function resolveHttpConfig(overrides = {}) {
 
 export async function startTradingViewHttpServer(overrides = {}) {
   const config = resolveHttpConfig(overrides);
+  const token = overrides.token ?? readHttpToken({ create: true });
+  if (typeof token !== 'string' || token.length < 32) {
+    throw new Error('TradingView MCP HTTP token must be at least 32 characters');
+  }
+  const tokenDigest = digest(token);
   const sessions = new Map();
 
   async function closeSession(sessionId) {
@@ -216,6 +252,11 @@ export async function startTradingViewHttpServer(overrides = {}) {
     try {
       if (!isAllowedHostHeader(req.headers.host)) {
         sendProtocolError(res, 403, 'Forbidden host header');
+        return;
+      }
+      if (!hasBearerToken(req.headers.authorization, tokenDigest)) {
+        res.setHeader('www-authenticate', 'Bearer');
+        sendProtocolError(res, 401, 'Unauthorized');
         return;
       }
 
