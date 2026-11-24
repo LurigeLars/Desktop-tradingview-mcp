@@ -80,5 +80,7 @@ test('Trade Alert watchlist is refused unless the user explicitly allows it', as
   assert.throws(() => refuseTradeAlertWatchlist(list, false, '341892775'), /TRADE_ALERT_WATCHLIST/);
   assert.doesNotThrow(() => refuseTradeAlertWatchlist(list, true, '341892775'));
   assert.doesNotThrow(() => refuseTradeAlertWatchlist({ id: 1, name: 'Other' }, false, '341892775'));
-  assert.doesNotThrow(() => refuseTradeAlertWatchlist(null, false, '341892775'));
+  assert.throws(() => refuseTradeAlertWatchlist(null, false, '341892775'), /cannot tell which watchlist/);
+  assert.doesNotThrow(() => refuseTradeAlertWatchlist(null, true, '341892775'));
+  assert.doesNotThrow(() => refuseTradeAlertWatchlist(null, false, null));
 });

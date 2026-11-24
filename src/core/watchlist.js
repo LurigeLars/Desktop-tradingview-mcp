@@ -20,7 +20,13 @@ export function tradeAlertWatchlistId({ readConfig } = {}) {
 }
 
 export function refuseTradeAlertWatchlist(listInfo, allow, protectedId = tradeAlertWatchlistId()) {
-  if (allow || !protectedId || !listInfo || String(listInfo.id) !== protectedId) return;
+  if (allow || !protectedId) return;
+  // An unreadable active list might be Trade Alert's, so fail closed instead of guessing.
+  if (!listInfo) {
+    throw new Error('TRADE_ALERT_WATCHLIST: cannot tell which watchlist is active, and it may be the one Trade Alert watches. '
+      + 'Open the watchlist panel and retry, or pass allow_trade_alert_watchlist=true only when the user explicitly asks.');
+  }
+  if (String(listInfo.id) !== protectedId) return;
   throw new Error('TRADE_ALERT_WATCHLIST: the active watchlist "' + (listInfo.name || listInfo.id)
     + '" is what Trade Alert watches. Change it only when the user explicitly asks, with allow_trade_alert_watchlist=true.');
 }
