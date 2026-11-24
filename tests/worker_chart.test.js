@@ -1,3 +1,4 @@
+import * as uiCore from '../src/core/ui.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
@@ -186,4 +187,31 @@ test('embedded literals cannot close a script context and round-trip exactly', (
   const literal = jsLiteral(value);
   assert.equal(/[<>]/.test(literal) || literal.includes(ls), false);
   assert.equal(JSON.stringify(runInNewContext('(' + literal + ')')), JSON.stringify(value));
+});
+
+test('UI tools drive a worker tab over its own client and never move the shared attachment', async () => {
+  const events = [];
+  let closed = false;
+  const client = {
+    Runtime: { evaluate: async ({ expression }) => ({ result: { value: expression === '1+1' ? 2 : true } }) },
+    Input: { dispatchMouseEvent: async event => { events.push(event.type); } },
+    close: async () => { closed = true; },
+  };
+  const state = { worker_tabs: [{ slot: 0, persistent_layout: true, chart_id: 'owned', pane_count: 1 }],
+    topology_plan: { tabs: [{ tab_index: 0, handles: ['a'] }] },
+    entries: [{ handle: 'a', assignment: { worker_slot: 0, pane_index: 0, chart_id: 'owned' } }] };
+  const _deps = { status: () => state, connect: async () => client,
+    listTargets: async () => [{ id: 't1', url: 'https://www.tradingview.com/chart/owned/' }] };
+
+  const clicked = await uiCore.mouseClick({ x: 5, y: 6, worker_slot: 0, _deps });
+  assert.deepEqual(events, ['mouseMoved', 'mousePressed', 'mouseReleased']);
+  assert.equal(closed, true);
+  assert.equal(clicked.chart_id, 'owned');
+  assert.equal(clicked.worker_layout_saved, false);
+  assert.equal((await uiCore.uiEvaluate({ expression: '1+1', worker_slot: 0, _deps })).result, 2);
+
+  let attached = false;
+  await assert.rejects(uiCore.uiEvaluate({ expression: '1', worker_slot: 3,
+    _deps: { ..._deps, connect: async () => { attached = true; return client; } } }), /uniquely registered/);
+  assert.equal(attached, false);
 });
