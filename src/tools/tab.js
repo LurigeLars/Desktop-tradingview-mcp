@@ -67,9 +67,10 @@ export function registerTabTools(server) {
     inputSchema: {
       chart_id: z.string().optional().describe('Unique chart URL token; use target_id instead for duplicate layouts.'),
       target_id: z.string().optional().describe('Exact live CDP target from a fresh tab_list, including duplicate layouts.'),
+      allow_protected_worker: z.boolean().optional().describe('Set true only when the user explicitly asks to change a protected worker tab (Trade Spine lunch study panes); run worker_provision afterwards.'),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, async ({ chart_id, target_id }) => {
+  }, async ({ chart_id, target_id, allow_protected_worker }) => {
     try {
       return jsonResult(await withTopologyMutationLock('tab_attach', async () => {
         if (Boolean(chart_id) === Boolean(target_id)) {
@@ -83,8 +84,8 @@ export function registerTabTools(server) {
           throw new Error('No unique open chart matched. Refresh tab_list and use exact target_id.');
         }
         return target_id
-          ? core.attachChartTarget({ target_id })
-          : core.attachChart({ chart_id });
+          ? core.attachChartTarget({ target_id, allow_protected_worker })
+          : core.attachChart({ chart_id, allow_protected_worker });
       }));
     } catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });

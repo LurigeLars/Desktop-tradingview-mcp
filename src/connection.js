@@ -71,7 +71,14 @@ async function invalidateCachedClient() {
 }
 
 // Protected worker tabs belong to a fixed consumer; reads go through realtime_snapshot's own clients.
+// An explicit attach (user asked) may keep the shared client there until it attaches elsewhere.
+let allowedProtectedTargetId = null;
+export const PROTECTED_WORKER_REASON = 'PROTECTED_WORKER_TAB: this worker tab holds the fixed panes of the Trade Spine lunch study, '
+  + 'which samples them every weekday 15:30-18:30 Swedish time; a change there leaves the research samples of that day incomplete. '
+  + 'Read it with realtime_snapshot. Only if the user explicitly asks to change it, call tab_attach with allow_protected_worker=true '
+  + 'and run worker_provision afterwards to restore it.';
 function isProtectedTarget(target) {
+  if (target?.id && target.id === allowedProtectedTargetId) return false;
   let id = null;
   try { id = new URL(String(target?.url)).pathname.match(/^\/chart\/([^/]+)/)?.[1] || null; } catch { /* not a chart */ }
   return !!id && protectedChartIds().has(id);
@@ -104,9 +111,7 @@ export async function connect(targetId = null) {
 }
 
 async function _doConnect(targetId) {
-  if (targetId && isProtectedTarget(await findTargetById(targetId))) {
-    throw new Error('PROTECTED_WORKER_TAB: this worker tab belongs to a fixed consumer; read it with realtime_snapshot');
-  }
+  if (targetId && isProtectedTarget(await findTargetById(targetId))) throw new Error(PROTECTED_WORKER_REASON);
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -164,7 +169,8 @@ async function _doConnect(targetId) {
   throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
-export async function reconnectTo(targetId) {
+export async function reconnectTo(targetId, { allowProtected = false } = {}) {
+  allowedProtectedTargetId = allowProtected ? targetId : null;
   await invalidateCachedClient();
   return connect(targetId);
 }

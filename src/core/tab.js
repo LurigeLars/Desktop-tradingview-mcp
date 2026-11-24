@@ -164,14 +164,14 @@ export function selectExactChartTarget(targets, chartId) {
 
 /** Attach subsequent chart/indicator tools to one exact chart without altering
  * the physical tab bar, layout state, worker panes, or saved changes. */
-export async function attachChart({ chart_id, _deps } = {}) {
+export async function attachChart({ chart_id, allow_protected_worker = false, _deps } = {}) {
   const deps = {
     listTargets: _deps?.listTargets || listCdpTargets,
     reconnect: _deps?.reconnect || reconnectTo,
     current: _deps?.current || getTargetInfo,
   };
   const target = selectExactChartTarget(await deps.listTargets(), chart_id);
-  await deps.reconnect(target.id);
+  await deps.reconnect(target.id, { allowProtected: allow_protected_worker });
   const attached = await deps.current();
   if (String(attached?.id || '') !== String(target.id)) {
     throw new Error('CDP attachment verification failed for chart ' + chart_id);
@@ -668,14 +668,14 @@ export async function inspectShellTabMetadata({ shell_tab_ids = [], _deps } = {}
 }
 
 /** Exact live CDP target attachment handles duplicate chart/layout IDs. */
-export async function attachChartTarget({ target_id, _deps } = {}) {
+export async function attachChartTarget({ target_id, allow_protected_worker = false, _deps } = {}) {
   const id = String(target_id || '').trim();
   const listTargets = _deps?.listTargets || listCdpTargets;
   const reconnect = _deps?.reconnect || reconnectTo;
   const current = _deps?.current || getTargetInfo;
   const target = (await listTargets()).find(row => String(row.id) === id);
   if (!isChartPageTarget(target)) throw new Error('Stale/non-chart target; refresh tab_list.');
-  await reconnect(id);
+  await reconnect(id, { allowProtected: allow_protected_worker });
   if (String((await current())?.id) !== id) {
     throw new Error('CDP target attachment verification failed.');
   }
