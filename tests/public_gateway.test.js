@@ -79,7 +79,8 @@ describe('public gateway configuration', () => {
     assert.equal(allowed.has('pine_set_source'), true);
     assert.equal(allowed.has('replay_start'), true);
     assert.equal(allowed.has('draw_shape'), true);
-    assert.equal(allowed.has('ui_evaluate'), true);
+    assert.equal(allowed.has('ui_evaluate'), false);
+    assert.equal(allowed.has('worker_chart_control'), true);
     assert.equal(allowed.has('tv_update'), true);
     assert.equal(allowed.has('realtime_snapshot'), true);
     assert.equal(allowed.has('worker_status'), true);
@@ -94,7 +95,8 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit operator-controlled core profile', () => {
     const allowed = parseAllowedTools('core');
-    assert.equal(allowed.size, 57);
+    assert.equal(allowed.size, 58);
+    assert.equal(allowed.has('worker_chart_control'), true);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('data_get_ohlcv'), true);
     assert.equal(allowed.has('news_flow_get'), true);
@@ -109,8 +111,14 @@ describe('public gateway configuration', () => {
   it('supports an explicit full profile', () => {
     const allowed = parseAllowedTools('full');
     assert.equal(allowed.size, 99);
-    assert.equal(allowed.has('ui_evaluate'), true);
+    assert.equal(allowed.has('ui_evaluate'), false);
     assert.equal(allowed.has('tv_update'), true);
+  });
+
+  it('never exposes arbitrary page JavaScript, even when an operator lists it', () => {
+    const allowed = parseAllowedTools('chart_get_state,ui_evaluate');
+    assert.deepEqual([...allowed], ['chart_get_state']);
+    assert.match(checkRequest({ method: 'tools/call', params: { name: 'ui_evaluate' } }, allowed).error, /not available/);
   });
 
   it('advertises and permits safe tab attachment and worker recovery in both profiles', () => {
@@ -192,7 +200,7 @@ describe('public gateway configuration', () => {
 
     assert.deepEqual(
       response.result.tools.map(tool => tool.name),
-      ['chart_get_state', 'ui_evaluate', 'tv_update']
+      ['chart_get_state', 'tv_update']
     );
     assert.match(response.result.instructions, /TradingView Desktop MCP/);
     assert.match(response.result.instructions, /no mandatory tool order/);
