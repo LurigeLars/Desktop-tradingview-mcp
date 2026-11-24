@@ -767,17 +767,21 @@ function configurePaneExpression(index, entry, sessionOnly = false) {
       if (!chart) throw new Error('Active chart unavailable after focusing pane ' + cfg.index);
 
       // Session-only changes must preserve all existing indicators.
-      var setExtended = function() {
+      var setExtended = async function() {
         var series = chart._chartWidget.model().mainSeries();
-        var info = series.symbolInfo();
-        if (!Array.isArray(info && info.subsessions) || !info.subsessions.some(function(s) { return s.id === 'extended'; })) {
+        var hasExtended = function(info) {
+          return Array.isArray(info && info.subsessions) && info.subsessions.some(function(s) { return s.id === 'extended'; });
+        };
+        // Symbol info for a just-set symbol can arrive after the fixed sleeps; wait up to 5 s for it.
+        for (var wait = 0; wait < 25 && !hasExtended(series.symbolInfo()); wait++) await sleep(200);
+        if (!hasExtended(series.symbolInfo())) {
           throw new Error('Extended session is not supported for ' + cfg.symbol);
         }
         series.sessionIdProxyProperty().setValue('extended');
         if (series.sessionId() !== 'extended') throw new Error('Extended session did not apply');
       };
       if (cfg.sessionOnly) {
-        setExtended();
+        await setExtended();
         return { success: true, studies: [], session_only: true };
       }
 
@@ -794,7 +798,7 @@ function configurePaneExpression(index, entry, sessionOnly = false) {
       await sleep(600);
       chart.setResolution(cfg.timeframe, {});
       await sleep(600);
-      if (cfg.extended) setExtended();
+      if (cfg.extended) await setExtended();
 
       var studyResults = [];
       for (var si = 0; si < cfg.studies.length; si++) {
