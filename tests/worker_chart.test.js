@@ -71,6 +71,7 @@ function fakeDesktop({ drift = false, sabotage = null } = {}) {
     { symbol: drift ? 'NYSE:WRONG' : 'NYSE:ORCL', interval: '1', session: 'extended', subsessions: ['regular', 'extended'], studies: [], range: { from: 1, to: 2 } },
   ];
   let seq = 0;
+  const times = [1_699_000_000, 1_700_000_000, 1_700_043_200, 1_700_086_400, 1_700_200_000];
   const chartApi = i => {
     const p = panes[i];
     return {
@@ -80,7 +81,8 @@ function fakeDesktop({ drift = false, sabotage = null } = {}) {
         symbolInfo: () => ({ subsessions: p.subsessions.map(id => ({ id })) }),
         sessionIdProxyProperty: () => ({ setValue: v => { p.session = v; } }),
         sessionId: () => p.session,
-      }) }) },
+        bars: () => ({ firstIndex: () => 0, lastIndex: () => times.length - 1, valueAt: i => [times[i]] }),
+      }), timeScale: () => ({ zoomToBarsRange: (a, b) => { p.range = { from: times[a], to: times[b] }; } }) }) },
       getAllStudies: () => p.studies.map(s => ({ id: s.id, name: s.name })),
       getStudyById: id => { const s = p.studies.find(x => x.id === id); return {
         getInputValues: () => Object.entries(s.inputs).map(([id, value]) => ({ id, value })),
@@ -88,7 +90,7 @@ function fakeDesktop({ drift = false, sabotage = null } = {}) {
       }; },
       removeEntity: id => { p.studies = p.studies.filter(s => s.id !== id); },
       createStudy: async name => { const id = 'n' + (++seq); p.studies.push({ id, name, inputs: { in_0: 10 } }); return id; },
-      setVisibleRange: async r => { p.range = r; },
+      setVisibleRange: async () => { throw new Error('Not implemented'); },
       getVisibleRange: () => p.range,
     };
   };
