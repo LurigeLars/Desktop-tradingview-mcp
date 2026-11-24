@@ -6,11 +6,6 @@ import * as core from '../core/worker.js';
 import { rotateWorkerSnapshot, recoverRotatingPane, rotationCandidates } from '../core/rotating-worker.js';
 import { topologyMutationLockStatus, withTopologyMutationLock } from '../core/topology-lock.js';
 import { workerUsageReport } from '../core/worker-usage.js';
-import { workerChartControl, SYMBOL_PATTERN, INPUT_KEY_PATTERN, WORKER_STUDY_ALLOWLIST } from '../core/worker-chart.js';
-
-const controlInputs = z.record(z.string().regex(INPUT_KEY_PATTERN),
-  z.union([z.number().finite(), z.boolean(), z.string().max(64)]));
-const controlStudy = z.string().max(64).describe('Allowlisted study: ' + Object.values(WORKER_STUDY_ALLOWLIST).join(', ') + ' (EMA/VWAP aliases accepted).');
 
 const studySchema = z.union([
   z.string(),
@@ -42,31 +37,6 @@ export function registerWorkerTools(server) {
   }, async (args) => {
     try { return jsonResult(await withTopologyMutationLock('worker_set_universe', () => core.setUniverse(args))); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
-  });
-
-  server.registerTool('worker_chart_control', {
-    description: 'Structured, verified control of ONE resident worker pane named by handle + slot + pane_index from worker_status. read: registry vs live pane, studies (with input ids) and visible range. update: change symbol/timeframe, extended hours, add/configure/remove allowlisted studies and/or visible range; other panes and studies are preserved, the result is verified, saved to the worker layout, then recorded in the registry. A symbol/timeframe change regenerates the handle so handle-pinned consumers fail closed; groups are kept. Use dry_run first. watch_manifest_apply later restores manifest-defined entries.',
-    inputSchema: {
-      operation: z.enum(['read', 'update']),
-      handle: z.string().min(1).max(64),
-      slot: z.number().int().min(0).max(49),
-      pane_index: z.number().int().min(0).max(7),
-      symbol: z.string().regex(SYMBOL_PATTERN).optional().describe('Exchange-qualified symbol, e.g. NASDAQ:QQQ. No formulas.'),
-      timeframe: z.string().max(8).optional().describe('e.g. 1, 5, 60, 1D, 1W.'),
-      extended_hours: z.boolean().optional(),
-      add_studies: z.array(z.object({ name: controlStudy, inputs: controlInputs.optional() }).strict()).max(8).optional(),
-      configure_studies: z.array(z.object({ name: controlStudy, match_inputs: controlInputs.optional(),
-        inputs: controlInputs }).strict()).max(8).optional().describe('Set inputs (ids from read, e.g. in_0) on exactly one matching live study.'),
-      remove_studies: z.array(z.object({ name: controlStudy, match_inputs: controlInputs.optional() }).strict()).max(8).optional(),
-      visible_range: z.object({ from: z.number().int(), to: z.number().int() }).strict().optional().describe('Unix seconds; sets zoom/visible interval of this pane.'),
-      dry_run: z.boolean().optional().describe('Verify identity and plan without mutation.'),
-    },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  }, async args => {
-    try {
-      if (args.operation === 'read' || args.dry_run) return jsonResult(await workerChartControl(args));
-      return jsonResult(await withTopologyMutationLock('worker_chart_control', () => workerChartControl(args), { timeoutMs: 60_000 }));
-    } catch (err) { return jsonResult({ success: false, error: String(err?.message || err).slice(0, 2000) }, true); }
   });
 
   server.registerTool('worker_rotate_snapshot', {

@@ -50,22 +50,3 @@ export function isWorkerOwnedTab(tab, state = status()) {
 export function resolveWorkerSelection({handles=[],groups=[],_deps}={}){const state=status({_deps}),requestedHandles=uniqueStrings(handles,{sort:false}),requestedGroups=uniqueStrings(groups,{sort:false});if(!requestedHandles.length&&!requestedGroups.length)return{entries:state.entries,missing_handles:[],missing_groups:[]};const byHandle=new Map(state.entries.map(e=>[e.handle,e])),groupNames=new Set(state.groups.map(g=>g.name)),selected=new Map(),missing_handles=[],missing_groups=[];for(const h of requestedHandles){const e=byHandle.get(h);if(e)selected.set(e.key,e);else missing_handles.push(h);}for(const g of requestedGroups){if(!groupNames.has(g)){missing_groups.push(g);continue;}for(const e of state.entries)if((e.groups||[]).includes(g))selected.set(e.key,e);}return{entries:[...selected.values()],missing_handles,missing_groups};}
 export function recordWorkerProvision({assignments={},worker_tabs,_deps}={}){const d=deps(_deps),state=d.loadState();if(!state)throw new Error('Worker universe is not configured');const entries=(state.entries||[]).map(e=>Object.prototype.hasOwnProperty.call(assignments,e.handle)?{...e,assignment:assignments[e.handle]}:e);const next={...state,worker_tabs:worker_tabs??state.worker_tabs??[],updated_at:new Date(d.now()).toISOString(),entries};d.saveState(next);return stateSummary(next);}
 
-/** Replace one entry in place, keeping order, other assignments and topology; refuses merges. */
-export function replaceWorkerEntry({ handle, entry, keepHandle, assignment, _deps } = {}) {
-  const d = deps(_deps), state = d.loadState();
-  if (!state) throw new Error('Worker universe is not configured');
-  const index = (state.entries || []).findIndex(e => e.handle === handle);
-  if (index < 0) throw new Error('Unknown worker handle: ' + handle);
-  const raw = state.entries.map(e => ({ handle: e.handle, symbol: e.symbol, timeframe: e.timeframe, studies: e.studies, groups: e.groups }));
-  raw[index] = { ...entry, handle: keepHandle ? handle : undefined };
-  const normalized = normalizeWorkerUniverse(raw, {
-    capacity: state.capacity, reserveSlots: state.reserve_slots, previousEntries: state.entries,
-  });
-  if (normalized.entries.length !== state.entries.length) {
-    throw new Error('Change would merge with an existing equivalent worker entry');
-  }
-  normalized.entries[index].assignment = assignment;
-  const next = { ...state, updated_at: new Date(d.now()).toISOString(), entries: normalized.entries };
-  d.saveState(next);
-  return normalized.entries[index];
-}

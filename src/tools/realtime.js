@@ -5,7 +5,7 @@ import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerRealtimeTools(server) {
   server.registerTool('realtime_snapshot', {
-    description: 'Read recent resident panes at their existing resolutions without symbol switching. For a different timeframe or full history, use data_get_ohlcv on a non-worker research chart.',
+    description: 'Read recent resident panes at their existing resolutions without symbol switching. For a different timeframe or full history, use data_get_ohlcv on any attached chart, workers included.',
     inputSchema: {
       symbols: z.array(z.string()).optional().describe('Optional symbols/expressions. A bare ticker may resolve to one unique exchange-qualified resident symbol; formulas require exact matching. Do not combine with handles/groups.'),
       handles: z.array(z.string()).optional().describe('Optional logical worker handles from worker_status. Do not combine with symbols.'),

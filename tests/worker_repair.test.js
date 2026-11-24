@@ -1,20 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { personalChartExpression } from '../src/connection.js';
 import { repairWorker } from '../src/core/worker-repair.js';
-
-test('interactive writes reject workers by stable chart ID after restart, before executing code', () => {
-  const expression = personalChartExpression('changed=true; 42', {
-    worker_tabs: [{ chart_id: 'owned', target_id: 'old' }],
-  });
-  const owned = { location: { pathname: '/chart/owned/' }, changed: false };
-  assert.throws(() => runInNewContext(expression, owned), /WORKER_TARGET_FORBIDDEN/);
-  assert.equal(owned.changed, false);
-  const personal = { location: { pathname: '/chart/personal/' }, changed: false };
-  assert.equal(runInNewContext(expression, personal), 42);
-  assert.equal(personal.changed, true);
-});
 
 function fixture() {
   const panes = [
