@@ -27,7 +27,7 @@ function fixture() {
         _saveChartService: { _chartSaver: {} },
         saveChartToServer: done => {
           api._saveChartService._chartSaver._prevChartState = { content: JSON.stringify({
-            symbolLock: sync.symbol, intervalLock: sync.interval,
+            layout: '2h', symbolLock: sync.symbol, intervalLock: sync.interval,
             charts: panes.map(pane => ({ panes: [{ sources: [{ type: 'MainSeries', state: {
               symbol: pane.resolved_symbol, interval: pane.resolution,
             } }] }] })),
