@@ -3,8 +3,31 @@
  */
 import { evaluate, evaluatePersonal, evaluateAsync, getClient } from '../connection.js';
 import * as tabCore from './tab.js';
+import { status as workerStatus } from './worker.js';
+import { registeredWorkerTab, attachWorkerTarget } from './worker-repair.js';
 
-export async function click({ by, value }) {
+// worker_slot drives a registered worker tab over its own CDP client, so the shared
+// attachment (used by chart, Pine, replay and drawing tools) never moves onto a worker.
+// Worker UI changes are not saved or recorded in the registry; worker_provision restores them.
+async function withTarget(worker_slot, fn, { read = false, _deps = {} } = {}) {
+  if (worker_slot === undefined) {
+    return fn({ evaluate: read ? evaluate : evaluatePersonal, client: _deps.client ? async () => _deps.client : getClient });
+  }
+  const { owner } = registeredWorkerTab((_deps.status || workerStatus)(), worker_slot);
+  const { client, evaluate: workerEvaluate } = await attachWorkerTarget(owner, _deps, 'Worker UI');
+  try {
+    const result = await fn({ evaluate: expression => workerEvaluate(expression, 15000), client: async () => client });
+    return { ...result, worker_slot, chart_id: owner.chart_id, worker_layout_saved: false };
+  } finally {
+    try { await client.close(); } catch { /* already gone */ }
+  }
+}
+
+export async function click({ by, value, worker_slot, _deps }) {
+  return withTarget(worker_slot, ({ evaluate }) => clickOn(evaluate, { by, value }), { _deps });
+}
+
+async function clickOn(evaluatePersonal, { by, value }) {
   const escaped = JSON.stringify(value);
   const result = await evaluatePersonal(`
     (function() {
@@ -29,7 +52,11 @@ export async function click({ by, value }) {
   return { success: true, clicked: result };
 }
 
-export async function openPanel({ panel, action }) {
+export async function openPanel({ panel, action, worker_slot, _deps }) {
+  return withTarget(worker_slot, ({ evaluate }) => openPanelOn(evaluate, { panel, action }), { _deps });
+}
+
+async function openPanelOn(evaluatePersonal, { panel, action }) {
   const isBottomPanel = panel === 'pine-editor' || panel === 'strategy-tester';
   if (isBottomPanel) {
     const widgetName = panel === 'pine-editor' ? 'pine-editor' : 'backtesting';
@@ -94,7 +121,11 @@ export async function openPanel({ panel, action }) {
   }
 }
 
-export async function fullscreen() {
+export async function fullscreen({ worker_slot, _deps } = {}) {
+  return withTarget(worker_slot, ({ evaluate }) => fullscreenOn(evaluate), { _deps });
+}
+
+async function fullscreenOn(evaluatePersonal) {
   const result = await evaluatePersonal(`
     (function() {
       var btn = document.querySelector('[data-name="header-toolbar-fullscreen"]');
@@ -166,9 +197,14 @@ export async function layoutSwitch({ name, _deps } = {}) {
   };
 }
 
-export async function keyboard({ key, modifiers }) {
-  await evaluatePersonal('true');
-  const c = await getClient();
+export async function keyboard({ key, modifiers, worker_slot, _deps }) {
+  return withTarget(worker_slot, async ({ evaluate, client }) => {
+    await evaluate('true');
+    return keyboardOn(await client(), { key, modifiers });
+  }, { _deps });
+}
+
+async function keyboardOn(c, { key, modifiers }) {
   let mod = 0;
   if (modifiers) {
     if (modifiers.includes('alt')) mod |= 1;
@@ -191,14 +227,19 @@ export async function keyboard({ key, modifiers }) {
   return { success: true, key, modifiers: modifiers || [] };
 }
 
-export async function typeText({ text }) {
-  await evaluatePersonal('true');
-  const c = await getClient();
-  await c.Input.insertText({ text });
-  return { success: true, typed: text.substring(0, 100), length: text.length };
+export async function typeText({ text, worker_slot, _deps }) {
+  return withTarget(worker_slot, async ({ evaluate, client }) => {
+    await evaluate('true');
+    await (await client()).Input.insertText({ text });
+    return { success: true, typed: text.substring(0, 100), length: text.length };
+  }, { _deps });
 }
 
-export async function hover({ by, value }) {
+export async function hover({ by, value, worker_slot, _deps }) {
+  return withTarget(worker_slot, ({ evaluate, client }) => hoverOn(evaluate, client, { by, value }), { read: true, _deps });
+}
+
+async function hoverOn(evaluate, getClient, { by, value }) {
   const coords = await evaluate(`
     (function() {
       var by = ${JSON.stringify(by)};
@@ -224,9 +265,14 @@ export async function hover({ by, value }) {
   return { success: true, hovered: { by, value, tag: coords.tag, x: coords.x, y: coords.y } };
 }
 
-export async function scroll({ direction, amount }) {
-  await evaluatePersonal('true');
-  const c = await getClient();
+export async function scroll({ direction, amount, worker_slot, _deps }) {
+  return withTarget(worker_slot, async ({ evaluate, client }) => {
+    await evaluate('true');
+    return scrollOn(evaluate, await client(), { direction, amount });
+  }, { _deps });
+}
+
+async function scrollOn(evaluatePersonal, c, { direction, amount }) {
   const px = amount || 300;
   const center = await evaluatePersonal(`
     (function() {
@@ -243,9 +289,14 @@ export async function scroll({ direction, amount }) {
   return { success: true, direction, amount: px };
 }
 
-export async function mouseClick({ x, y, button, double_click, _deps }) {
-  if (!_deps?.client) await evaluatePersonal('true');
-  const c = _deps?.client || await getClient();
+export async function mouseClick({ x, y, button, double_click, worker_slot, _deps }) {
+  return withTarget(worker_slot, async ({ evaluate, client }) => {
+    if (!_deps?.client) await evaluate('true');
+    return mouseClickOn(await client(), { x, y, button, double_click });
+  }, { _deps });
+}
+
+async function mouseClickOn(c, { x, y, button, double_click }) {
   const btn = button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left';
   const buttons = btn === 'left' ? 1 : btn === 'right' ? 2 : 4;
   await c.Input.dispatchMouseEvent({ type: 'mouseMoved', x, y });
@@ -259,7 +310,11 @@ export async function mouseClick({ x, y, button, double_click, _deps }) {
   return { success: true, x, y, button: btn, double_click: !!double_click };
 }
 
-export async function findElement({ query, strategy }) {
+export async function findElement({ query, strategy, worker_slot, _deps }) {
+  return withTarget(worker_slot, ({ evaluate }) => findElementOn(evaluate, { query, strategy }), { read: true, _deps });
+}
+
+async function findElementOn(evaluate, { query, strategy }) {
   const strat = strategy || 'text';
   const results = await evaluate(`
     (function() {
@@ -297,7 +352,6 @@ export async function findElement({ query, strategy }) {
   return { success: true, query, strategy: strat, count: results?.length || 0, elements: results || [] };
 }
 
-export async function uiEvaluate({ expression }) {
-  const result = await evaluatePersonal(expression);
-  return { success: true, result };
+export async function uiEvaluate({ expression, worker_slot, _deps }) {
+  return withTarget(worker_slot, async ({ evaluate }) => ({ success: true, result: await evaluate(expression) }), { _deps });
 }
