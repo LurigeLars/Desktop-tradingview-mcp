@@ -4,7 +4,7 @@ Read historical candles from the **currently attached** TradingView Desktop char
 
 ## Procedure
 
-1. Attach to a **dedicated non-worker research chart** with `tab_attach`, then verify `chart_get_state`. Worker chart targets are now rejected by code, not just guidance. Never use a portfolio worker or another user's active trading layout for research.
+1. Attach to a chart with `tab_attach` (workers are AI charts and are fine), then verify `chart_get_state`.
 2. Set the desired symbol and resolution with the existing chart tools **before** starting the history read.
 3. Use the **exact returned symbol** and resolution in each history request. For example, a requested NASDAQ:NVDA may resolve to BATS:NVDA, with feed-dependent prices/volumes.
 4. First request (example):

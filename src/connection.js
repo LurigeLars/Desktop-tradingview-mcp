@@ -1,5 +1,4 @@
 import CDP from 'chrome-remote-interface';
-import { status as workerStatus } from './core/worker.js';
 
 let client = null;
 let targetInfo = null;
@@ -205,15 +204,9 @@ export async function getTargetInfo() {
   return targetInfo;
 }
 
-export function personalChartExpression(expression, state) {
-  const ids = (state.worker_tabs || []).map(tab => String(tab.chart_id || '')).filter(Boolean);
-  return `{ if (${JSON.stringify(ids)}.includes(location.pathname.match(/^\\/chart\\/([^/]+)/)?.[1])) throw new Error('WORKER_TARGET_FORBIDDEN: use resident snapshots or explicit worker repair'); }\n` + expression;
-}
-
 export async function evaluate(expression, opts = {}) {
   const c = await getClient();
-  const { timeoutMs, requirePersonalChart, ...cdpOpts } = opts;
-  if (requirePersonalChart) expression = personalChartExpression(expression, workerStatus());
+  const { timeoutMs, ...cdpOpts } = opts;
   let result;
   try {
     result = await withTimeout(
@@ -238,8 +231,6 @@ export async function evaluate(expression, opts = {}) {
 }
 
 export async function evaluateAsync(expression, opts = {}) { return evaluate(expression, { ...opts, awaitPromise: true }); }
-export async function evaluatePersonal(expression, opts = {}) { return evaluate(expression, { ...opts, requirePersonalChart: true }); }
-export async function evaluatePersonalAsync(expression) { return evaluatePersonal(expression, { awaitPromise: true }); }
 export async function disconnect() { await invalidateCachedClient(); }
 
 async function verifyAndReturn(path, name) {

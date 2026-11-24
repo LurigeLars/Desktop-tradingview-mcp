@@ -62,7 +62,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 ### "Screen multiple symbols"
 - Choose or combine tools according to required evidence, freshness, history/studies, coverage, latency, payload size and chart impact; no mandatory tool order. `batch_run` is an option for finite watchlist/top-50 and multi-timeframe work when its supported actions fit. Verify the universe/ranking and required measures.
 - Supported actions: `get_ohlcv`, `screenshot`, `get_strategy_results`. Use explicit symbols/timeframes and bounded chunks; check partial/per-item failures.
-- Use one exact non-worker research chart. Record and explicitly restore its original symbol/timeframe after completion or failure; batch does not automatically restore state. Never repurpose worker or personal charts.
+- Use one exact attached chart; a worker is fine. Batch does not restore the chart afterwards.
 - Current batch `get_ohlcv` output contains counts and `last_bar`, not the full inspected history or calculated RSI/EMA. Fetch bounded existing candle/study evidence when a measure needs it; do not claim a complete technical screen from the summary alone.
 - Use `realtime_snapshot` for already resident trading checks and `morning_brief` for resident morning context, with batch for supported coverage gaps. One-off analysis does not justify a permanent worker per symbol.
 
@@ -116,12 +116,10 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 
 ## Safety Model
 
-- **Protected:** only the resident worker layouts (`DTV Market 01–05`, `DTV Worker 06`). Consumers such as TradeAlert read them continuously. Don't change or close them by hand; a duplicate worker instance is removed with `worker_target_audit` → `worker_retire_nonmatching` → `worker_cleanup_retired_shell`.
-- **Changing a worker pane:** `worker_chart_control` (handle + slot + pane_index from `worker_status`). It verifies identity, changes only that pane (symbol, timeframe, extended hours, allowlisted studies, visible range), verifies, saves the worker layout and then records the registry. General chart/indicator/Pine/replay/drawing tools stay blocked on workers.
-- **Free UI control of a worker:** pass `worker_slot` to `ui_*` tools (including `ui_evaluate`). They run on that worker tab over a separate CDP client, so the shared attachment never moves onto a worker. Changes are not saved or recorded in the registry; `worker_provision` restores the registered state. `ui_evaluate` is never exposed by the public gateway.
-- **CDP port:** 9222 has no authentication and can read local files. `dtv-cdp-guard` (compose.public.yaml) blocks Docker containers from reaching it via host.docker.internal; keep it running.
-- **Disposable:** personal/test charts, the Pine editor buffer and drawings on non-worker charts. Only AI uses them, layouts are saved and unsaved changes never persist. `tab_close` discards unsaved changes by default.
-- Don't add new guards for disposable state; a guard is justified only where a mistake breaks a worker or returns wrong market data.
+- **Workers are AI charts.** The worker layouts (`DTV Market 01–05`, `DTV Worker 06`) exist so AI can read charts fast and answer questions. Use and change them freely with every tool (`tab_attach` / `layout_switch` first). `realtime_snapshot` matches live pane content, so a changed pane only drops out of resident reads (consumers fail closed); `worker_provision` restores the registered setup. No consumer reads workers continuously (checked 2026-11-24 with `worker_usage`: Trade Alert stopped 2026-11-13; Trade Spine reads by symbol with a `worker_rotate_snapshot` fallback, or by handles chosen in chat).
+- **Only rule for workers:** never close or duplicate a worker tab. A duplicate is removed with `worker_target_audit` → `worker_retire_nonmatching` → `worker_cleanup_retired_shell`.
+- **Computer safety, not chart safety:** `ui_evaluate` is never exposed by the public gateway. CDP port 9222 has no authentication and can read local files; `dtv-cdp-guard` (compose.public.yaml) blocks Docker containers from reaching it via host.docker.internal; keep it running.
+- Don't add guards against chart changes. A guard is justified only where a mistake reaches the computer or returns wrong market data without saying so.
 - `npm test` is the offline unit suite. `npm run test:e2e` is live and manages its own disposable chart tab.
 
 ## Tool Conventions

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {planPersonalLayoutOpen} from '../src/core/personal-routing.js';
 import {recordWorkerUsage,workerUsageReport,usageFromSnapshot} from '../src/core/worker-usage.js';
 
-test('personal chart reuse never opens duplicate, reuses the first of duplicates and refuses workers',()=>{
+test('personal chart reuse never opens duplicate, reuses the first of duplicates and never duplicates workers',()=>{
  const mk=(id,chart_id)=>({id,chart_id,is_chart:true});
  const worker={worker_tabs:[{chart_id:'worker',target_id:'worker-id'}]};
  const tabState={tabs:[mk('personal1','stocks'),mk('worker-id','worker')]};
@@ -13,7 +13,10 @@ test('personal chart reuse never opens duplicate, reuses the first of duplicates
    {action:'open',matched_count:1});
  assert.deepEqual(planPersonalLayoutOpen({chartId:'unknown',tabState,workerState:worker}),
    {action:'open',matched_count:0});
- assert.throws(()=>planPersonalLayoutOpen({chartId:'worker',tabState,workerState:worker}),/protected worker/);
+ assert.deepEqual(planPersonalLayoutOpen({chartId:'worker',tabState,workerState:worker}),
+   {action:'reuse',target_id:'worker-id',matched_count:1});
+ assert.throws(()=>planPersonalLayoutOpen({chartId:'worker',tabState,workerState:worker,forceNew:true}),/never duplicated/);
+ assert.throws(()=>planPersonalLayoutOpen({chartId:'worker',tabState:{tabs:[]},workerState:worker}),/worker_provision/);
  assert.deepEqual(planPersonalLayoutOpen({
    chartId:'stocks',
    tabState:{tabs:[mk('personal1','stocks'),mk('personal2','stocks')]},

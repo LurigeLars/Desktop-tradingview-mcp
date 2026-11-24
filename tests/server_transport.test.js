@@ -239,7 +239,7 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
     assert.match(byName.get('batch_run').description, /explicitly restore/);
     assert.match(byName.get('batch_run').description, /not full candle history/);
     const candles = byName.get('data_get_ohlcv');
-    assert.match(candles.description, /history\.count=1000.*non-worker research chart/);
+    assert.match(candles.description, /history\.count=1000.*verified chart/);
     const history = candles.inputSchema.properties.history;
     assert.deepEqual(history.required, ['expected_symbol', 'expected_resolution']);
     assert.match(history.properties.before_time.description, /previous first_time/);

@@ -392,7 +392,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 | "Run my morning brief" | `morning_brief` → interpret the returned evidence with configured rules → `session_save` when the brief is complete |
-| "Check a watchlist / top 50 Nasdaq / several timeframes" | Choose or combine suitable resident reads, `batch_run` on a non-worker research chart, temporary sampling or other bounded reads; verify coverage, explicitly restore chart state, and obtain extra candle/study data when the summary is insufficient |
+| "Check a watchlist / top 50 Nasdaq / several timeframes" | Choose or combine suitable resident reads, `batch_run` on any attached chart, temporary sampling or other bounded reads; verify coverage, explicitly restore chart state, and obtain extra candle/study data when the summary is insufficient |
 | "What did yesterday's brief say?" | `session_get` |
 
 ## Tool Reference (93 MCP tools)
@@ -639,7 +639,7 @@ CDP `target_id` values and Desktop `shell_tab_id` values must be rediscovered af
 - `tab_list`: lists chart renderers in `tabs` plus distinct physical `shell_tabs` (`shell_tab_id`, `layout_name`, `active`). Shell discovery fails closed.
 - `tab_close(shell_tab_id, expected_layout_name)`: closes exactly one physical Desktop tab even when layout names repeat. Worker tabs are protected.
 - `tab_switch(shell_tab_id, expected_layout_name)`: switches the visible physical Desktop tab even when layout names repeat.
-- `tab_attach(target_id)`: selects an exact current CDP chart renderer for editing, including duplicate `chart_id` instances, while protecting workers.
+- `tab_attach(target_id)`: selects an exact current CDP chart renderer for editing, including duplicate `chart_id` instances and worker tabs.
 - `tab_attach(chart_id)`: legacy shortcut for uniquely opened chart layouts; `tab_new` continues to create/open tabs.
 
 After restart, always call `tab_list` again. Do not reuse previous session IDs or infer an exact renderer from a duplicate layout name.

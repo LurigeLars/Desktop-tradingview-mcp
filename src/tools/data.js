@@ -5,23 +5,14 @@ import * as core from '../core/data.js';
 import { getOhlcvHistory } from '../core/history.js';
 import { getTargetInfo } from '../connection.js';
 import * as tabCore from '../core/tab.js';
-import { isWorkerOwnedTab, status as workerStatus } from '../core/worker.js';
-
-/** Read-only history collection is permitted only on a verified non-worker
- * chart. Unlike a normal OHLCV read, history loading changes the chart's
- * in-memory cache, so never run it against resident market worker targets.
- */
-export function verifyHistoryResearchTarget(info, snapshot, state) {
+/** History paging is bound to one uniquely identified chart target. */
+export function verifyHistoryResearchTarget(info, snapshot) {
   if(!info?.id || !Array.isArray(snapshot?.tabs))
-    throw new Error('HISTORY_TARGET_UNVERIFIED: attach a dedicated non-worker chart');
+    throw new Error('HISTORY_TARGET_UNVERIFIED: attach a chart first');
   const matches=snapshot.tabs.filter(tab=>tab.is_chart && tab.id===info.id);
   if(matches.length!==1)
     throw new Error('HISTORY_TARGET_UNVERIFIED: current chart target not uniquely identified');
-  const target=matches[0];
-  if(isWorkerOwnedTab(target,state) ||
-    /DTV (?:Market|Worker)\b/i.test(String(target.title||'')))
-    throw new Error('WORKER_TARGET_FORBIDDEN: attach an isolated research chart');
-  return target;
+  return matches[0];
 }
 
 
@@ -35,12 +26,12 @@ const historySchema = z.object({
 
 async function readVerifiedHistory(args) {
   const attached=await getTargetInfo();
-  verifyHistoryResearchTarget(attached,await tabCore.list(),workerStatus());
+  verifyHistoryResearchTarget(attached,await tabCore.list());
   return getOhlcvHistory(args);
 }
 
 export function registerDataTools(server) {
-  server.tool('data_get_ohlcv', 'Primary TradingView Desktop candles for intraday analysis and backtests when the selected feed covers the symbol and session. Standard reads return up to 500 bars. For deeper history, use history.count=1000 on a verified non-worker research chart with the exact expected_symbol and expected_resolution. Continue with next_cursor. Verify chart identity and coverage. Use summary=true for compact stats.', {
+  server.tool('data_get_ohlcv', 'Primary TradingView Desktop candles for intraday analysis and backtests when the selected feed covers the symbol and session. Standard reads return up to 500 bars. For deeper history, use history.count=1000 on a verified chart with the exact expected_symbol and expected_resolution. Continue with next_cursor. Verify chart identity and coverage. Use summary=true for compact stats.', {
     count: z.coerce.number().optional().describe('Number of bars to retrieve (max 500, default 100)'),
     summary: z.coerce.boolean().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
     history: historySchema.optional().describe('Page older bars. Omit top-level count/summary. While has_more, pass cursor or before_time.'),
@@ -56,7 +47,7 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('data_get_ohlcv_history', 'Page older candles on an attached non-worker research chart; equivalent to data_get_ohlcv(history=...). Repeat while has_more=true.', historySchema.shape, async (args) => {
+  server.tool('data_get_ohlcv_history', 'Page older candles on an attached chart; equivalent to data_get_ohlcv(history=...). Repeat while has_more=true.', historySchema.shape, async (args) => {
     try {
       return jsonResult(await readVerifiedHistory(args));
     }

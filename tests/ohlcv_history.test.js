@@ -148,7 +148,7 @@ describe('DTV paginated OHLCV history', () => {
     assert.equal(p.returned,1000);
     assert.ok(h.calls>0);
   });
-  it('requires registered read-only annotations and excludes market workers',()=>{
+  it('requires registered read-only annotations and a uniquely identified chart',()=>{
     assert.deepEqual(LEGACY_TOOL_ANNOTATIONS.data_get_ohlcv_history,
       LEGACY_TOOL_ANNOTATIONS.data_get_ohlcv);
     const tools=new Map();
@@ -163,11 +163,10 @@ describe('DTV paginated OHLCV history', () => {
       {id:'qa-target',is_chart:true,chart_id:'qa-chart',title:'DTV OHLCV QA'},
       {id:'worker-target',is_chart:true,chart_id:'worker-chart',title:'BATS:NVDA DTV Worker 06'},
     ]};
-    const workerState={worker_tabs:[{target_id:'worker-target',chart_id:'worker-chart'}]};
-    assert.equal(verifyHistoryResearchTarget({id:'qa-target'},tabs,workerState).id,'qa-target');
-    assert.throws(()=>verifyHistoryResearchTarget({id:'worker-target'},tabs,workerState),/WORKER_TARGET_FORBIDDEN/);
-    assert.throws(()=>verifyHistoryResearchTarget({id:'absent'},tabs,workerState),/HISTORY_TARGET_UNVERIFIED/);
-    assert.throws(()=>verifyHistoryResearchTarget({id:'worker-target'},tabs,{worker_tabs:[]}),/WORKER_TARGET_FORBIDDEN/);
+    assert.equal(verifyHistoryResearchTarget({id:'qa-target'},tabs).id,'qa-target');
+    // Workers are ordinary AI charts, so history paging may run on them.
+    assert.equal(verifyHistoryResearchTarget({id:'worker-target'},tabs).id,'worker-target');
+    assert.throws(()=>verifyHistoryResearchTarget({id:'absent'},tabs),/HISTORY_TARGET_UNVERIFIED/);
   });
 
 });

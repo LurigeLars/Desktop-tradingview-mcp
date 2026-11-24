@@ -63,7 +63,7 @@ export function registerTabTools(server) {
   });
 
   server.registerTool('tab_attach', {
-    description: 'Attach to an exact live CDP target_id from tab_list (supports duplicate layouts), or to a unique chart_id. Rediscover IDs after TradingView restart. Worker tabs are protected.',
+    description: 'Attach to an exact live CDP target_id from tab_list (supports duplicate layouts), or to a unique chart_id. Rediscover IDs after TradingView restart. Worker tabs are ordinary AI charts.',
     inputSchema: {
       chart_id: z.string().optional().describe('Unique chart URL token; use target_id instead for duplicate layouts.'),
       target_id: z.string().optional().describe('Exact live CDP target from a fresh tab_list, including duplicate layouts.'),
@@ -82,9 +82,6 @@ export function registerTabTools(server) {
         if (match.length !== 1) {
           throw new Error('No unique open chart matched. Refresh tab_list and use exact target_id.');
         }
-        if (isWorkerOwnedTab(match[0], workerStatus())) {
-          throw new Error('Refusing to attach interactive commands to a DTV worker-owned layout.');
-        }
         return target_id
           ? core.attachChartTarget({ target_id })
           : core.attachChart({ chart_id });
@@ -93,7 +90,7 @@ export function registerTabTools(server) {
   });
 
   server.registerTool('tab_new', {
-    description: 'Open or reuse a personal TradingView Desktop chart. layout=new with name and symbol creates the named layout first, then changes its symbol; existing saved layouts reuse a non-worker tab by default. Worker layouts are protected.',
+    description: 'Open or reuse a personal TradingView Desktop chart. layout=new with name and symbol creates the named layout first, then changes its symbol; existing saved layouts reuse their open tab by default. Worker layouts are reused, never duplicated.',
     inputSchema: {
       layout: z.string().optional().describe('"new" for a blank new layout, or a saved layout name (substring match). Omit to leave the tab on the new-tab page.'),
       name: z.string().optional().describe('Name for the new layout (used with layout: "new"; default "New layout")'),

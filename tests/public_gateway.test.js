@@ -75,15 +75,14 @@ describe('public gateway configuration', () => {
     assert.equal(headers['content-length'], '12');
   });
 
-  it('preserves the full 99-tool TradingView surface by default', () => {
+  it('preserves the full 98-tool TradingView surface by default', () => {
     const allowed = parseAllowedTools();
-    assert.equal(allowed.size, 99);
+    assert.equal(allowed.size, 98);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('pine_set_source'), true);
     assert.equal(allowed.has('replay_start'), true);
     assert.equal(allowed.has('draw_shape'), true);
     assert.equal(allowed.has('ui_evaluate'), false);
-    assert.equal(allowed.has('worker_chart_control'), true);
     assert.equal(allowed.has('tv_update'), true);
     assert.equal(allowed.has('realtime_snapshot'), true);
     assert.equal(allowed.has('worker_status'), true);
@@ -98,8 +97,7 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit operator-controlled core profile', () => {
     const allowed = parseAllowedTools('core');
-    assert.equal(allowed.size, 58);
-    assert.equal(allowed.has('worker_chart_control'), true);
+    assert.equal(allowed.size, 57);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('data_get_ohlcv'), true);
     assert.equal(allowed.has('news_flow_get'), true);
@@ -113,7 +111,7 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit full profile', () => {
     const allowed = parseAllowedTools('full');
-    assert.equal(allowed.size, 99);
+    assert.equal(allowed.size, 98);
     assert.equal(allowed.has('ui_evaluate'), false);
     assert.equal(allowed.has('tv_update'), true);
   });
@@ -208,7 +206,7 @@ describe('public gateway configuration', () => {
     assert.match(response.result.instructions, /TradingView Desktop MCP/);
     assert.match(response.result.instructions, /no mandatory tool order/);
     assert.match(response.result.instructions, /Direct chart tools require no worker preflight/);
-    assert.match(response.result.instructions, /explicitly restore/);
+    assert.match(response.result.instructions, /Workers are AI charts/);
     assert.match(response.result.instructions, /counts \+ last_bar, not full candles/);
     assert.match(response.result.instructions, /history\.count=1000/);
     assert.match(response.result.instructions, /history\.before_time.*first_time/);
