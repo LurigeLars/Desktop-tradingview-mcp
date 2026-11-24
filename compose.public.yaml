@@ -31,6 +31,46 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # Docker Desktop relays host.docker.internal to the host's 127.0.0.1, so without this
+  # every container could attach to TradingView's unauthenticated CDP port and bypass the MCP.
+  cdp-guard:
+    build:
+      dockerfile_inline: |
+        FROM node:26.13.1-alpine
+        RUN apk add --no-cache iptables
+    image: dtv-cdp-guard:local
+    container_name: dtv-cdp-guard
+    network_mode: host
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW]
+    read_only: true
+    tmpfs: [/run]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CDP_PORT: "9222"
+    entrypoint: ["/bin/sh", "-c"]
+    # Re-checks every 15s because Docker Desktop can rewrite DOCKER-USER after network changes.
+    command:
+      - |
+        set -u
+        while :; do
+          HOST_IP=$$(getent ahostsv4 host.docker.internal | awk 'NR==1{print $$1}')
+          if [ -z "$$HOST_IP" ]; then echo "host.docker.internal unresolved" >&2; sleep 5; continue; fi
+          echo "$$HOST_IP" > /run/host_ip
+          for chain in DOCKER-USER OUTPUT; do
+            iptables -C $$chain -d $$HOST_IP -p tcp --dport $$CDP_PORT -j REJECT --reject-with tcp-reset 2>/dev/null \
+              || { iptables -I $$chain 1 -d $$HOST_IP -p tcp --dport $$CDP_PORT -j REJECT --reject-with tcp-reset \
+                   && echo "blocked $$HOST_IP:$$CDP_PORT in $$chain"; }
+          done
+          sleep 15
+        done
+    healthcheck:
+      test: ["CMD-SHELL", "ip=$$(cat /run/host_ip) && for c in DOCKER-USER OUTPUT; do iptables -C $$c -d $$ip -p tcp --dport $$CDP_PORT -j REJECT --reject-with tcp-reset || exit 1; done"]
+      interval: 30s
+      start_period: 20s
+    restart: unless-stopped
+
 networks:
   edge:
     driver: bridge
