@@ -70,3 +70,15 @@ test('bare tickers never suffix-match a formula row', () => {
     { matched: null, verification: 'not_found' },
   );
 });
+
+test('Trade Alert watchlist is refused unless the user explicitly allows it', async () => {
+  const { tradeAlertWatchlistId, refuseTradeAlertWatchlist } = await import('../src/core/watchlist.js');
+  assert.equal(tradeAlertWatchlistId({ readConfig: () => '﻿{"dtv_watchlist_id": 341892775}' }), '341892775');
+  assert.equal(tradeAlertWatchlistId({ readConfig: () => '{"dtv_watchlist_id": null}' }), null);
+  assert.equal(tradeAlertWatchlistId({ readConfig: () => { throw new Error('missing'); } }), null);
+  const list = { id: 341892775, name: 'Alerts' };
+  assert.throws(() => refuseTradeAlertWatchlist(list, false, '341892775'), /TRADE_ALERT_WATCHLIST/);
+  assert.doesNotThrow(() => refuseTradeAlertWatchlist(list, true, '341892775'));
+  assert.doesNotThrow(() => refuseTradeAlertWatchlist({ id: 1, name: 'Other' }, false, '341892775'));
+  assert.doesNotThrow(() => refuseTradeAlertWatchlist(null, false, '341892775'));
+});

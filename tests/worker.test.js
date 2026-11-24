@@ -223,3 +223,15 @@ test('worker tab ownership matches exact target id and restart-stable chart id',
   assert.equal(isWorkerOwnedTab({ id: 'rotated-b', chart_id: 'layout-b' }, state), true);
   assert.equal(isWorkerOwnedTab({ id: 'external', chart_id: 'external-layout' }, state), false);
 });
+
+test('protected entries get tabs of their own after the shared AI tabs', async () => {
+  const { planWorkerTopology, protectedChartIds, PROTECTED_GROUP } = await import('../src/core/worker.js');
+  const e = (handle, groups = []) => ({ handle, groups });
+  const entries = [e('a'), e('L1', [PROTECTED_GROUP]), e('b'), e('L2', [PROTECTED_GROUP, 'morning']), e('c')];
+  const plan = planWorkerTopology(entries, { maxChartsPerTab: 2 });
+  assert.deepEqual(plan.tabs.map(t => t.handles), [['a', 'b'], ['c'], ['L1', 'L2']]);
+  const state = { entries, topology_plan: plan, worker_tabs: [
+    { slot: 0, chart_id: 'shared0' }, { slot: 1, chart_id: 'shared1' }, { slot: 2, chart_id: 'lunch' }] };
+  assert.deepEqual([...protectedChartIds(state)], ['lunch']);
+  assert.deepEqual([...protectedChartIds({ ...state, entries: entries.map(x => ({ ...x, groups: [] })) })], []);
+});
