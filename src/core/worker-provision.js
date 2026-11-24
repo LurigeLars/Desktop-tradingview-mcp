@@ -1429,109 +1429,42 @@ async function openOrCreateWorkerTab({
     }
   }
 
+  // Create the named layout from the layout picker in a fresh tab. The older
+  // "open an unsaved chart, Make copy, close the temporary tab" flow left the
+  // copy undiscoverable in Desktop 3.5 and its cleanup quit TradingView.
   let created = null;
   try {
-    created = await deps.newTab({
-      as_chart: true,
-      force_new_tab: owned?.persistent_layout !== true,
-      ...newTabOptions,
-    });
+    created = await deps.newTab({ layout: 'new', name: desiredName, ...newTabOptions });
   } catch (error) {
     throw new Error(
-      'Worker direct chart-tab create failed for "' + desiredName + '": ' +
-      (error?.message || String(error)),
+      'Worker layout create failed for "' + desiredName + '": ' + (error?.message || String(error)),
     );
   }
-
-  const directTarget = await findTargetForOwned(
+  const target = await findTargetForOwned(
     { target_id: created.target_id, chart_id: created.chart_id },
     null,
     deps.listTargets,
   );
-  if (!directTarget) throw new Error('New worker chart target was not discoverable after direct navigation');
-
-  try {
-    const cloned = await deps.cloneTargetAsLayout(directTarget, desiredName);
-    return {
-      target: cloned,
-      layoutName: desiredName,
-      reused: false,
-      openedThisCall: true,
-      directChart: false,
-      persistentLayout: true,
-    };
-  } catch (error) {
-    try {
-      await deps.closeTabByOwned({
-        target_id: directTarget.id,
-        chart_id: chartIdFromTarget(directTarget),
-      });
-    } catch { /* best effort: close only the DTV-created direct chart */ }
-    throw new Error(
-      'Worker chart persistence failed for "' + desiredName + '": ' +
-      (error?.message || String(error)),
-    );
-  }
+  if (!target) throw new Error('New worker layout "' + desiredName + '" was not discoverable as a chart target');
+  return {
+    target,
+    layoutName: desiredName,
+    reused: false,
+    openedThisCall: true,
+    directChart: false,
+    persistentLayout: true,
+  };
 }
 
-export async function closeWorkerTargetGracefully(targetId, {
-  connect = id => CDP({ host: CDP_HOST, port: CDP_PORT, target: id }),
-  listTargets = listTradingViewChartTargets,
-  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  timeoutMs = 900,
-} = {}) {
-  const id = String(targetId || '').trim();
-  if (!id) return false;
-
-  let client = null;
-  try {
-    client = await connect(id);
-
-    // Prefer renderer/page-level close semantics so TradingView Desktop's
-    // Electron shell receives a normal tab-close lifecycle and can remove the
-    // visual tab instead of retaining an orphaned spinner shell.
-    try {
-      await client.Runtime.enable();
-      await client.Runtime.evaluate({
-        expression: 'window.close(); true',
-        returnByValue: true,
-      });
-    } catch {
-      // Some restored tabs reject window.close(); Page.close is the next
-      // graceful option before falling back to Target.closeTarget.
-      try {
-        if (client.Page?.enable) await client.Page.enable();
-        if (client.Page?.close) await client.Page.close();
-      } catch {
-        // Caller will use hard target close if this target remains live.
-      }
-    }
-  } catch {
-    return false;
-  } finally {
-    try { if (client) await client.close(); } catch { /* target may already be gone */ }
-  }
-
-  const deadline = Date.now() + Number(timeoutMs);
-  do {
-    const remaining = await listTargets();
-    if (!remaining.some(target => String(target.id) === id)) return true;
-    if (Date.now() >= deadline) break;
-    await wait(75);
-  } while (true);
-
-  return false;
-}
-
+// Never close a tab renderer from the inside (window.close, Page.close or
+// Target.closeTarget): Electron closes the whole Desktop window and TradingView
+// quits. Always click the exact tab's own close button in the shell.
 export async function closeTabByOwned(owned, {
   listTargets = listTradingViewChartTargets,
-  gracefulCloseTarget = targetId => closeWorkerTargetGracefully(targetId, { listTargets }),
-  closeTarget = targetId => CDP.Close({ host: CDP_HOST, port: CDP_PORT, id: targetId }),
+  closeByTargetId = target_id => tabCore.closeTabByTargetId({ target_id }),
   listTabs = tabCore.list,
   switchTab = tabCore.switchTab,
   closeTab = tabCore.closeTab,
-  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  timeoutMs = 3000,
 } = {}) {
   const targetId = owned?.target_id ? String(owned.target_id) : null;
 
@@ -1540,30 +1473,8 @@ export async function closeTabByOwned(owned, {
     if (!before.some(target => String(target.id) === targetId)) {
       return { success: true, closed: false, reason: 'already_absent', target_id: targetId };
     }
-
-    const gracefullyClosed = await gracefulCloseTarget(targetId);
-    if (gracefullyClosed) {
-      return {
-        success: true,
-        closed: true,
-        via: 'renderer_close',
-        target_id: targetId,
-      };
-    }
-
-    await closeTarget(targetId);
-
-    const deadline = Date.now() + Number(timeoutMs);
-    do {
-      const remaining = await listTargets();
-      if (!remaining.some(target => String(target.id) === targetId)) {
-        return { success: true, closed: true, via: 'target_id_fallback', target_id: targetId };
-      }
-      if (Date.now() >= deadline) break;
-      await wait(100);
-    } while (true);
-
-    throw new Error('Worker target ' + targetId + ' remained present after close request.');
+    await closeByTargetId(targetId);
+    return { success: true, closed: true, via: 'shell_tab_close', target_id: targetId };
   }
 
   const chartId = owned?.chart_id ? String(owned.chart_id) : null;

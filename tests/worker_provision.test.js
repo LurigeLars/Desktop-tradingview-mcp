@@ -8,7 +8,6 @@ import {
   retireVerifiedDuplicateWorker,
   buildWorkerLayoutName,
   closeTabByOwned,
-  closeWorkerTargetGracefully,
   cloneTargetAsLayout,
   layoutCodeForPaneCount,
   legacyDirectWorkerRecovery,
@@ -124,91 +123,34 @@ test('Save As recovery reuses an already-created saved-layout target', async () 
   assert.equal(dialogEvaluated, false);
 });
 
-test('worker cleanup prefers graceful renderer close for an exact duplicate target', async () => {
+test('worker cleanup closes an exact target only through its shell tab', async () => {
   const targets = [
     { id: 'worker-a', url: 'https://www.tradingview.com/chart/shared/' },
     { id: 'worker-b', url: 'https://www.tradingview.com/chart/shared/' },
   ];
-  let hardCloseCalled = false;
-  let shellTouched = false;
-
+  const closed = [];
   const result = await closeTabByOwned(
     { target_id: 'worker-a', chart_id: 'shared' },
     {
       listTargets: async () => targets.slice(),
-      gracefulCloseTarget: async targetId => {
-        const index = targets.findIndex(target => target.id === targetId);
-        if (index >= 0) targets.splice(index, 1);
-        return true;
-      },
-      closeTarget: async () => { hardCloseCalled = true; },
-      listTabs: async () => { shellTouched = true; throw new Error('shell list must not run'); },
-      switchTab: async () => { shellTouched = true; throw new Error('shell switch must not run'); },
-      closeTab: async () => { shellTouched = true; throw new Error('shell close must not run'); },
-      wait: async () => {},
+      closeByTargetId: async targetId => { closed.push(targetId); },
+      listTabs: async () => { throw new Error('chart-id lookup must not run with a target id'); },
     },
   );
+  assert.deepEqual(closed, ['worker-a']);
+  assert.equal(result.via, 'shell_tab_close');
 
-  assert.equal(result.success, true);
-  assert.equal(result.closed, true);
-  assert.equal(result.via, 'renderer_close');
-  assert.equal(hardCloseCalled, false);
-  assert.equal(shellTouched, false);
-  assert.deepEqual(targets.map(target => target.id), ['worker-b']);
-});
-
-test('worker cleanup falls back to hard target close when graceful close cannot remove it', async () => {
-  const targets = [
-    { id: 'worker-a', url: 'https://www.tradingview.com/chart/shared/' },
-    { id: 'worker-b', url: 'https://www.tradingview.com/chart/shared/' },
-  ];
-
-  const result = await closeTabByOwned(
-    { target_id: 'worker-a', chart_id: 'shared' },
-    {
-      listTargets: async () => targets.slice(),
-      gracefulCloseTarget: async () => false,
-      closeTarget: async targetId => {
-        const index = targets.findIndex(target => target.id === targetId);
-        if (index >= 0) targets.splice(index, 1);
-      },
-      wait: async () => {},
-    },
-  );
-
-  assert.equal(result.success, true);
-  assert.equal(result.closed, true);
-  assert.equal(result.via, 'target_id_fallback');
-  assert.deepEqual(targets.map(target => target.id), ['worker-b']);
-});
-
-test('graceful worker close reports success when renderer lifecycle removes the target', async () => {
-  const targets = [{ id: 'worker-a', url: 'https://www.tradingview.com/chart/shared/' }];
-  const evaluated = [];
-  const fakeClient = {
-    Runtime: {
-      enable: async () => {},
-      evaluate: async args => {
-        evaluated.push(args.expression);
-        targets.splice(0, targets.length);
-      },
-    },
-    Page: {
-      enable: async () => {},
-      close: async () => {},
-    },
-    close: async () => {},
-  };
-
-  const result = await closeWorkerTargetGracefully('worker-a', {
-    connect: async () => fakeClient,
+  const absent = await closeTabByOwned({ target_id: 'gone' }, {
     listTargets: async () => targets.slice(),
-    wait: async () => {},
-    timeoutMs: 100,
+    closeByTargetId: async () => { throw new Error('must not close an absent target'); },
   });
+  assert.equal(absent.reason, 'already_absent');
+});
 
-  assert.equal(result, true);
-  assert.match(evaluated[0], /window\.close/);
+test('worker cleanup never closes a renderer from the inside', async () => {
+  const source = await import('node:fs').then(fs => fs.readFileSync(new URL('../src/core/worker-provision.js', import.meta.url), 'utf8'));
+  // Electron closes the whole Desktop window (and TradingView quits) for these.
+  for (const call of ['window.close(', 'Page.close(', 'CDP.Close(']) assert.equal(source.includes(call), false, call);
 });
 
 test('legacy chart-id cleanup fails closed when multiple tabs share the chart id', async () => {
@@ -545,7 +487,6 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
 
   let liveTargets = [];
   let chartCounter = 0;
-  let cloneCounter = 0;
   const runtime = {
     status: () => status({ _deps: store.deps }),
     record: args => recordWorkerProvision({ ...args, _deps: store.deps }),
@@ -557,10 +498,10 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
     })),
     newTab: async args => {
       chartCounter += 1;
-      assert.equal(args.as_chart, true);
-      assert.equal(args.force_new_tab, true);
+      assert.equal(args.layout, 'new');
+      assert.equal(args.name, 'Worker ' + String(chartCounter).padStart(2, '0'));
       const targetId = 'target-' + chartCounter;
-      const chartId = 'direct-' + chartCounter;
+      const chartId = 'persistent-' + chartCounter;
       liveTargets.push({
         id: targetId,
         type: 'page',
@@ -569,14 +510,7 @@ test('worker provisioning is resumable across tab-open and pane-configure phases
       });
       return { success: true, target_id: targetId, chart_id: chartId };
     },
-    cloneTargetAsLayout: async (target, name) => {
-      cloneCounter += 1;
-      assert.equal(name, 'Worker ' + String(cloneCounter).padStart(2, '0'));
-      const live = liveTargets.find(item => item.id === target.id);
-      assert.ok(live);
-      live.url = 'https://www.tradingview.com/chart/persistent-' + cloneCounter + '/';
-      return live;
-    },
+    cloneTargetAsLayout: async () => { throw new Error('new worker tabs must not use Make copy'); },
     configureTarget: async ({ target, paneCount, entries, maxPanes }) => {
       assert.equal(maxPanes, 1);
       return {
@@ -1210,23 +1144,16 @@ test('persisted worker intent creates a restart-stable saved layout', async () =
     })),
     newTab: async args => {
       newTabCalls += 1;
-      assert.equal(args.as_chart, true);
-      assert.equal(args.force_new_tab, true);
+      assert.deepEqual([args.layout, args.name], ['new', 'DTV Worker 01']);
       const created = {
         id: 'worker-target',
         type: 'page',
-        url: 'https://www.tradingview.com/chart/worker-chart/',
+        url: 'https://www.tradingview.com/chart/persistent-worker/',
       };
       liveTargets.push(created);
-      return { success: true, target_id: created.id, chart_id: 'worker-chart' };
+      return { success: true, target_id: created.id, chart_id: 'persistent-worker' };
     },
-    cloneTargetAsLayout: async (target, name) => {
-      assert.equal(name, 'DTV Worker 01');
-      const live = liveTargets.find(item => item.id === target.id);
-      assert.ok(live);
-      live.url = 'https://www.tradingview.com/chart/persistent-worker/';
-      return live;
-    },
+    cloneTargetAsLayout: async () => { throw new Error('new worker tabs must not use Make copy'); },
     configureTarget: async () => {
       throw new Error('configureTarget must not run in a tab-open phase');
     },
