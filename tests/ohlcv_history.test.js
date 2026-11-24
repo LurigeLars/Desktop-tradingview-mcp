@@ -5,7 +5,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { getOhlcvHistory } from '../src/core/history.js';
-import { verifyHistoryResearchTarget, registerDataTools } from '../src/tools/data.js';
+import { verifyHistoryResearchTarget, registerDataTools, historyResult } from '../src/tools/data.js';
 import { LEGACY_TOOL_ANNOTATIONS } from '../src/server/tool-annotations.js';
 
 const ORIGIN = 1700000000;
@@ -74,6 +74,38 @@ describe('DTV paginated OHLCV history', () => {
     assert.ok(rows.every((v,i)=>i===0||v.time>rows[i-1].time));
     assert.equal(rows[0].time,ORIGIN);
     assert.ok(h.calls>=21);
+  });
+  it('returns up to 8000 lossless compact columns and preserves cursor boundaries',async()=>{
+    const h=createHarness({total:10000,initiallyLoaded:100});
+    const args={expected_symbol:h.expected_symbol,expected_resolution:'1',format:'columns',count:8000,_deps:h._deps};
+    const first=await getOhlcvHistory(args);
+    assert.equal(first.format,'columns');
+    assert.equal(first.returned,8000);
+    assert.ok(first.has_more);
+    for (const [key,field] of Object.entries({t:'time',o:'open',h:'high',l:'low',c:'close',v:'volume'}))
+      assert.deepEqual(first.bars[key],h.all.slice(-8000).map(b=>b[field]));
+    const wire=historyResult(first).content[0].text;
+    assert.deepEqual(JSON.parse(wire),first);
+    assert.ok(Buffer.byteLength(wire)<512*1024);
+    assert.ok(!wire.includes('\n'));
+    const second=await getOhlcvHistory({...args,cursor:first.next_cursor});
+    assert.equal(second.returned,2000);
+    assert.deepEqual(second.bars.t,h.all.slice(0,2000).map(b=>b.time));
+    assert.ok(second.last_time<first.first_time);
+    assert.equal(second.has_more,false);
+    await assert.rejects(getOhlcvHistory({...args,count:8001}),/count/);
+    await assert.rejects(getOhlcvHistory({...args,format:'rows'}),/count/);
+    await assert.rejects(getOhlcvHistory({...args,format:'unknown'}),/format/);
+  });
+  it('preserves legacy row encoding and rejects oversized compact payloads explicitly',()=>{
+    const row={success:true,bars:[{time:ORIGIN,open:1,high:2,low:1,close:2,volume:3}]};
+    assert.equal(historyResult(row).content[0].text,JSON.stringify(row,null,2));
+    const values=Array(8000).fill(1.2345678901234567e-100);
+    assert.throws(()=>historyResult({format:'columns',bars:{t:values,o:values,h:values,l:values,c:values,v:values}}),/HISTORY_OUTPUT_TOO_LARGE/);
+  });
+  it('rejects invalid candles before column conversion',async()=>{
+    const h=createHarness({duplicate:true});
+    await assert.rejects(getOhlcvHistory({expected_symbol:h.expected_symbol,expected_resolution:'1',count:120,format:'columns',_deps:h._deps}),/HISTORY_INVALID/);
   });
   it('selects strict before_time and returns stable cursors',async()=>{
     const h=createHarness();
@@ -158,6 +190,8 @@ describe('DTV paginated OHLCV history', () => {
       expected_symbol:'BATS:NVDA',expected_resolution:'1',count:1000,
     }).success,true);
     assert.equal(normal.history.safeParse({count:1000}).success,false);
+    assert.equal(normal.history.safeParse({expected_symbol:'BATS:NVDA',expected_resolution:'1',count:8000,format:'columns'}).success,true);
+    assert.equal(normal.history.safeParse({expected_symbol:'BATS:NVDA',expected_resolution:'1',count:8001,format:'columns'}).success,false);
     assert.equal(tools.has('data_get_ohlcv_history'),true);
     const tabs={tabs:[
       {id:'qa-target',is_chart:true,chart_id:'qa-chart',title:'DTV OHLCV QA'},
