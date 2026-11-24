@@ -183,5 +183,5 @@ test('embedded literals cannot close a script context and round-trip exactly', (
   const value = { a: '</script><x>' + ls, b: 'quote" back' + String.fromCharCode(92) };
   const literal = jsLiteral(value);
   assert.equal(/[<>]/.test(literal) || literal.includes(ls), false);
-  assert.deepEqual(runInNewContext('(' + literal + ')'), value);
+  assert.equal(JSON.stringify(runInNewContext('(' + literal + ')')), JSON.stringify(value));
 });
