@@ -251,6 +251,9 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
     assert.equal(byName.get('pane_set_symbol').annotations.openWorldHint, false);
 
     assert.equal(byName.get('ui_evaluate').annotations.openWorldHint, true);
+    assert.equal(byName.get('ui_sequence').annotations.destructiveHint, true);
+    assert.equal(byName.get('ui_sequence').annotations.openWorldHint, false);
+    assert.equal(byName.get('ui_sequence').inputSchema.properties.steps.maxItems, 8);
     assert.equal(byName.get('tv_update').annotations.openWorldHint, true);
   } finally {
     try {

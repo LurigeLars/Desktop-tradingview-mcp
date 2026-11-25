@@ -85,6 +85,7 @@ export const LEGACY_TOOL_ANNOTATIONS = Object.freeze({
   replay_status: CLOSED_READ,
 
   ui_click: CLOSED_DESTRUCTIVE,
+  ui_sequence: CLOSED_DESTRUCTIVE,
   ui_open_panel: CLOSED_WRITE,
   ui_fullscreen: CLOSED_WRITE,
   layout_list: CLOSED_READ,

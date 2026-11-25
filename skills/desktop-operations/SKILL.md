@@ -15,3 +15,5 @@ Prefer semantic tools over UI automation.
 6. Use UI keyboard/actions only as a narrow fallback and verify resulting state afterward.
 
 Keep mutations minimal and reversible where the tool surface allows it.
+
+For multiple chart UI checks or clicks, use `ui_sequence` with exact target_id + chart_id from tab_list. Up to 8 steps; exact visible aria-label, data-name or text; a click must be followed by wait/assert. Inspect partial results before retrying. No arbitrary JavaScript or Desktop targets. Use `tab_confirm_close` and `layout_delete` for their named operations; never use generic UI to bypass their protection or execute trades.
