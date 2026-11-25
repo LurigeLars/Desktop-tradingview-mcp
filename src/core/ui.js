@@ -123,6 +123,43 @@ export async function layoutList() {
   return { success: true, layout_count: layouts?.layouts?.length || 0, source: layouts?.source, layouts: layouts?.layouts || [], error: layouts?.error };
 }
 
+
+/** Click only the exact saved-chart row in the existing layout picker. */
+export function layoutDeleteExpression({chart_id,name}) {
+  if(!/^[A-Za-z0-9_-]{1,64}$/.test(chart_id)||typeof name!=='string'||!name.trim())throw new Error('Exact chart ID and layout name required');
+  return '(function(){'+
+    "const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};"+
+    "const d=document.querySelectorAll('[data-name=\"load-layout-dialog\"]');if(d.length!==1)return {clicked:false};"+
+    "const rows=Array.from(d[0].querySelectorAll('[data-name=\"load-chart-dialog-item\"]')).filter(e=>{"+
+      "const a=e.getAttribute('href');if(!a)return false;let u;try{u=new URL(a,location.origin)}catch{return false;}"+
+      "return u.origin===location.origin&&u.pathname.replace(/\\/$/,'')==="+JSON.stringify('/chart/'+chart_id)+"&&String(e.querySelector('[data-name=\"list-item-title\"]')?.textContent||'').trim()==="+JSON.stringify(name)+";});"+
+    "if(rows.length!==1)return {clicked:false};"+
+    "const buttons=Array.from(rows[0].querySelectorAll('[data-name=\"list-item-remove-button\"]')).filter(e=>visible(e)&&e.getAttribute('aria-label')==='Remove');"+
+    "if(buttons.length!==1)return {clicked:false};buttons[0].click();return {clicked:true};})()";
+}
+export async function deleteSavedLayout({chart_id,expected_layout_name,worker_state,_deps}={}) {
+  const listLayouts=_deps?.listLayouts||layoutList;
+  const listTabs=_deps?.listTabs||tabCore.list;
+  const run=_deps?.evaluate||evaluate;
+  const wait=_deps?.wait||(ms=>new Promise(resolve=>setTimeout(resolve,ms)));
+  const expression=layoutDeleteExpression({chart_id,name:expected_layout_name});
+  const saved=await listLayouts();
+  if(saved.error||saved.layouts.filter(l=>l.chart_id===chart_id&&l.name===expected_layout_name).length!==1||
+    saved.layouts.filter(l=>l.chart_id===chart_id).length!==1)throw new Error('Saved layout identity is missing or ambiguous');
+  if(tabCore.isWorkerShellTab({layout_name:expected_layout_name},(worker_state?.worker_tabs||[]).map(t=>t.layout_name))||
+    (worker_state?.worker_tabs||[]).some(t=>String(t.chart_id)===chart_id))throw new Error('Worker layout cannot be deleted');
+  const tabs=await listTabs();
+  if(tabs.tabs.some(t=>t.chart_id===chart_id)||tabs.shell_tabs.some(t=>t.layout_name===expected_layout_name))throw new Error('Close all instances of exact saved layout before deletion');
+  const r=await run(expression);
+  if(!r?.clicked)throw new Error('Exact visible remove control not found; open layout picker on a non-worker chart');
+  for(let i=0;i<8;i++){
+    await wait(200);
+    const next=await listLayouts();
+    if(!next.error&&!next.layouts.some(l=>l.chart_id===chart_id))return {success:true,deleted:true,chart_id,layout_name:expected_layout_name};
+  }
+  return {success:false,clicked:true,chart_id,error:'Removal requested but not verified; inspect named confirmation before proceeding'};
+}
+
 /** Strict resolver: exact name/id first; reject ambiguous partial names. */
 export function resolveSavedLayout(layouts, query) {
   const target = String(query || '').trim();

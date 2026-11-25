@@ -28,7 +28,7 @@ export const FULL_ALLOWED_TOOLS = [
   'replay_start', 'replay_step', 'replay_autoplay', 'replay_stop', 'replay_trade', 'replay_status',
   'indicator_set_inputs', 'indicator_toggle_visibility', 'indicator_search', 'indicator_add',
   'watchlist_get', 'watchlist_add', 'watchlist_add_bulk', 'watchlist_remove', 'news_flow_get',
-  'ui_click', 'ui_open_panel', 'ui_fullscreen', 'layout_list', 'layout_switch',
+  'ui_click', 'ui_open_panel', 'ui_fullscreen', 'layout_list', 'layout_switch', 'layout_delete', 'tab_confirm_close',
   'ui_keyboard', 'ui_type_text', 'ui_hover', 'ui_scroll', 'ui_mouse_click', 'ui_find_element',
   // ui_evaluate (arbitrary page JavaScript in the signed-in TradingView session) is never public.
   'pane_list', 'pane_set_layout', 'pane_focus', 'pane_set_symbol',

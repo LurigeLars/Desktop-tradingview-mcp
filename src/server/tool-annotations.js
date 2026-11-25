@@ -88,6 +88,7 @@ export const LEGACY_TOOL_ANNOTATIONS = Object.freeze({
   ui_open_panel: CLOSED_WRITE,
   ui_fullscreen: CLOSED_WRITE,
   layout_list: CLOSED_READ,
+  layout_delete: CLOSED_DESTRUCTIVE,
   layout_switch: CLOSED_SET,
   ui_keyboard: CLOSED_DESTRUCTIVE,
   ui_type_text: CLOSED_DESTRUCTIVE,

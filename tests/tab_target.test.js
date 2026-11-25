@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { inspectShellTabMetadata, rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline, withShell, shouldDirectNavigate, isDesktopUiTarget, closeDialogExpression, probeDesktopCloseDialogs, layoutCreateProbeExpression, probeLayoutCreateUi } from '../src/core/tab.js';
-import { layoutSwitch, resolveSavedLayout } from '../src/core/ui.js';
+import { inspectShellTabMetadata, rankShellRendererWitnesses, probeShellRendererCorrespondence, attachChart, attachChartTarget, listShellTabs, switchShellTab, closeShellTabById, cleanupOrphanShellTabs, closeTabByTargetId, createDirectChartTarget, isChartPageTarget, isNewTabPageTarget, isReusableWorkerBootstrapTarget, newTab, openChartViaRenderer, rankLandingCandidates, rankReusableWorkerBootstrapCandidates, rankShellCandidates, selectExactChartTarget, switchTab, withDeadline, withShell, shouldDirectNavigate, isDesktopUiTarget, closeDialogExpression, desktopCloseActionExpression, confirmDesktopCloseDialog, probeDesktopCloseDialogs, layoutCreateProbeExpression, probeLayoutCreateUi } from '../src/core/tab.js';
+import { layoutSwitch, resolveSavedLayout, deleteSavedLayout } from '../src/core/ui.js';
 import { registerTabTools } from '../src/tools/tab.js';
 
 
@@ -1246,4 +1246,31 @@ test('shell metadata inspection is bounded to caller verified current shell IDs'
   await assert.rejects(inspectShellTabMetadata({
     shell_tab_ids:['a','b','c','d','e'],_deps:{listShellTabs:async()=>tabs},
   }),/between 1 and 4/);
+});
+
+
+test('specific Desktop dialog action is bound to one active non-worker tab and verifies close', async()=>{
+  let closed=false, clicks=0;
+  const dialog={textContent:'Close tab? There are unsaved changes Save Close without saving Cancel',contains:()=>true,parentElement:null};
+  const button=text=>({textContent:text,parentElement:dialog,disabled:false,getAttribute:()=>null,getBoundingClientRect:()=>({width:30,height:20}),click(){clicks++;closed=true;}});
+  const document={querySelectorAll:()=>['Save','Close without saving','Cancel'].map(button)};
+  const deps={listShellTabs:async()=>[{shell_tab_id:'keep',layout_name:'Other',active:false},...(!closed?[{shell_tab_id:'qa',layout_name:'QA',active:true}]:[])],
+    listTargets:async()=>[{id:'dialog',type:'page',url:'file:///app.asar/app/dialog/index.html'}],
+    probe:async()=>({matches:[{target_id:'dialog'}]}),evaluateTarget:async(id,expr)=>runInNewContext(expr,{document}),wait:async()=>{}};
+  assert.throws(()=>desktopCloseActionExpression('execute'),/Unsupported/);
+  await assert.rejects(confirmDesktopCloseDialog({shell_tab_id:'qa',expected_layout_name:'QA',dialog_target_id:'dialog',action:'save',protected_layout_names:['QA'],_deps:deps}),/non-worker/);
+  await assert.rejects(confirmDesktopCloseDialog({shell_tab_id:'qa',expected_layout_name:'QA',dialog_target_id:'wrong',action:'save',_deps:deps}),/target missing/);
+  assert.equal(clicks,0);
+  const r=await confirmDesktopCloseDialog({shell_tab_id:'qa',expected_layout_name:'QA',dialog_target_id:'dialog',action:'save',_deps:deps});
+  assert.equal(r.closed,true);assert.equal(clicks,1);
+});
+test('layout delete refuses open, mismatched and worker layouts; verifies removal',async()=>{
+  let clicks=0,deleted=false,open=true;
+  const args={chart_id:'Test123',expected_layout_name:'QA',_deps:{listLayouts:async()=>({layouts:deleted?[]:[{chart_id:'Test123',name:'QA'}]}),listTabs:async()=>({tabs:open?[{chart_id:'Test123'}]:[],shell_tabs:[]}),evaluate:async()=>{clicks++;deleted=true;return{clicked:true}},wait:async()=>{}}};
+  await assert.rejects(deleteSavedLayout(args),/Close all instances/);
+  open=false;
+  await assert.rejects(deleteSavedLayout({...args,expected_layout_name:'Other'}),/identity/);
+  await assert.rejects(deleteSavedLayout({...args,worker_state:{worker_tabs:[{chart_id:'Test123'}]}}),/Worker/);
+  assert.equal(clicks,0);
+  assert.equal((await deleteSavedLayout(args)).deleted,true);assert.equal(clicks,1);
 });

@@ -859,6 +859,65 @@ export async function probeDesktopCloseDialogs({baseline_ids=[],include_existing
       .slice(0,15).map(t=>({type:t.type,
         scheme:(()=>{try{return new URL(String(t.url||'')).protocol}catch{return 'unknown'}})()}))};
 }
+
+/** Narrow recovery for a single visible close confirmation in Desktop, not arbitrary UI evaluation. */
+export function desktopCloseActionExpression(action) {
+  const choices = {save:['Save','Save and close','Save changes'], discard:['Close without saving'], cancel:['Cancel']};
+  if (!Object.hasOwn(choices,action)) throw new Error('Unsupported close-dialog action');
+  return '(function(){'+
+    "const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};"+
+    "const all=Array.from(document.querySelectorAll('button,[role=\"button\"]')).filter(visible);"+
+    "const disc=all.filter(e=>String(e.textContent||'').trim()==='Close without saving');"+
+    "if(disc.length!==1)return {matched:false,clicked:false};"+
+    "let p=disc[0].parentElement;for(let i=0;p&&i<12;i++,p=p.parentElement){"+
+      "const t=String(p.textContent||'');if(t.length>3000)break;"+
+      "if(/close tab\\?/i.test(t)&&/unsaved changes/i.test(t)){"+
+        "const candidates=all.filter(e=>p.contains(e)&&"+JSON.stringify(choices[action])+".includes(String(e.textContent||'').trim())&&!e.disabled&&e.getAttribute('aria-disabled')!=='true');"+
+        "if(candidates.length!==1)return {matched:true,clicked:false,button_count:candidates.length};"+
+        "const b=candidates[0],k=Object.keys(b).find(x=>x.startsWith('__reactProps'));"+
+        "if(k&&typeof b[k].onClick==='function')b[k].onClick({button:0,preventDefault(){},stopPropagation(){},currentTarget:b,target:b});else b.click();"+
+        "return {matched:true,clicked:true};}}return {matched:false,clicked:false};})()";
+}
+
+export async function confirmDesktopCloseDialog({shell_tab_id,expected_layout_name,dialog_target_id,action,protected_layout_names=[],_deps}={}) {
+  const listTabs=_deps?.listShellTabs||listShellTabs;
+  const listTargets=_deps?.listTargets||listCdpTargets;
+  const probe=_deps?.probe||probeDesktopCloseDialogs;
+  const evaluate=_deps?.evaluateTarget||((id,expr)=>withTarget(id,fn=>fn(expr),1200));
+  const wait=_deps?.wait||(ms=>new Promise(resolve=>setTimeout(resolve,ms)));
+  const expression=desktopCloseActionExpression(action);
+  if (!expected_layout_name || !dialog_target_id) throw new Error('Exact layout name and dialog target required');
+  const checkTab=async()=>{
+    const tabs=await listTabs();
+    const tab=requireShellTab(tabs,shell_tab_id,expected_layout_name);
+    if(tabs.length<=1||!tab.active||tabs.filter(t=>t.active).length!==1||isWorkerShellTab(tab,protected_layout_names))
+      throw new Error('Exact non-worker tab must be uniquely active; no tab switching');
+    if(tabs.filter(t=>t.layout_name===expected_layout_name).length!==1)
+      throw new Error('Layout is ambiguous');
+    return tab;
+  };
+  await checkTab();
+  const targets=await listTargets();
+  if(targets.filter(t=>String(t.id)===dialog_target_id&&isDesktopUiTarget(t)).length!==1)
+    throw new Error('Exact local Desktop dialog target missing');
+  const diagnostics=await probe({include_existing:true});
+  if(diagnostics.matches.length!==1||diagnostics.matches[0].target_id!==dialog_target_id)
+    throw new Error('Close dialog missing or ambiguous; refresh tab_list');
+  await checkTab();
+  const result=await evaluate(dialog_target_id,expression);
+  if(!result?.matched||!result?.clicked)throw new Error('Exact requested dialog button not available; no action taken');
+  for(let n=0;n<20;n++){
+    const tabs=await listTabs();
+    const remains=tabs.some(t=>t.shell_tab_id===shell_tab_id);
+    if(action!=='cancel'&&!remains){pendingUnsavedClose.delete(shell_tab_id);return {success:true,action,shell_tab_id,closed:true};}
+    if(action==='cancel'&&remains&&!(await listTargets()).some(t=>String(t.id)===dialog_target_id)){
+      pendingUnsavedClose.delete(shell_tab_id);return {success:true,action,shell_tab_id,closed:false};
+    }
+    await wait(150);
+  }
+  return {success:false,action,shell_tab_id,clicked:true,error:'Dialog action sent, but expected postcondition not verified; refresh tab_list before further action'};
+}
+
 async function clickDesktopCloseDialog(id,{_deps}={}) {
   const evaluate=_deps?.evaluateTarget||((target,expr)=>withTarget(target,fn=>fn(expr),1200));
   return evaluate(id,closeDialogExpression({click:true}));
