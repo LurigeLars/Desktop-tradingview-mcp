@@ -2,8 +2,11 @@
  * Process-global serialization for TradingView Desktop topology mutations.
  *
  * The Desktop runtime is shared by every MCP client/chat connected to this
- * server process. Read-only tools remain concurrent; mutations that depend on
- * shared tab/layout/pane state should run through this FIFO lock.
+ * server process. Mutations that depend on shared tab/layout/pane state run
+ * through this FIFO lock, and so do reads of the active chart: quote_get
+ * switches it temporarily, and its series symbol changes before the old bars
+ * are cleared, so an interleaved read could return one instrument's bars
+ * labelled as another.
  */
 
 function positiveInteger(value, fallback) {

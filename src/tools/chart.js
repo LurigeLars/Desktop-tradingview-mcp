@@ -5,7 +5,7 @@ import { withTopologyMutationLock } from '../core/topology-lock.js';
 
 export function registerChartTools(server) {
   server.tool('chart_get_state', 'Get current chart state (symbol, timeframe, chart type, indicators)', {}, async () => {
-    try { return jsonResult(await core.getState()); }
+    try { return jsonResult(await withTopologyMutationLock('chart_get_state', () => core.getState())); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -46,7 +46,7 @@ export function registerChartTools(server) {
   });
 
   server.tool('chart_get_visible_range', 'Get the visible date range (unix timestamps) and bars range on the chart', {}, async () => {
-    try { return jsonResult(await core.getVisibleRange()); }
+    try { return jsonResult(await withTopologyMutationLock('chart_get_visible_range', () => core.getVisibleRange())); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -66,7 +66,7 @@ export function registerChartTools(server) {
   });
 
   server.tool('symbol_info', 'Get detailed metadata about the current symbol (name, exchange, type, description)', {}, async () => {
-    try { return jsonResult(await core.symbolInfo()); }
+    try { return jsonResult(await withTopologyMutationLock('symbol_info', () => core.symbolInfo())); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
