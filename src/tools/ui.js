@@ -3,6 +3,7 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/ui.js';
 import * as tabCore from '../core/tab.js';
 import { withTopologyMutationLock } from '../core/topology-lock.js';
+import { status as workerStatus } from '../core/worker.js';
 
 export function registerUiTools(server) {
   server.tool('ui_click', 'Click a UI element by aria-label, data-name, text content, or class substring', {
@@ -29,6 +30,14 @@ export function registerUiTools(server) {
   server.tool('layout_list', 'List saved chart layouts', {}, async () => {
     try { return jsonResult(await core.layoutList()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('layout_delete', 'Remove an exact closed non-worker saved layout by chart ID and name using the visible layout picker. Verify deletion; never matches by substring. Open layout picker first on a non-worker chart.', {
+    chart_id: z.string().min(1).max(64),
+    expected_layout_name: z.string().min(1).max(200),
+  }, async (args) => {
+    try { return jsonResult(await withTopologyMutationLock('layout_delete', () => core.deleteSavedLayout({...args,worker_state:workerStatus()}))); }
+    catch(err){return jsonResult({success:false,error:err.message},true);}
   });
 
   server.tool('layout_switch', 'Attach controls to an OPEN saved layout (personal or worker) by name, numeric ID, or chart URL token. Never discards unsaved changes or alters the visible Desktop tab.', {

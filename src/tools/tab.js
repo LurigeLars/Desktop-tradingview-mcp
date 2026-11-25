@@ -221,6 +221,24 @@ export function registerTabTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+
+  server.registerTool('tab_confirm_close', {
+    description: 'Resolve one existing, uniquely verified Desktop close dialog for an explicitly named active non-worker tab. Save, discard or cancel. Use fresh tab_list with diagnose_unsaved_dialog=true; never selects another tab.',
+    inputSchema: {
+      shell_tab_id: z.string().min(1),
+      expected_layout_name: z.string().min(1),
+      dialog_target_id: z.string().min(1),
+      action: z.enum(['save','discard','cancel']),
+    },
+    annotations: {readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:false},
+  }, async (args) => {
+    try {
+      return jsonResult(await withTopologyMutationLock('tab_confirm_close', () => core.confirmDesktopCloseDialog({
+        ...args, protected_layout_names:(workerStatus().worker_tabs||[]).map(t=>t.layout_name).filter(Boolean),
+      })));
+    } catch(err){return jsonResult({success:false,error:err.message},true);}
+  });
+
   server.registerTool('tab_switch', {
     description: 'Switch one physical Desktop tab by shell_tab_id (works with duplicate layouts), or by legacy CDP list index. Refresh tab_list after restart.',
     inputSchema: {

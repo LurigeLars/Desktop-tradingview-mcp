@@ -75,9 +75,11 @@ describe('public gateway configuration', () => {
     assert.equal(headers['content-length'], '12');
   });
 
-  it('preserves the full 98-tool TradingView surface by default', () => {
+  it('preserves the full 100-tool TradingView surface by default', () => {
     const allowed = parseAllowedTools();
-    assert.equal(allowed.size, 98);
+    assert.equal(allowed.size, 100);
+    assert.equal(allowed.has('tab_confirm_close'), true);
+    assert.equal(allowed.has('layout_delete'), true);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('pine_set_source'), true);
     assert.equal(allowed.has('replay_start'), true);
@@ -111,7 +113,9 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit full profile', () => {
     const allowed = parseAllowedTools('full');
-    assert.equal(allowed.size, 98);
+    assert.equal(allowed.size, 100);
+    assert.equal(allowed.has('tab_confirm_close'), true);
+    assert.equal(allowed.has('layout_delete'), true);
     assert.equal(allowed.has('ui_evaluate'), false);
     assert.equal(allowed.has('tv_update'), true);
   });
