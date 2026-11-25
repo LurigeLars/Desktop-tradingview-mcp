@@ -309,6 +309,8 @@ Copy `public/gateway.env.example` to the gitignored `public/gateway.env`, replac
 docker compose -f compose.public.yaml up -d
 ```
 
+Cloudflare signing-key refreshes share one in-flight request per gateway. Failed refreshes are throttled for 30 seconds; expired keys cannot be trusted after a failed refresh.
+
 The gateway requires a valid Cloudflare Access JWT, strips client credentials before proxying, applies request/rate limits, and exposes the full 93-tool surface by default. Set `ALLOWED_TOOLS=core` to select the smaller reviewed profile.
 
 ## CLI

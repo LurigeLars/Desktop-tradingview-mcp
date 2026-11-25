@@ -1,8 +1,10 @@
-import { describe, it } from 'node:test';
+import { describe, it, test } from 'node:test';
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   loadConfig,
+  createAccessVerifier,
   isAllowedPath,
   buildUpstreamHeaders,
 } from '../public/gateway/gateway.mjs';
@@ -217,4 +219,63 @@ describe('public gateway configuration', () => {
     assert.match(response.result.instructions, /history\.count=1000/);
     assert.match(response.result.instructions, /history\.before_time.*first_time/);
   });
+});
+
+
+function makeJwt(privateKey, kid, claims, alg = 'RS256') {
+  const header = Buffer.from(JSON.stringify({ alg, typ: 'JWT', kid })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+  const data = `${header}.${payload}`;
+  const signature = crypto.sign('RSA-SHA256', Buffer.from(data), privateKey).toString('base64url');
+  return `${data}.${signature}`;
+}
+
+test('concurrent cold Access verifications share one certificate fetch', async () => {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const kid = 'shared-key';
+  const jwk = { ...publicKey.export({ format: 'jwk' }), kid };
+  const claims = { aud: ['audience-id'], iss: 'https://team.cloudflareaccess.com',
+    email: 'owner@example.com', exp: Math.floor(Date.now() / 1000) + 300 };
+  const token = makeJwt(privateKey, kid, claims);
+  let calls = 0;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const verify = createAccessVerifier(loadConfig(baseEnv), async () => {
+    calls += 1;
+    await gate;
+    return { ok: true, json: async () => ({ keys: [jwk] }) };
+  });
+  const pending = Array.from({ length: 8 }, () => verify(token));
+  assert.equal(calls, 1);
+  release();
+  assert.ok((await Promise.all(pending)).every(result => result.ok));
+  assert.equal(calls, 1);
+});
+
+test('failed Access refresh is throttled, expired keys are denied, and recovery works', async t => {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const kid = 'test-key';
+  const jwk = { ...publicKey.export({ format: 'jwk' }), kid };
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const token = makeJwt(privateKey, kid, { aud: ['audience-id'],
+    iss: 'https://team.cloudflareaccess.com', email: 'owner@example.com',
+    exp: Math.floor(now / 1000) + 7200 });
+  let calls = 0;
+  let unavailable = false;
+  const verify = createAccessVerifier(loadConfig(baseEnv), async () => {
+    calls += 1;
+    return unavailable ? { ok: false, status: 503 }
+      : { ok: true, json: async () => ({ keys: [jwk] }) };
+  });
+  assert.equal((await verify(token)).ok, true);
+  now += 3_600_001;
+  unavailable = true;
+  assert.equal((await verify(token)).ok, false);
+  assert.equal((await verify(token)).ok, false);
+  assert.equal(calls, 2);
+  now += 30_000;
+  unavailable = false;
+  assert.equal((await verify(token)).ok, true);
+  assert.equal(calls, 3);
 });
