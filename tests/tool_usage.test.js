@@ -74,3 +74,20 @@ test('telemetry failure never changes a handler result or thrown error',async()=
   server.registerTool('quote_get',{},async()=>{throw new Error('original')});
   await assert.rejects(callback(),/original/);
 });
+test('usage counts calls per server transport without storing unknown labels',async t=>{
+  const {root,store}=fixture(t);const handlers=new Map();
+  const legacy={registerTool:(name,config,fn)=>handlers.set('legacy:'+name,fn)};
+  const modern={registerTool:(name,config,fn)=>handlers.set('modern:'+name,fn)};
+  installToolUsage(legacy,store,'http_legacy');installToolUsage(modern,store,'http_modern');
+  legacy.registerTool('quote_get',{},async()=>jsonResult({success:true}));
+  modern.registerTool('quote_get',{},async()=>jsonResult({success:true}));
+  await handlers.get('legacy:quote_get')();await handlers.get('modern:quote_get')();await handlers.get('modern:quote_get')();
+  store.record('quote_get',5,{ok:true},'PRIVATE_CLIENT');
+  writeFileSync(join(root,'2026-11-24.ndjson'),JSON.stringify({tool:'quote_get',ms:1,ok:true})+'\n');
+  const report=store.report();
+  assert.deepEqual(report.calls_by_transport,{stdio:0,http_legacy:1,http_modern:2,unrecorded:2});
+  assert.equal(report.invalid_records,0);
+  assert.doesNotMatch(readFileSync(join(root,'2026-11-25.ndjson'),'utf8'),/PRIVATE_CLIENT/);
+  writeFileSync(join(root,'2026-11-23.ndjson'),JSON.stringify({tool:'quote_get',ms:1,ok:true,transport:'bogus'})+'\n');
+  assert.equal(store.report().invalid_records,1);
+});

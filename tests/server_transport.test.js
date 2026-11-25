@@ -517,6 +517,13 @@ test('modern HTTP bounds open exchanges and reports protocol errors', async () =
     assert.equal(unsupported.status, 400);
     assert.deepEqual((await unsupported.json()).error.data.supported, ['2026-07-28']);
 
+    const lookalike = await fetch(runtime.url, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/jsonx', 'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/list' },
+      body: '{}',
+    });
+    assert.equal(lookalike.status, 415);
+
     const tooLarge = await fetch(runtime.url, {
       method: 'POST',
       headers: { ...AUTH, 'content-type': 'application/json', 'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/list' },

@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-84 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+109 tools (2026-11-25; `tool_usage` lists the registered set) for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -136,7 +136,16 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 ## Architecture
 
 ```
-Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
+MCP client ←→ MCP server ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
+               stdio: src/server/stdio.js (TV_MCP_SHARED_HTTP_URL forwards to HTTP as a 2025 client)
+               HTTP:  src/server/http.js on 127.0.0.1:8765/mcp, bearer token required
+                      2026-07-28 requests: stateless, one SDK v2 server per request
+                      2025 requests: sessionful SDK v1 transport
+Remote: Cloudflare Access → Docker gateway (public/gateway, tool allowlist) → HTTP server
 ```
+
+- Both HTTP eras share one tool catalog; details and measured differences: `docs/mcp-v2-http-migration.md`.
+- `tool_usage` reports `calls_by_transport` (`stdio`, `http_legacy`, `http_modern`). Remove the 2025 HTTP transport only after `http_legacy` stays at zero, which first requires moving `shared-stdio.js` to a 2026-07-28 client.
+- The managed HTTP server runs the code loaded at start; deploy by updating the main checkout and restarting it (`docs/windows-managed-http-task.md`).
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`

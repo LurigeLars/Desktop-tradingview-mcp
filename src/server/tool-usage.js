@@ -11,6 +11,8 @@ const DAY_MS=86400000;
 const DAY_LIMIT=2*1024*1024;
 const BUCKETS=[10,25,50,100,200,300,500,750,1000,1500,2000,3000,5000,10000,20000,30000,60000,120000,300000,600000];
 const ACTIONS=['find','click','wait','assert'];
+// Which server path served the call; shows when the 2025 HTTP transport has no callers left.
+const TRANSPORTS=['stdio','http_legacy','http_modern'];
 const CODES=new Set([
   'UNCLASSIFIED_ERROR','HANDLER_EXCEPTION','HISTORY_OUTPUT_TOO_LARGE','CHART_UNAVAILABLE','CHART_CHANGED',
   'CURSOR_IDENTITY_MISMATCH','TARGET_UNAVAILABLE','CURSOR_TARGET_MISMATCH','TARGET_CHANGED',
@@ -56,6 +58,7 @@ export function rememberToolResult(result,obj,isError){
 function validEvent(e){
   return e&&validTool(e.tool)&&Number.isInteger(e.ms)&&e.ms>=0&&e.ms<=86400000&&
     typeof e.ok==='boolean'&&(e.ok?e.code===undefined:CODES.has(e.code))&&
+    (e.transport===undefined||TRANSPORTS.includes(e.transport))&&
     (e.ui===undefined||(e.tool==='ui_sequence'&&Array.isArray(e.ui.completed)&&
       e.ui.completed.length<=8&&e.ui.completed.every(a=>ACTIONS.includes(a))&&
       (e.ui.failed===undefined||ACTIONS.includes(e.ui.failed))&&Number.isInteger(e.ui.retries)&&
@@ -140,10 +143,11 @@ export function createToolUsageStore({root,now=Date.now,dayLimit=DAY_LIMIT,flush
       }
     }catch{recordingErrors+=Math.max(1,batch.length);for(const {day} of batch)limited.add(day);}
   }
-  function record(tool,ms,meta={}){
+  function record(tool,ms,meta={},transport){
     if(!enabled||tool==='tool_usage'||!validTool(tool)||!Number.isFinite(ms)||ms<0)return;
     const event={tool,ms:Math.min(86400000,Math.round(ms)),ok:meta.ok!==false};
     if(!event.ok)event.code=safeError(meta.code);
+    if(TRANSPORTS.includes(transport))event.transport=transport;
     if(tool==='ui_sequence'){
       const completed=Array.isArray(meta.completed)?meta.completed.slice(0,8).filter(a=>ACTIONS.includes(a)):[];
       event.ui={completed,retries:smallCount(meta.retries,100)};
@@ -158,6 +162,7 @@ export function createToolUsageStore({root,now=Date.now,dayLimit=DAY_LIMIT,flush
       (tool!==undefined&&!validTool(tool)))throw new Error('Invalid usage report bounds');
     flush();
     const totals=new Map(),sampleDays=[],limitedDays=[];
+    const byTransport={stdio:0,http_legacy:0,http_modern:0,unrecorded:0};
     let invalidRecords=0;
     const today=dayAt(now()),first=dayAt(now()-(days-1)*DAY_MS);
     for(let i=days-1;i>=0;i--){
@@ -190,6 +195,7 @@ export function createToolUsageStore({root,now=Date.now,dayLimit=DAY_LIMIT,flush
                   if(!validEvent(event)){invalidRecords++;incomplete=true;continue;}
                   if(tool&&event.tool!==tool)continue;
                   sampled=true;
+                  byTransport[event.transport||'unrecorded']++;
                   const a=totals.get(event.tool)||accumulator(event.tool);addEvent(a,event);totals.set(event.tool,a);
                 }
                 if(sampled)sampleDays.push(day);
@@ -205,6 +211,7 @@ export function createToolUsageStore({root,now=Date.now,dayLimit=DAY_LIMIT,flush
       measurement_scope:'Validated MCP handler duration including internal waits; excludes network/gateway and SDK rejections. A non-error response does not certify data completeness or trading outcome.',
       percentile_method:'Histogram bucket upper bounds; rounded milliseconds.',
       recorded_calls:rows.reduce((n,r)=>n+r.calls,0),recorded_errors:rows.reduce((n,r)=>n+r.errors,0),
+      calls_by_transport:byTransport,
       tool_count:rows.length,returned_count:Math.min(limit,rows.length),truncated:rows.length>limit,
       days_with_samples:sampleDays,coverage_limited_days:limitedDays,invalid_records:invalidRecords,
       registered_tool_count:[...registered].filter(n=>n!=='tool_usage'&&(!tool||n===tool)).length,
@@ -224,7 +231,7 @@ export function getToolUsageStore(){
 }
 
 /** Covers native registerTool and the legacy adapter that delegates to it. */
-export function installToolUsage(server,store=getToolUsageStore()){
+export function installToolUsage(server,store=getToolUsageStore(),transport){
   const register=server.registerTool.bind(server);
   server.registerTool=(name,config,handler)=>{
     store.register?.(name);
@@ -236,7 +243,7 @@ export function installToolUsage(server,store=getToolUsageStore()){
       meta=resultMetadata.get(result)||{ok:!result?.isError,code:result?.isError?'UNCLASSIFIED_ERROR':undefined};
       return result;
     }finally{
-      try{store.record(name,performance.now()-start,meta);}catch{/* telemetry never changes a tool result */}
+      try{store.record(name,performance.now()-start,meta,transport);}catch{/* telemetry never changes a tool result */}
     }
     });
   };
