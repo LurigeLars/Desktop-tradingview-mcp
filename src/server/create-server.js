@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { getToolUsageStore, installToolUsage } from './tool-usage.js';
 import { jsonResult } from '../tools/_format.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer as ModernMcpServer } from '@modelcontextprotocol/server';
 import { registerHealthTools } from '../tools/health.js';
 import { registerChartTools } from '../tools/chart.js';
 import { registerPineTools } from '../tools/pine.js';
@@ -39,13 +40,26 @@ export const SERVER_INSTRUCTIONS = `Read and control TradingView Desktop charts.
 - Keep Pine studies visible for their drawing outputs and narrow with study_filter. Use full study names to add indicators, and avoid pine_get_source unless needed. Prefer bounded results and screenshots for visual questions.
 - tv_close exits the entire MCP-managed TradingView Desktop app. Use tab_close for one tab. Official TradingView MCP/API is retired; use the Desktop bridge.`;
 
-export function createTradingViewServer() {
-  const server = new McpServer(
+export function createTradingViewServer({ modern = false } = {}) {
+  const Server = modern ? ModernMcpServer : McpServer;
+  const server = new Server(
     SERVER_INFO,
     {
       instructions: SERVER_INSTRUCTIONS,
     }
   );
+
+  // SDK v2 accepts Standard Schema objects rather than the raw Zod shapes
+  // used by our existing tool definitions. Keep a single tool catalog and
+  // normalize only at the v2 SDK boundary during the transport transition.
+  if (modern) {
+    const register = server.registerTool.bind(server);
+    server.registerTool = (name, config, handler) => register(name, {
+      ...config,
+      ...(config.inputSchema && { inputSchema: z.object(config.inputSchema) }),
+      ...(config.outputSchema && { outputSchema: z.object(config.outputSchema) }),
+    }, handler);
+  }
 
   // Legacy server.tool registrations must receive explicit safety metadata.
   // This adapter fails closed if a newly added legacy tool is not classified.
