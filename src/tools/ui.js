@@ -6,6 +6,23 @@ import { withTopologyMutationLock } from '../core/topology-lock.js';
 import { status as workerStatus } from '../core/worker.js';
 
 export function registerUiTools(server) {
+
+  server.tool('ui_sequence', 'Run 1-8 exact-match find, click, wait or assert steps on one verified HTTPS chart. Each click needs a following wait/assert. Stops on failure; no arbitrary JS, Desktop dialogs, or rollback.', {
+    target_id: z.string().min(1).max(128).describe('Exact live chart target from tab_list'),
+    chart_id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).describe('Expected saved chart token'),
+    steps: z.array(z.object({
+      action: z.enum(['find','click','wait','assert']),
+      by: z.enum(['aria-label','data-name','text']),
+      value: z.string().min(1).max(160),
+      state: z.enum(['present','absent']).optional().describe('Wait/assert condition; present means exactly one visible match'),
+    }).strict()).min(1).max(8),
+  }, async (args) => {
+    try {
+      const result=await withTopologyMutationLock('ui_sequence', () => core.uiSequence(args));
+      return jsonResult(result,!result.success);
+    } catch(err){return jsonResult({success:false,error:err.message},true);}
+  });
+
   server.tool('ui_click', 'Click a UI element by aria-label, data-name, text content, or class substring', {
     by: z.enum(['aria-label', 'data-name', 'text', 'class-contains']).describe('Selector strategy'),
     value: z.string().describe('Value to match against the chosen selector strategy'),

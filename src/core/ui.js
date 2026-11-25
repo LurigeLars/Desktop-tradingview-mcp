@@ -1,7 +1,8 @@
 /**
  * Core UI automation logic.
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate, evaluateAsync, getClient, listCdpTargets, isTradingViewUrl } from '../connection.js';
+import { protectedChartIds } from './worker.js';
 import * as tabCore from './tab.js';
 
 export async function click({ by, value }) {
@@ -333,4 +334,126 @@ export async function findElement({ query, strategy }) {
 export async function uiEvaluate({ expression }) {
   const result = await evaluate(expression);
   return { success: true, result };
+}
+
+const UI_SEQUENCE_MAX_STEPS = 8;
+const UI_SEQUENCE_BUDGET_MS = 8000;
+const UI_SEQUENCE_WAIT_MS = 2500;
+const UI_SEQUENCE_ACTIONS = new Set(['find','click','wait','assert']);
+const UI_SEQUENCE_SELECTORS = new Set(['aria-label','data-name','text']);
+
+/** All caller inputs are data; no caller-supplied JS, CSS, URLs, attributes or function paths. */
+export function validateUiSequence({target_id,chart_id,steps}={}) {
+  if(typeof target_id!=='string'||!target_id.trim()||target_id.length>128||
+     typeof chart_id!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(chart_id))
+    throw new Error('Exact target_id and chart_id required');
+  if(!Array.isArray(steps)||steps.length<1||steps.length>UI_SEQUENCE_MAX_STEPS)
+    throw new Error('Sequence requires 1-8 steps');
+  for(let i=0;i<steps.length;i++){
+    const s=steps[i];
+    if(!s||!UI_SEQUENCE_ACTIONS.has(s.action)||!UI_SEQUENCE_SELECTORS.has(s.by)||
+       typeof s.value!=='string'||!s.value.trim()||s.value.length>160||
+       Object.keys(s).some(k=>!['action','by','value','state'].includes(k)))
+      throw new Error('Invalid UI sequence step '+(i+1));
+    if(s.state!==undefined&&(!['wait','assert'].includes(s.action)||!['present','absent'].includes(s.state)))
+      throw new Error('Invalid UI sequence state at step '+(i+1));
+    if(s.action==='click'&&!['wait','assert'].includes(steps[i+1]?.action))
+      throw new Error('Each click must be immediately followed by a wait or assert');
+  }
+}
+
+export function uiSequenceStepExpression({origin,chart_id,step,deadline}) {
+  // Exact comparisons avoid constructing selectors from caller text. All code is server-owned.
+  return '('+function(args){
+    if(Date.now()>=args.deadline)return {error:'SEQUENCE_DEADLINE'};
+    if(globalThis.location.origin!==args.origin||globalThis.location.protocol!=='https:'||
+       globalThis.location.pathname.replace(/\/$/,'')!=='/chart/'+args.chart_id)
+      return {error:'CHART_IDENTITY_CHANGED'};
+    const s=args.step;
+    const visible=e=>{
+      if(!e.isConnected||e.closest('[hidden],[inert],[aria-hidden="true"]'))return false;
+      const r=e.getBoundingClientRect(),c=globalThis.getComputedStyle(e);
+      return r.width>0&&r.height>0&&c.visibility==='visible'&&c.display!=='none'&&c.opacity!=='0';
+    };
+    const controls='button,[role="button"],[role="menuitem"],[role="tab"],[role="option"]';
+    const selector=s.by==='text'?controls+',label,span,div,h1,h2,h3,h4':'['+s.by+']';
+    const matches=[];
+    for(const e of globalThis.document.querySelectorAll(selector)){
+      if(!visible(e))continue;
+      const value=s.by==='text'?String(e.innerText||'').trim():e.getAttribute(s.by);
+      if(value===s.value)matches.push(e);
+      if(matches.length>=6)break;
+    }
+    const count=matches.length;
+    if(s.action==='find')return {count,count_capped:count>=6,items:matches.slice(0,5).map(e=>({
+      tag:e.tagName.toLowerCase(),text:String(e.innerText||'').trim().slice(0,120),
+      aria_label:(e.getAttribute('aria-label')||'').slice(0,160),
+      data_name:(e.getAttribute('data-name')||'').slice(0,160),
+      disabled:!!e.disabled||e.getAttribute('aria-disabled')==='true'
+    }))};
+    if(s.action==='wait'||s.action==='assert'){
+      const state=s.state||'present';
+      return {count,count_capped:count>=6,condition_met:state==='absent'?count===0:count===1,state};
+    }
+    if(s.action!=='click')return {error:'INVALID_ACTION'};
+    if(count!==1)return {error:'CLICK_MATCH_NOT_UNIQUE',count};
+    const e=matches[0];
+    // Don't extend existing UI clicking to arbitrary DOM nodes, form submits, or links.
+    if(!e.matches(controls)||e.closest('a,[contenteditable="true"],form')||
+       e.disabled||e.closest('[aria-disabled="true"]')||
+       typeof e.click!=='function')return {error:'CLICK_CONTROL_NOT_ALLOWED'};
+    const r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+    const hit=globalThis.document.elementFromPoint(x,y);
+    if(!hit||!(hit===e||e.contains(hit)))return {error:'CLICK_CONTROL_OBSCURED_OR_OFFSCREEN'};
+    if(Date.now()>=args.deadline)return {error:'SEQUENCE_DEADLINE'};
+    e.click();
+    return {clicked:true};
+  }.toString()+')('+JSON.stringify({origin,chart_id,step,deadline})+')';
+}
+
+export async function uiSequence({target_id,chart_id,steps,_deps}={}) {
+  validateUiSequence({target_id,chart_id,steps});
+  const list=_deps?.listTargets||listCdpTargets;
+  const protectedIds=_deps?.protectedIds||protectedChartIds;
+  const run=_deps?.withTarget||tabCore.withTarget;
+  const now=_deps?.now||Date.now;
+  const wait=_deps?.wait||(ms=>new Promise(resolve=>setTimeout(resolve,ms)));
+  const candidates=(await list()).filter(t=>t.id===target_id&&t.type==='page'&&isTradingViewUrl(t.url));
+  if(candidates.length!==1)throw new Error('Target is not one verified HTTPS TradingView chart; refresh tab_list');
+  const url=new URL(candidates[0].url);
+  if(url.pathname.replace(/\/$/,'')!=='/chart/'+chart_id)throw new Error('Chart identity mismatch');
+  if(protectedIds().has(chart_id))throw new Error('PROTECTED_WORKER_TAB: use the existing protected worker workflow');
+  const deadline=now()+UI_SEQUENCE_BUDGET_MS;
+  const completed=[];
+  let attempted=0,clickOutcomeUnknown=false;
+  const fail=error=>({success:false,target_id,chart_id,completed_steps:completed.length,failed_step:attempted,
+    results:completed,error,click_outcome_unknown:clickOutcomeUnknown,
+    note:'Completed clicks are not rolled back; verify current UI before retrying.'});
+  try{
+    return await run(target_id,async evaluateStep=>{
+      for(let i=0;i<steps.length;i++){
+        attempted=i+1;
+        const step=steps[i];
+        const stepDeadline=Math.min(deadline,now()+(step.action==='wait'?UI_SEQUENCE_WAIT_MS:UI_SEQUENCE_BUDGET_MS));
+        let result;
+        do{
+          if(now()>=stepDeadline)return fail('WAIT_OR_SEQUENCE_TIMEOUT');
+          clickOutcomeUnknown=step.action==='click';
+          result=await evaluateStep(uiSequenceStepExpression({origin:url.origin,chart_id,step,deadline:stepDeadline}));
+          if(!result||typeof result!=='object')return fail('INVALID_RENDERER_RESPONSE');
+          clickOutcomeUnknown=false;
+          if(result.error)return fail(result.error);
+          if(step.action==='click'&&result.clicked!==true)return fail('CLICK_NOT_VERIFIED');
+          if(step.action!=='wait'||result.condition_met===true)break;
+          await wait(100);
+        }while(now()<stepDeadline);
+        if(['wait','assert'].includes(step.action)&&result.condition_met!==true)return fail('CONDITION_NOT_MET');
+        completed.push({step:attempted,action:step.action,...result});
+      }
+      return {success:true,target_id,chart_id,completed_steps:completed.length,results:completed};
+    },UI_SEQUENCE_BUDGET_MS+2000);
+  }catch{
+    // Do not retry an uncertain mutation or leak renderer error internals.
+    return fail('CDP_SEQUENCE_FAILED');
+  }
 }

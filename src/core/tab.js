@@ -1074,7 +1074,7 @@ async function waitForChartTarget({ chartIdsBefore, landingId, timeoutMs = 15000
 }
 
 /** Run fn with an eval helper attached to a specific target. */
-async function withTarget(targetId, fn, timeoutMs = 2000) {
+export async function withTarget(targetId, fn, timeoutMs = 2000) {
   const task = (async () => {
     let client = null;
     try {
