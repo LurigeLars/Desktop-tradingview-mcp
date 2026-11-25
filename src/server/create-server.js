@@ -40,6 +40,27 @@ export const SERVER_INSTRUCTIONS = `Read and control TradingView Desktop charts.
 - Keep Pine studies visible for their drawing outputs and narrow with study_filter. Use full study names to add indicators, and avoid pine_get_source unless needed. Prefer bounded results and screenshots for visual questions.
 - tv_close exits the entire MCP-managed TradingView Desktop app. Use tab_close for one tab. Official TradingView MCP/API is retired; use the Desktop bridge.`;
 
+// The v2 HTTP entry builds a server per request; constructing the Zod schemas of every
+// tool dominated that cost under load, so record the catalog once and replay it.
+// Tool handlers never reference the server instance they were registered on.
+let modernCatalog;
+function modernToolCatalog() {
+  if (!modernCatalog) {
+    const tools = [];
+    // SDK v2 accepts Standard Schema objects rather than the raw Zod shapes used
+    // by our tool definitions; normalize only at the v2 SDK boundary.
+    registerToolCatalog({
+      registerTool: (name, config, handler) => tools.push([name, {
+        ...config,
+        ...(config.inputSchema && { inputSchema: z.object(config.inputSchema) }),
+        ...(config.outputSchema && { outputSchema: z.object(config.outputSchema) }),
+      }, handler]),
+    });
+    modernCatalog = tools;
+  }
+  return modernCatalog;
+}
+
 export function createTradingViewServer({ modern = false } = {}) {
   const Server = modern ? ModernMcpServer : McpServer;
   const server = new Server(
@@ -48,19 +69,12 @@ export function createTradingViewServer({ modern = false } = {}) {
       instructions: SERVER_INSTRUCTIONS,
     }
   );
+  if (!modern) return registerToolCatalog(server);
+  for (const tool of modernToolCatalog()) server.registerTool(...tool);
+  return server;
+}
 
-  // SDK v2 accepts Standard Schema objects rather than the raw Zod shapes
-  // used by our existing tool definitions. Keep a single tool catalog and
-  // normalize only at the v2 SDK boundary during the transport transition.
-  if (modern) {
-    const register = server.registerTool.bind(server);
-    server.registerTool = (name, config, handler) => register(name, {
-      ...config,
-      ...(config.inputSchema && { inputSchema: z.object(config.inputSchema) }),
-      ...(config.outputSchema && { outputSchema: z.object(config.outputSchema) }),
-    }, handler);
-  }
-
+function registerToolCatalog(server) {
   // Legacy server.tool registrations must receive explicit safety metadata.
   // This adapter fails closed if a newly added legacy tool is not classified.
   const usageStore=getToolUsageStore();

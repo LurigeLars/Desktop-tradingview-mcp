@@ -408,9 +408,12 @@ test('modern HTTP preserves authenticated tool behavior without allocating a leg
     const modern = await modernRequest(runtime, 'tools/list');
     assert.equal(modern.status, 200, JSON.stringify(modern.body));
     assert.equal(modern.sessionId, null);
-    const inventory = tools => tools.map(t => [t.name, t.annotations])
-      .sort(([a], [b]) => a.localeCompare(b));
+    // Full catalog parity; only the JSON Schema dialect URI differs (draft-07 vs 2020-12).
+    const inventory = tools => tools.map(({ name, description, annotations, inputSchema: { $schema, ...inputSchema } }) =>
+      ({ name, description, annotations, inputSchema }))
+      .sort((a, b) => a.name.localeCompare(b.name));
     assert.deepEqual(inventory(modern.body.result.tools), inventory(legacy.tools));
+    assert.equal(modern.body.result.nextCursor, undefined);
     assert.ok(modern.body.result.tools.every(t => t.outputSchema === undefined));
     const analyze = modern.body.result.tools.find(t => t.name === 'pine_analyze');
     assert.deepEqual(analyze.inputSchema.required, ['source']);
@@ -434,9 +437,95 @@ test('modern HTTP preserves authenticated tool behavior without allocating a leg
     });
     assert.equal(mismatch.status, 400);
     assert.ok(mismatch.body.error);
+    // A routing header can never name a different tool than the body the gateway policy checked.
+    const nameMismatch = await modernRequest(runtime, 'tools/call', args, { ...AUTH, 'mcp-name': 'ui_evaluate' });
+    assert.equal(nameMismatch.status, 400);
+    assert.ok(nameMismatch.body.error);
     assert.equal(runtime.sessionCount(), 1);
   } finally {
     await client.close().catch(() => {});
+    await runtime.close();
+  }
+});
+
+test('modern HTTP serves concurrent stateless calls without crosstalk', async () => {
+  const runtime = await startTradingViewHttpServer({ port: 0, token: TOKEN, maxSessions: 32 });
+  try {
+    const sources = Array.from({ length: 24 }, (_, i) =>
+      `//@version=6\nindicator("Concurrent ${i}")\nplot(close${i % 2 ? '' : ' +'})`);
+    const results = await Promise.all(sources.map(source =>
+      modernRequest(runtime, 'tools/call', { name: 'pine_analyze', arguments: { source } })));
+    const sequential = [];
+    for (const source of sources) {
+      sequential.push(await modernRequest(runtime, 'tools/call', { name: 'pine_analyze', arguments: { source } }));
+    }
+    results.forEach((result, i) => {
+      assert.equal(result.status, 200, JSON.stringify(result.body));
+      assert.equal(result.sessionId, null);
+      assert.deepEqual(result.body.result.content, sequential[i].body.result.content);
+    });
+    assert.equal(runtime.sessionCount(), 0);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('modern HTTP bounds open exchanges and reports protocol errors', async () => {
+  const runtime = await startTradingViewHttpServer({ port: 0, token: TOKEN, maxSessions: 1, maxBodyBytes: 4096 });
+  const abort = new AbortController();
+  try {
+    // A subscription stream is a long-lived exchange and holds one slot until the client leaves.
+    const listen = await fetch(runtime.url, {
+      method: 'POST',
+      signal: abort.signal,
+      headers: {
+        ...AUTH,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        'mcp-protocol-version': '2026-07-28',
+        'mcp-method': 'subscriptions/listen',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'subscriptions/listen',
+        params: {
+          notifications: { toolsListChanged: true },
+          _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} },
+        },
+      }),
+    });
+    assert.equal(listen.status, 200);
+    await listen.body.getReader().read();
+    assert.equal((await modernRequest(runtime, 'tools/list')).status, 503);
+    abort.abort();
+    let released;
+    for (let i = 0; i < 50 && released?.status !== 200; i += 1) {
+      await new Promise(resolvePromise => setTimeout(resolvePromise, 20));
+      released = await modernRequest(runtime, 'tools/list');
+    }
+    assert.equal(released.status, 200);
+
+    const unknown = await modernRequest(runtime, 'tools/call', { name: 'no_such_tool', arguments: {} });
+    assert.equal(unknown.body.error.code, -32602);
+    const invalid = await modernRequest(runtime, 'tools/call', { name: 'pine_analyze', arguments: { source: 5 } });
+    assert.equal(invalid.body.result.isError, true);
+
+    const unsupported = await fetch(runtime.url, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json', 'mcp-protocol-version': '2099-01-01', 'mcp-method': 'tools/list' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2099-01-01', 'io.modelcontextprotocol/clientCapabilities': {} } } }),
+    });
+    assert.equal(unsupported.status, 400);
+    assert.deepEqual((await unsupported.json()).error.data.supported, ['2026-07-28']);
+
+    const tooLarge = await fetch(runtime.url, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json', 'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/list' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: { pad: 'x'.repeat(8192) } }),
+    });
+    assert.equal(tooLarge.status, 413);
+    assert.equal(runtime.sessionCount(), 0);
+  } finally {
+    abort.abort();
     await runtime.close();
   }
 });
