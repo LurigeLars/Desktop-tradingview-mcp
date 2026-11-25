@@ -2,7 +2,7 @@
 // Patterned after firecrawl-local's public gateway:
 // - filters tools/list to an explicit public allowlist
 // - blocks direct calls to non-public tools
-// - replaces initialize instructions with concise public guidance
+// - replaces initialize and discovery instructions with concise public guidance
 // - compacts tool descriptors to reduce repeated model-context/token overhead
 // Node standard library only.
 // Security-critical code copied across eight repos: the Cloudflare Access JWT/JWKS check, the rate
@@ -360,7 +360,7 @@ export function createGatewayServer(env = process.env, dependencies = {}) {
             return sendJson(res, rpcError(message.id, verdict.error));
           }
 
-          if (message?.method === 'tools/list' || message?.method === 'initialize') {
+          if (message?.method === 'tools/list' || message?.method === 'initialize' || message?.method === 'server/discover') {
             ctx = { allowedTools: config.allowedTools };
           }
         }
