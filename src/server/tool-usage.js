@@ -2,7 +2,7 @@
  * Local, bounded tool metadata only. No request arguments, response text, URLs,
  * session/client identities, symbols, or free-form errors are persisted.
  */
-import {appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync} from 'node:fs';
+import {appendFileSync, closeSync, constants, existsSync, fstatSync, mkdirSync, openSync, readSync, readdirSync, unlinkSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {performance} from 'node:perf_hooks';
 
@@ -95,6 +95,7 @@ function summarize(a){
  */
 export function createToolUsageStore({root,now=Date.now,dayLimit=DAY_LIMIT,flushMs=5000,enabled=true}={}){
   let queue=[],timer=null,lastPrune=null,recordingErrors=0;
+  const registered=new Set();
   const limited=new Set();
   const directory=root||resolve(process.env.LOCALAPPDATA||process.env.HOME||'.','tradingview-mcp','tool-usage');
   function prune(day){
@@ -124,11 +125,17 @@ export function createToolUsageStore({root,now=Date.now,dayLimit=DAY_LIMIT,flush
           const file=join(directory,day+'.ndjson'),mark=join(directory,day+'.limited');
           if(limited.has(day)||existsSync(mark)){limited.add(day);continue;}
           const payload=lines.join('');
-          const bytes=existsSync(file)?statSync(file).size:0;
-          if(bytes+Buffer.byteLength(payload)>dayLimit){
-            limited.add(day);writeFileSync(mark,'capacity reached\n',{mode:0o600});continue;
-          }
-          appendFileSync(file,payload,{encoding:'utf8',mode:0o600});
+          const fd=openSync(file,constants.O_WRONLY|constants.O_APPEND|constants.O_CREAT|(constants.O_NOFOLLOW||0),0o600);
+          try{
+            const stat=fstatSync(fd);
+            if(!stat.isFile()||stat.nlink!==1)throw new Error('Unsafe metrics file');
+            if(stat.size+Buffer.byteLength(payload)>dayLimit){
+              limited.add(day);
+              try{writeFileSync(mark,'capacity reached\n',{flag:'wx',mode:0o600});}catch(e){if(e.code!=='EEXIST')throw e;}
+              continue;
+            }
+            appendFileSync(fd,payload,{encoding:'utf8'});
+          }finally{closeSync(fd);}
         }catch{recordingErrors+=lines.length;limited.add(day);}
       }
     }catch{recordingErrors+=Math.max(1,batch.length);for(const {day} of batch)limited.add(day);}
@@ -157,25 +164,38 @@ export function createToolUsageStore({root,now=Date.now,dayLimit=DAY_LIMIT,flush
       const day=dayAt(now()-i*DAY_MS),file=join(directory,day+'.ndjson');
       let incomplete=limited.has(day)||existsSync(join(directory,day+'.limited'));
       try{
-        if(existsSync(file)){
-          if(statSync(file).size>dayLimit){incomplete=true;}
-          else{
-            const raw=readFileSync(file,'utf8');
-            if(Buffer.byteLength(raw)>dayLimit)incomplete=true;
+        let fd;
+        try{fd=openSync(file,constants.O_RDONLY|(constants.O_NOFOLLOW||0));}
+        catch(e){if(e.code!=='ENOENT')throw e;}
+        if(fd!==undefined){
+          try{
+            const stat=fstatSync(fd);
+            if(!stat.isFile()||stat.nlink!==1||stat.size>dayLimit)incomplete=true;
             else{
-              let sampled=false;
-              for(const line of raw.split('\n')){
-                if(!line)continue;
-                let event;
-                try{event=JSON.parse(line);}catch{invalidRecords++;incomplete=true;continue;}
-                if(!validEvent(event)){invalidRecords++;incomplete=true;continue;}
-                if(tool&&event.tool!==tool)continue;
-                sampled=true;
-                const a=totals.get(event.tool)||accumulator(event.tool);addEvent(a,event);totals.set(event.tool,a);
+              // Bound the read even if a concurrent appender grows the same file.
+              const buffer=Buffer.alloc(Math.min(dayLimit+1,stat.size+1));
+              let offset=0;
+              while(offset<buffer.length){
+                const n=readSync(fd,buffer,offset,buffer.length-offset,null);
+                if(!n)break;
+                offset+=n;
               }
-              if(sampled)sampleDays.push(day);
+              if(offset>stat.size||offset>dayLimit)incomplete=true;
+              else{
+                let sampled=false;
+                for(const line of buffer.subarray(0,offset).toString('utf8').split('\n')){
+                  if(!line)continue;
+                  let event;
+                  try{event=JSON.parse(line);}catch{invalidRecords++;incomplete=true;continue;}
+                  if(!validEvent(event)){invalidRecords++;incomplete=true;continue;}
+                  if(tool&&event.tool!==tool)continue;
+                  sampled=true;
+                  const a=totals.get(event.tool)||accumulator(event.tool);addEvent(a,event);totals.set(event.tool,a);
+                }
+                if(sampled)sampleDays.push(day);
+              }
             }
-          }
+          }finally{closeSync(fd);}
         }
       }catch{incomplete=true;}
       if(incomplete)limitedDays.push(day);
@@ -187,9 +207,11 @@ export function createToolUsageStore({root,now=Date.now,dayLimit=DAY_LIMIT,flush
       recorded_calls:rows.reduce((n,r)=>n+r.calls,0),recorded_errors:rows.reduce((n,r)=>n+r.errors,0),
       tool_count:rows.length,returned_count:Math.min(limit,rows.length),truncated:rows.length>limit,
       days_with_samples:sampleDays,coverage_limited_days:limitedDays,invalid_records:invalidRecords,
+      registered_tool_count:[...registered].filter(n=>n!=='tool_usage'&&(!tool||n===tool)).length,
+      unobserved_tools:[...registered].filter(n=>n!=='tool_usage'&&(!tool||n===tool)&&!totals.has(n)).sort(),
       recording_errors_since_start:recordingErrors,tools:rows.slice(0,limit)};
   }
-  return {record,report,flush};
+  return {record,report,flush,register:name=>{if(validTool(name))registered.add(name);}};
 }
 
 let defaultStore;
@@ -204,7 +226,9 @@ export function getToolUsageStore(){
 /** Covers native registerTool and the legacy adapter that delegates to it. */
 export function installToolUsage(server,store=getToolUsageStore()){
   const register=server.registerTool.bind(server);
-  server.registerTool=(name,config,handler)=>register(name,config,async function(...args){
+  server.registerTool=(name,config,handler)=>{
+    store.register?.(name);
+    return register(name,config,async function(...args){
     const start=performance.now();
     let meta={ok:false,code:'HANDLER_EXCEPTION'};
     try{
@@ -214,5 +238,6 @@ export function installToolUsage(server,store=getToolUsageStore()){
     }finally{
       try{store.record(name,performance.now()-start,meta);}catch{/* telemetry never changes a tool result */}
     }
-  });
+    });
+  };
 }

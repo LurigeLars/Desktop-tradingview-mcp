@@ -21,12 +21,16 @@ test('usage records handler failure even without MCP error and does not persist 
   server.registerTool('quote_get',{},async()=>jsonResult({success:false,error:'SECRET_TOKEN_123'}));
   server.registerTool('layout_list',{},async()=>jsonResult({success:true,symbol:'PRIVATE_SYMBOL'}));
   server.registerTool('tab_list',{},async()=>{throw new Error('PRIVATE_EXCEPTION')});
+  server.registerTool('chart_set_symbol',{},async()=>jsonResult({success:true}));
+  server.registerTool('tool_usage',{},async()=>jsonResult({success:true}));
   const result=await handlers.get('ui_sequence')({password:'PRIVATE_PARAMETER'});
   assert.match(result.content[0].text,/PRIVATE_RESPONSE/);
   await handlers.get('quote_get')();await handlers.get('layout_list')();
   await assert.rejects(handlers.get('tab_list')(),/PRIVATE_EXCEPTION/);
   const report=store.report();
   assert.equal(report.recorded_calls,4);assert.equal(report.recorded_errors,3);
+  assert.equal(report.registered_tool_count,5);assert.deepEqual(report.unobserved_tools,['chart_set_symbol']);
+  assert.deepEqual(store.report({tool:'chart_set_symbol'}).unobserved_tools,['chart_set_symbol']);
   const ui=report.tools.find(r=>r.tool==='ui_sequence');
   assert.equal(ui.ui_steps.click.completed,1);assert.equal(ui.ui_steps.wait.failed,1);
   assert.equal(ui.ui_retries,2);assert.equal(ui.error_codes.CONDITION_NOT_MET,1);

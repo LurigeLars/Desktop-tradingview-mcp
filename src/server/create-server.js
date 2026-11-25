@@ -53,7 +53,7 @@ export function createTradingViewServer() {
   installToolUsage(server,usageStore);
   installLegacyToolAnnotationAdapter(server);
   server.registerTool('tool_usage', {
-    description:'Read local 30-day metadata-only tool usage, latency, errors and UI sequence outcomes. Default 7 UTC days, top 50; optional exact tool filter.',
+    description:'Read local 30-day metadata-only tool usage, latency, errors and UI sequence outcomes; includes registered local tools with no observed calls. Default 7 UTC days, top 50.',
     inputSchema:{days:z.number().int().min(1).max(30).optional(),limit:z.number().int().min(1).max(100).optional(),tool:z.string().regex(/^[a-z][a-z0-9_]{0,63}$/).optional()},
     annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
   },async args=>{try{return jsonResult(usageStore.report(args));}catch{return jsonResult({success:false,error:'Tool usage report unavailable'},true);}});
