@@ -933,12 +933,12 @@ test('chart selection uses stable URL tokens and fails closed on duplicate targe
 
 test('saved-layout attachment uses URL token and never silently discards unsaved changes', async () => {
   const layouts = [
-    { id: 206255929, name: 'Default', chart_id: 'eh2ouJQ6' },
-    { id: 205961832, name: 'DTV Market 04', chart_id: 'H3pDwClg' },
+    { id: 900000001, name: 'Default', chart_id: 'chartDefault' },
+    { id: 900000004, name: 'DTV Market 04', chart_id: 'chart04' },
     { id: 51, name: 'Default copy', chart_id: 'other' },
   ];
-  assert.equal(resolveSavedLayout(layouts, 'Default').chart_id, 'eh2ouJQ6');
-  assert.equal(resolveSavedLayout(layouts, '206255929').chart_id, 'eh2ouJQ6');
+  assert.equal(resolveSavedLayout(layouts, 'Default').chart_id, 'chartDefault');
+  assert.equal(resolveSavedLayout(layouts, '900000001').chart_id, 'chartDefault');
   assert.throws(() => resolveSavedLayout(layouts, 'def'), /Ambiguous/);
   const calls = [];
   const result = await layoutSwitch({
@@ -953,7 +953,7 @@ test('saved-layout attachment uses URL token and never silently discards unsaved
   });
   assert.equal(result.verified, true);
   assert.equal(result.visually_switched, false);
-  assert.deepEqual(calls, ['eh2ouJQ6']);
+  assert.deepEqual(calls, ['chartDefault']);
 });
 
 
