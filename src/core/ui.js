@@ -366,19 +366,19 @@ export function uiSequenceStepExpression({origin,chart_id,step,deadline}) {
   // Exact comparisons avoid constructing selectors from caller text. All code is server-owned.
   return '('+function(args){
     if(Date.now()>=args.deadline)return {error:'SEQUENCE_DEADLINE'};
-    if(location.origin!==args.origin||location.protocol!=='https:'||
-       location.pathname.replace(/\/$/,'')!=='/chart/'+args.chart_id)
+    if(globalThis.location.origin!==args.origin||globalThis.location.protocol!=='https:'||
+       globalThis.location.pathname.replace(/\/$/,'')!=='/chart/'+args.chart_id)
       return {error:'CHART_IDENTITY_CHANGED'};
     const s=args.step;
     const visible=e=>{
       if(!e.isConnected||e.closest('[hidden],[inert],[aria-hidden="true"]'))return false;
-      const r=e.getBoundingClientRect(),c=getComputedStyle(e);
+      const r=e.getBoundingClientRect(),c=globalThis.getComputedStyle(e);
       return r.width>0&&r.height>0&&c.visibility==='visible'&&c.display!=='none'&&c.opacity!=='0';
     };
     const controls='button,[role="button"],[role="menuitem"],[role="tab"],[role="option"]';
     const selector=s.by==='text'?controls+',label,span,div,h1,h2,h3,h4':'['+s.by+']';
     const matches=[];
-    for(const e of document.querySelectorAll(selector)){
+    for(const e of globalThis.document.querySelectorAll(selector)){
       if(!visible(e))continue;
       const value=s.by==='text'?String(e.innerText||'').trim():e.getAttribute(s.by);
       if(value===s.value)matches.push(e);
@@ -403,7 +403,7 @@ export function uiSequenceStepExpression({origin,chart_id,step,deadline}) {
        e.disabled||e.closest('[aria-disabled="true"]')||
        typeof e.click!=='function')return {error:'CLICK_CONTROL_NOT_ALLOWED'};
     const r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
-    const hit=document.elementFromPoint(x,y);
+    const hit=globalThis.document.elementFromPoint(x,y);
     if(!hit||!(hit===e||e.contains(hit)))return {error:'CLICK_CONTROL_OBSCURED_OR_OFFSCREEN'};
     if(Date.now()>=args.deadline)return {error:'SEQUENCE_DEADLINE'};
     e.click();
