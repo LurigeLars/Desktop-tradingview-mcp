@@ -69,3 +69,29 @@ test('timed-out waiter is removed without blocking later callers', async () => {
 
   assert.equal(await lock.run('third', async () => 'ok'), 'ok');
 });
+
+test('active-chart read tools wait behind a topology mutation', async () => {
+  // Offline: released readers must fail fast instead of reaching a live Desktop.
+  process.env.TV_CDP_PORT = '1029';
+  const { withTopologyMutationLock, topologyMutationLockStatus } = await import('../src/core/topology-lock.js');
+  const { registerDataTools } = await import('../src/tools/data.js');
+  const { registerChartTools } = await import('../src/tools/chart.js');
+  const tools = new Map();
+  const server = { tool(name, description, schema, handler) { tools.set(name, handler); } };
+  registerDataTools(server);
+  registerChartTools(server);
+
+  let release;
+  const held = withTopologyMutationLock('quote_get', () => new Promise(resolve => { release = resolve; }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  // Read-only tools only: a quote_get switch must not interleave with them.
+  const reads = ['chart_get_state', 'data_get_ohlcv'];
+  const pending = reads.map(name => tools.get(name)({}));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const status = topologyMutationLockStatus();
+  assert.equal(status.active.label, 'quote_get');
+  assert.deepEqual(status.queued.map(item => item.label), reads);
+  release();
+  await held;
+  await Promise.allSettled(pending);
+});
