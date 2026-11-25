@@ -123,7 +123,7 @@ export function createToolUsageStore({root,now=Date.now,dayLimit=DAY_LIMIT,flush
         try{
           if(day<dayAt(now()-(RETAIN_DAYS-1)*DAY_MS))continue;
           const file=join(directory,day+'.ndjson'),mark=join(directory,day+'.limited');
-          if(limited.has(day)||existsSync(mark)){limited.add(day);continue;}
+          if(limited.has(day))continue;
           const payload=lines.join('');
           const fd=openSync(file,constants.O_WRONLY|constants.O_APPEND|constants.O_CREAT|(constants.O_NOFOLLOW||0),0o600);
           try{
