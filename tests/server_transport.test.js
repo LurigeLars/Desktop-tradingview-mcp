@@ -351,3 +351,92 @@ test('managed lifecycle fails closed when persisted process identity does not ma
   assert.equal(result.reason, 'managed_instance_identity_mismatch');
   assert.equal(killAttempted, false);
 });
+
+
+async function modernRequest(runtime, method, params = {}, headers = AUTH) {
+  const response = await fetch(runtime.url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      'mcp-protocol-version': '2026-07-28',
+      'mcp-method': method,
+      ...(method === 'tools/call' ? { 'mcp-name': params.name } : {}),
+      ...headers,
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 10, method,
+      params: {
+        ...params,
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+          'io.modelcontextprotocol/clientCapabilities': {},
+        },
+      },
+    }),
+  });
+  const raw = await response.text();
+  const data = raw.split(/\r?\n/).filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).trim()).join('') || raw;
+  return {
+    status: response.status,
+    sessionId: response.headers.get('mcp-session-id'),
+    body: JSON.parse(data),
+  };
+}
+
+test('modern HTTP preserves authenticated tool behavior without allocating a legacy session', async () => {
+  const runtime = await startTradingViewHttpServer({
+    port: 0, token: TOKEN, maxSessions: 1, sessionIdleMs: 60_000,
+  });
+  const client = new Client({ name: 'protocol-regression', version: '1' }, { capabilities: {} });
+  try {
+    const unauthenticated = await modernRequest(runtime, 'server/discover', {}, {});
+    assert.equal(unauthenticated.status, 401);
+    assert.equal(runtime.sessionCount(), 0);
+    const discovery = await modernRequest(runtime, 'server/discover');
+    assert.equal(discovery.status, 200, JSON.stringify(discovery.body));
+    assert.ok(discovery.body.result.supportedVersions.includes('2026-07-28'));
+    assert.equal(discovery.sessionId, null);
+    assert.equal(runtime.sessionCount(), 0);
+
+    await client.connect(new StreamableHTTPClientTransport(new URL(runtime.url), {
+      requestInit: { headers: AUTH },
+    }));
+    assert.equal(runtime.sessionCount(), 1);
+    const legacy = await client.request({ method: 'tools/list', params: {} }, ListToolsResultSchema);
+    const modern = await modernRequest(runtime, 'tools/list');
+    assert.equal(modern.status, 200, JSON.stringify(modern.body));
+    assert.equal(modern.sessionId, null);
+    const inventory = tools => tools.map(t => [t.name, t.annotations])
+      .sort(([a], [b]) => a.localeCompare(b));
+    assert.deepEqual(inventory(modern.body.result.tools), inventory(legacy.tools));
+    assert.ok(modern.body.result.tools.every(t => t.outputSchema === undefined));
+    const analyze = modern.body.result.tools.find(t => t.name === 'pine_analyze');
+    assert.deepEqual(analyze.inputSchema.required, ['source']);
+    assert.equal(analyze.inputSchema.properties.source.type, 'string');
+
+    // Pure offline tool: no chart, account, credentials or market connection.
+    const args = {
+      name: 'pine_analyze',
+      arguments: { source: '//@version=6\nindicator("Test")\nplot(close)' },
+    };
+    const previous = await client.callTool(args);
+    const current = await modernRequest(runtime, 'tools/call', args);
+    assert.equal(current.status, 200, JSON.stringify(current.body));
+    assert.equal(current.sessionId, null);
+    assert.equal(current.body.result.isError ?? false, previous.isError ?? false);
+    assert.deepEqual(current.body.result.content, previous.content);
+    assert.equal(runtime.sessionCount(), 1);
+
+    const mismatch = await modernRequest(runtime, 'tools/list', {}, {
+      ...AUTH, 'mcp-method': 'tools/call',
+    });
+    assert.equal(mismatch.status, 400);
+    assert.ok(mismatch.body.error);
+    assert.equal(runtime.sessionCount(), 1);
+  } finally {
+    await client.close().catch(() => {});
+    await runtime.close();
+  }
+});
