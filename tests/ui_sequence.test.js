@@ -26,7 +26,7 @@ function fixture(){
   const ctx={location,document,Date:{now:()=>clock},getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
   const deps={listTargets:async()=>[chart],protectedIds:()=>new Set(),now:()=>clock,
     wait:async ms=>{clock+=ms},withTarget:async(id,fn)=>fn(async expr=>runInNewContext(expr,ctx))};
-  return {ctx,deps,button,dialog,get clicks(){return clicks},cover(){covered=true},open(){opened=true}};
+  return {ctx,deps,button,dialog,get clicks(){return clicks},cover(){covered=true},uncover(){covered=false},open(){opened=true}};
 }
 test('sequence reads, clicks exact visible control and verifies result on same target',async()=>{
   const f=fixture();
@@ -63,4 +63,25 @@ test('transport failure after click is never retried; outcome marked unknown',as
   const f=fixture();let calls=0;
   const r=await uiSequence({...args,steps:[click,assertion],_deps:{...f.deps,withTarget:async(id,fn)=>fn(async()=>{calls++;throw Error('lost CDP')})}});
   assert.equal(r.success,false);assert.equal(r.click_outcome_unknown,true);assert.equal(calls,1);
+});
+
+test('text click searches only interactive controls, not nested spans',async()=>{
+  const f=fixture();
+  const original=f.ctx.document.querySelectorAll;
+  f.ctx.document.querySelectorAll=sel=>{
+    if(sel.startsWith('button')){
+      assert.equal(sel.includes(',span'),false);
+      return [f.button];
+    }
+    return original(sel);
+  };
+  const r=await uiSequence({...args,steps:[{action:'click',by:'text',value:'Indicators'},assertion],_deps:f.deps});
+  assert.equal(r.success,true);assert.equal(f.clicks,1);
+});
+test('transient obstruction is retried only before any click',async()=>{
+  const f=fixture();f.cover();
+  const wait=f.deps.wait;
+  f.deps.wait=async ms=>{await wait(ms);f.uncover()};
+  const r=await uiSequence({...args,steps:[click,assertion],_deps:f.deps});
+  assert.equal(r.success,true);assert.equal(f.clicks,1);
 });

@@ -17,3 +17,5 @@ Prefer semantic tools over UI automation.
 Keep mutations minimal and reversible where the tool surface allows it.
 
 For multiple chart UI checks or clicks, use `ui_sequence` with exact target_id + chart_id from tab_list. Up to 8 steps; exact visible aria-label, data-name or text; a click must be followed by wait/assert. Inspect partial results before retrying. No arbitrary JavaScript or Desktop targets. Use `tab_confirm_close` and `layout_delete` for their named operations; never use generic UI to bypass their protection or execute trades.
+
+`layout_delete` requires an active non-worker chart with the layout picker already open. It validates exact closed layout identity, accepts only the fresh named English deletion confirmation, then verifies the saved-layout list (including all other entries). Never retry an uncertain deletion or confirm an unrelated/pre-existing dialog. `ui_sequence` retries only explicit pre-click obstruction within its bounded deadline; text clicks search interactive controls only.

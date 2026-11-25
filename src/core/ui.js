@@ -1,7 +1,7 @@
 /**
  * Core UI automation logic.
  */
-import { evaluate, evaluateAsync, getClient, listCdpTargets, isTradingViewUrl } from '../connection.js';
+import { evaluate, evaluateAsync, getClient, getTargetInfo, listCdpTargets, isTradingViewUrl } from '../connection.js';
 import { protectedChartIds } from './worker.js';
 import * as tabCore from './tab.js';
 
@@ -125,40 +125,142 @@ export async function layoutList() {
 }
 
 
-/** Click only the exact saved-chart row in the existing layout picker. */
-export function layoutDeleteExpression({chart_id,name}) {
-  if(!/^[A-Za-z0-9_-]{1,64}$/.test(chart_id)||typeof name!=='string'||!name.trim())throw new Error('Exact chart ID and layout name required');
-  return '(function(){'+
-    "const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0};"+
-    "const d=document.querySelectorAll('[data-name=\"load-layout-dialog\"]');if(d.length!==1)return {clicked:false};"+
-    "const rows=Array.from(d[0].querySelectorAll('[data-name=\"load-chart-dialog-item\"]')).filter(e=>{"+
-      "const a=e.getAttribute('href');if(!a)return false;let u;try{u=new URL(a,location.origin)}catch{return false;}"+
-      "return u.origin===location.origin&&u.pathname.replace(/\\/$/,'')==="+JSON.stringify('/chart/'+chart_id)+"&&String(e.querySelector('[data-name=\"list-item-title\"]')?.textContent||'').trim()==="+JSON.stringify(name)+";});"+
-    "if(rows.length!==1)return {clicked:false};"+
-    "const buttons=Array.from(rows[0].querySelectorAll('[data-name=\"list-item-remove-button\"]')).filter(e=>visible(e)&&e.getAttribute('aria-label')==='Remove');"+
-    "if(buttons.length!==1)return {clicked:false};buttons[0].click();return {clicked:true};})()";
+/** Fixed layout deletion actions; never accept a pre-existing confirmation. */
+export function layoutDeleteExpression({chart_id,name,origin,host_chart_id,phase,deadline}) {
+  if(!/^[A-Za-z0-9_-]{1,64}$/.test(chart_id)||typeof name!=='string'||!name.trim()||
+    !['remove','confirm'].includes(phase))throw new Error('Exact chart ID, layout name and action required');
+  return '('+function(args){
+    const doc=globalThis.document,loc=globalThis.location;
+    if(Date.now()>=args.deadline)return {error:'DEADLINE'};
+    if(loc.origin!==args.origin||loc.protocol!=='https:'||
+       loc.pathname.replace(/\/$/,'')!=='/chart/'+args.host_chart_id)
+      return {error:'CHART_IDENTITY_CHANGED'};
+    const visible=e=>{
+      const r=e.getBoundingClientRect(),c=globalThis.getComputedStyle(e);
+      return e.isConnected&&!e.closest('[hidden],[inert],[aria-hidden="true"]')&&r.width>0&&r.height>0&&
+        c.visibility==='visible'&&c.display!=='none'&&c.opacity!=='0';
+    };
+    const clickExact=e=>{
+      if(!visible(e)||e.disabled||e.closest('[aria-disabled="true"]'))return {error:'CONTROL_NOT_AVAILABLE'};
+      const r=e.getBoundingClientRect(),hit=doc.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+      if(!hit||!(hit===e||e.contains(hit)))return {error:'CONTROL_OBSCURED'};
+      if(Date.now()>=args.deadline)return {error:'DEADLINE'};
+      e.click();return {clicked:true};
+    };
+    const pickers=Array.from(doc.querySelectorAll('[data-name="load-layout-dialog"]'));
+    if(pickers.length!==1)return {error:'PICKER_NOT_UNIQUE'};
+    const rows=Array.from(pickers[0].querySelectorAll('[data-name="load-chart-dialog-item"]')).filter(e=>{
+      const href=e.getAttribute('href');if(!href)return false;
+      let u;try{u=new URL(href,loc.origin)}catch{return false}
+      return u.origin===loc.origin&&u.pathname.replace(/\/$/,'')==='/chart/'+args.chart_id&&
+        String(e.querySelector('[data-name="list-item-title"]')?.textContent||'').trim()===args.name;
+    });
+    if(rows.length!==1)return {error:'LAYOUT_ROW_NOT_UNIQUE'};
+    const dialogs=Array.from(doc.querySelectorAll('[data-name="confirm-dialog"]')).filter(visible);
+    if(args.phase==='remove'){
+      if(dialogs.length!==0)return {error:'EXISTING_CONFIRMATION'};
+      if(!visible(pickers[0])||!visible(rows[0]))return {error:'PICKER_NOT_VISIBLE'};
+      const buttons=Array.from(rows[0].querySelectorAll('[data-name="list-item-remove-button"]'))
+        .filter(e=>visible(e)&&e.getAttribute('aria-label')==='Remove');
+      if(buttons.length!==1)return {error:'REMOVE_CONTROL_NOT_UNIQUE'};
+      return clickExact(buttons[0]);
+    }
+    if(dialogs.length===0)return {pending:true};
+    if(dialogs.length!==1)return {error:'CONFIRMATION_NOT_UNIQUE'};
+    const dialog=dialogs[0],body=String(dialog.innerText||'');
+    // The observed TradingView confirmation names the layout in double quotes.
+    // Reject unknown localization/wording, different names and extra quoted names.
+    const names=[...body.matchAll(/"([^"]*)"/g)].map(m=>m[1]);
+    if(!body.includes('Delete this chart layout?')||
+       !body.includes('permanently delete your "'+args.name+'" layout')||
+       names.length!==1||names[0]!==args.name)return {error:'CONFIRMATION_NAME_MISMATCH'};
+    const buttons=Array.from(dialog.querySelectorAll('button')).filter(e=>visible(e)&&String(e.innerText||'').trim()==='Delete');
+    if(buttons.length!==1)return {error:'DELETE_CONTROL_NOT_UNIQUE'};
+    return clickExact(buttons[0]);
+  }.toString()+')('+JSON.stringify({chart_id,name,origin,host_chart_id,phase,deadline})+')';
 }
+
+function verifiedSavedLayouts(result){
+  if(result?.success!==true||result.source!=='internal_api'||result.error||
+    !Array.isArray(result.layouts)||result.layout_count!==result.layouts.length||
+    result.layouts.some(l=>!l.chart_id||typeof l.name!=='string')||
+    new Set(result.layouts.map(l=>l.chart_id)).size!==result.layouts.length)
+    throw new Error('Saved-layout readback is incomplete or ambiguous');
+  return result.layouts;
+}
+
 export async function deleteSavedLayout({chart_id,expected_layout_name,worker_state,_deps}={}) {
+  if(!/^[A-Za-z0-9_-]{1,64}$/.test(chart_id)||typeof expected_layout_name!=='string'||
+     !expected_layout_name.trim()||expected_layout_name.length>200||expected_layout_name.includes('"'))
+    throw new Error('Exact supported layout ID and name required');
   const listLayouts=_deps?.listLayouts||layoutList;
   const listTabs=_deps?.listTabs||tabCore.list;
-  const run=_deps?.evaluate||evaluate;
+  const current=_deps?.getTargetInfo||getTargetInfo;
+  const listTargets=_deps?.listTargets||listCdpTargets;
+  const run=_deps?.withTarget||tabCore.withTarget;
   const wait=_deps?.wait||(ms=>new Promise(resolve=>setTimeout(resolve,ms)));
-  const expression=layoutDeleteExpression({chart_id,name:expected_layout_name});
-  const saved=await listLayouts();
-  if(saved.error||saved.layouts.filter(l=>l.chart_id===chart_id&&l.name===expected_layout_name).length!==1||
-    saved.layouts.filter(l=>l.chart_id===chart_id).length!==1)throw new Error('Saved layout identity is missing or ambiguous');
-  if(tabCore.isWorkerShellTab({layout_name:expected_layout_name},(worker_state?.worker_tabs||[]).map(t=>t.layout_name))||
-    (worker_state?.worker_tabs||[]).some(t=>String(t.chart_id)===chart_id))throw new Error('Worker layout cannot be deleted');
+  const now=_deps?.now||Date.now;
+  const saved=verifiedSavedLayouts(await listLayouts());
+  if(saved.filter(l=>l.chart_id===chart_id&&l.name===expected_layout_name).length!==1||
+     saved.filter(l=>l.name===expected_layout_name).length!==1)throw new Error('Saved layout identity is missing or ambiguous');
+  const workers=worker_state?.worker_tabs||[],workerNames=workers.map(t=>t.layout_name);
+  const isWorker=l=>tabCore.isWorkerShellTab({layout_name:l.name},workerNames)||
+    workers.some(t=>String(t.chart_id)===l.chart_id);
+  if(isWorker({name:expected_layout_name,chart_id}))throw new Error('Worker layout cannot be deleted');
   const tabs=await listTabs();
-  if(tabs.tabs.some(t=>t.chart_id===chart_id)||tabs.shell_tabs.some(t=>t.layout_name===expected_layout_name))throw new Error('Close all instances of exact saved layout before deletion');
-  const r=await run(expression);
-  if(!r?.clicked)throw new Error('Exact visible remove control not found; open layout picker on a non-worker chart');
-  for(let i=0;i<8;i++){
-    await wait(200);
-    const next=await listLayouts();
-    if(!next.error&&!next.layouts.some(l=>l.chart_id===chart_id))return {success:true,deleted:true,chart_id,layout_name:expected_layout_name};
+  if(tabs.success!==true||tabs.shell_discovery_error||!Array.isArray(tabs.tabs)||!Array.isArray(tabs.shell_tabs))
+    throw new Error('Open layout identity unavailable');
+  if(tabs.tabs.some(t=>t.chart_id===chart_id)||tabs.shell_tabs.some(t=>t.layout_name===expected_layout_name))
+    throw new Error('Close all instances of exact saved layout before deletion');
+  const host=await current();
+  const candidates=(await listTargets()).filter(t=>t.id===host?.id&&t.type==='page'&&isTradingViewUrl(t.url));
+  if(candidates.length!==1)throw new Error('Attach an exact non-worker chart first');
+  const url=new URL(candidates[0].url),hostId=url.pathname.match(/^\/chart\/([A-Za-z0-9_-]{1,64})\/?$/)?.[1];
+  const hostLayout=saved.find(l=>l.chart_id===hostId);
+  if(!hostLayout||isWorker(hostLayout)||protectedChartIds(worker_state).has(hostId))
+    throw new Error('Open layout picker on a non-worker chart');
+  if(tabs.shell_tabs.filter(t=>t.active&&t.layout_name===hostLayout.name).length!==1||
+     tabs.tabs.filter(t=>t.chart_id===hostId&&t.id===host.id).length!==1)
+    throw new Error('Layout picker must be on the active verified chart');
+  const deadline=now()+5000;
+  let removed=false,confirmed=false,unknown=false;
+  const fail=error=>({success:false,clicked:removed,confirmed,click_outcome_unknown:unknown,chart_id,error});
+  try{
+    const actionResult=await run(host.id,async evaluateStep=>{
+      const act=async phase=>{
+        unknown=true;
+        const r=await evaluateStep(layoutDeleteExpression({chart_id,name:expected_layout_name,
+          origin:url.origin,host_chart_id:hostId,phase,deadline}));
+        if(!r||typeof r!=='object')throw new Error('INVALID_RENDERER_RESPONSE');
+        unknown=false;return r;
+      };
+      const first=await act('remove');
+      if(!first.clicked)return fail(first.error||'REMOVE_NOT_VERIFIED');
+      removed=true;
+      // Only a fresh confirmation resulting from this exact row click may be accepted.
+      while(now()<deadline){
+        const r=await act('confirm');
+        if(r.clicked){confirmed=true;return {success:true};}
+        if(!r.pending)return fail(r.error||'CONFIRMATION_NOT_VERIFIED');
+        await wait(100);
+      }
+      return fail('CONFIRMATION_TIMEOUT');
+    },6500);
+    if(!actionResult.success)return actionResult;
+    const expected=saved.filter(l=>l.chart_id!==chart_id).map(l=>JSON.stringify([l.chart_id,l.name])).sort();
+    for(let i=0;i<8;i++){
+      await wait(200);
+      const next=verifiedSavedLayouts(await listLayouts());
+      if(!next.some(l=>l.chart_id===chart_id)){
+        const actual=next.map(l=>JSON.stringify([l.chart_id,l.name])).sort();
+        if(JSON.stringify(actual)!==JSON.stringify(expected))return fail('OTHER_LAYOUTS_CHANGED');
+        return {success:true,deleted:true,confirmed:true,chart_id,layout_name:expected_layout_name};
+      }
+    }
+    return fail('DELETION_NOT_VERIFIED');
+  }catch{
+    return fail('LAYOUT_DELETE_OUTCOME_UNVERIFIED');
   }
-  return {success:false,clicked:true,chart_id,error:'Removal requested but not verified; inspect named confirmation before proceeding'};
 }
 
 /** Strict resolver: exact name/id first; reject ambiguous partial names. */
@@ -376,7 +478,7 @@ export function uiSequenceStepExpression({origin,chart_id,step,deadline}) {
       return r.width>0&&r.height>0&&c.visibility==='visible'&&c.display!=='none'&&c.opacity!=='0';
     };
     const controls='button,[role="button"],[role="menuitem"],[role="tab"],[role="option"]';
-    const selector=s.by==='text'?controls+',label,span,div,h1,h2,h3,h4':'['+s.by+']';
+    const selector=s.by==='text'?(s.action==='click'?controls:controls+',label,span,div,h1,h2,h3,h4'):'['+s.by+']';
     const matches=[];
     for(const e of globalThis.document.querySelectorAll(selector)){
       if(!visible(e))continue;
@@ -434,7 +536,7 @@ export async function uiSequence({target_id,chart_id,steps,_deps}={}) {
       for(let i=0;i<steps.length;i++){
         attempted=i+1;
         const step=steps[i];
-        const stepDeadline=Math.min(deadline,now()+(step.action==='wait'?UI_SEQUENCE_WAIT_MS:UI_SEQUENCE_BUDGET_MS));
+        const stepDeadline=Math.min(deadline,now()+(['wait','click'].includes(step.action)?UI_SEQUENCE_WAIT_MS:UI_SEQUENCE_BUDGET_MS));
         let result;
         do{
           if(now()>=stepDeadline)return fail('WAIT_OR_SEQUENCE_TIMEOUT');
@@ -442,11 +544,16 @@ export async function uiSequence({target_id,chart_id,steps,_deps}={}) {
           result=await evaluateStep(uiSequenceStepExpression({origin:url.origin,chart_id,step,deadline:stepDeadline}));
           if(!result||typeof result!=='object')return fail('INVALID_RENDERER_RESPONSE');
           clickOutcomeUnknown=false;
+          // Only retry an explicit pre-click obstruction, never an uncertain or completed click.
+          if(step.action==='click'&&result.error==='CLICK_CONTROL_OBSCURED_OR_OFFSCREEN'&&now()+100<stepDeadline){
+            await wait(100);continue;
+          }
           if(result.error)return fail(result.error);
           if(step.action==='click'&&result.clicked!==true)return fail('CLICK_NOT_VERIFIED');
           if(step.action!=='wait'||result.condition_met===true)break;
           await wait(100);
         }while(now()<stepDeadline);
+        if(step.action==='click'&&result?.clicked!==true)return fail(result?.error||'CLICK_NOT_VERIFIED');
         if(['wait','assert'].includes(step.action)&&result.condition_met!==true)return fail('CONDITION_NOT_MET');
         completed.push({step:attempted,action:step.action,...result});
       }
