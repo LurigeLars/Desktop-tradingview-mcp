@@ -78,7 +78,7 @@ function parseConfiguredTools(value) {
 }
 
 // Public server instructions are intentionally much shorter than the full local
-// server instructions. Read on initialize so edits apply after a connector refresh
+// server instructions. Read on initialize or discovery so edits apply after a connector refresh
 // without changing the upstream MCP implementation.
 export function loadInstructions() {
   try {
@@ -136,7 +136,7 @@ export function rewriteResponse(message, { allowedTools }) {
       .map(compactToolDefinition);
   }
 
-  if (message.result?.serverInfo) {
+  if (message.result?.serverInfo || Array.isArray(message.result?.supportedVersions)) {
     const instructions = loadInstructions();
     if (instructions) message.result.instructions = instructions;
   }

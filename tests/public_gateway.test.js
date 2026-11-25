@@ -189,6 +189,17 @@ describe('public gateway configuration', () => {
     assert.ok(JSON.stringify(compact).length < JSON.stringify(raw).length);
   });
 
+  it('preserves public guidance for modern discovery', () => {
+    const response = rewriteResponse({
+      result: {
+        supportedVersions: ['2026-07-28'],
+        instructions: 'upstream',
+      },
+    }, { allowedTools: parseAllowedTools() });
+    assert.match(response.result.instructions, /TradingView Desktop MCP/);
+    assert.deepEqual(response.result.supportedVersions, ['2026-07-28']);
+  });
+
   it('compacts the full listed surface and replaces initialize instructions like firecrawl-local', () => {
     const allowed = parseAllowedTools();
     const response = rewriteResponse({
