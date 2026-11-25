@@ -284,7 +284,7 @@ export async function startTradingViewHttpServer(overrides = {}) {
         // Authentication, host/path validation and body limits are already
         // applied. Let the v2 SDK classify the envelope, including malformed
         // modern claims; never fall back to legacy on a modern protocol error.
-        if (!(await isLegacyRequest(await toWebRequest(req, body)))) {
+        if (!(await isLegacyRequest(await toWebRequest(req, body), body, { maxRequestBodySize: config.maxBodyBytes }))) {
           if (modernInFlight >= config.maxSessions) {
             sendProtocolError(res, 503, 'Too many active MCP requests');
             return;
