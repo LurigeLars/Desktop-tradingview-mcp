@@ -444,39 +444,51 @@ export async function getEquity() {
   };
 }
 
-export async function getQuote({ symbol } = {}) {
+export async function getQuote({ symbol } = {}, _deps = {}) {
   // Serialize: chained on _quoteLock so parallel callers run one after another.
   // Catch on the lock chain prevents a single failure from poisoning the chain.
-  const run = _quoteLock.then(() => _getQuoteInternal({ symbol }));
+  const run = _quoteLock.then(() => _getQuoteInternal({ symbol }, _deps));
   _quoteLock = run.then(() => {}, () => {});
   return run;
 }
 
-async function _getQuoteInternal({ symbol } = {}) {
+async function _getQuoteInternal({ symbol } = {}, deps = {}) {
+  const read = deps.evaluate || evaluate;
+  const runAsync = deps.evaluateAsync || evaluateAsync;
+  const waitReady = deps.waitForChartReady || waitForChartReady;
   const requested = (symbol || '').toString().trim();
   let originalSymbol = null;
   let needsRestore = false;
 
-  if (requested) {
-    try { originalSymbol = await evaluate(`${CHART_API}.symbol()`); } catch (e) {}
-    const currentMatch = matchWatchlistSymbol(requested, [originalSymbol]);
-    if (!currentMatch.matched) {
-      needsRestore = true;
-      await evaluateAsync(`
-        (function() {
-          var chart = ${CHART_API};
-          return new Promise(function(resolve) {
-            chart.setSymbol(${safeString(requested)}, {});
-            setTimeout(resolve, 500);
-          });
-        })()
-      `);
-      await waitForChartReady(requested);
-    }
+  async function switchAndWait(target) {
+    await runAsync(`
+      (function() {
+        var chart = ${CHART_API};
+        return new Promise(function(resolve) {
+          chart.setSymbol(${safeString(target)}, {});
+          setTimeout(resolve, 500);
+        });
+      })()
+    `);
+    return await waitReady(target);
   }
 
   try {
-    const data = await evaluate(`
+    if (requested) {
+      originalSymbol = await read(`${CHART_API}.symbol()`);
+      if (typeof originalSymbol !== 'string' || !originalSymbol.trim()) {
+        throw new Error('QUOTE_ORIGINAL_SYMBOL_UNVERIFIED: refusing chart switch');
+      }
+      const currentMatch = matchWatchlistSymbol(requested, [originalSymbol]);
+      if (!currentMatch.matched) {
+        // Mark restoration necessary before dispatch: CDP can fail after mutation.
+        needsRestore = true;
+        if (!await switchAndWait(requested)) {
+          throw new Error('QUOTE_LOAD_TIMEOUT: requested chart did not become ready');
+        }
+      }
+    }
+    const data = await read(`
       (function() {
         var retrievedAtMs = Date.now();
         var api = null;
@@ -633,19 +645,14 @@ async function _getQuoteInternal({ symbol } = {}) {
         : null,
     };
   } finally {
-    if (needsRestore && originalSymbol) {
+    if (needsRestore) {
       try {
-        await evaluateAsync(`
-          (function() {
-            var chart = ${CHART_API};
-            return new Promise(function(resolve) {
-              chart.setSymbol(${safeString(originalSymbol)}, {});
-              setTimeout(resolve, 500);
-            });
-          })()
-        `);
-        await waitForChartReady(originalSymbol);
-      } catch (e) {}
+        if (!await switchAndWait(originalSymbol)) {
+          throw new Error('Original chart did not become ready');
+        }
+      } catch (cause) {
+        throw new Error('QUOTE_RESTORE_FAILED: original chart restoration is unverified', { cause });
+      }
     }
   }
 }
