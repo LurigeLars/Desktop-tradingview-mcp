@@ -21,8 +21,20 @@ const historySchema = z.object({
   expected_resolution: z.string().min(1).describe('Exact resolution from chart_get_state, e.g. 1 or 5.'),
   before_time: z.coerce.number().int().optional().describe('Exclusive Unix UTC seconds; use the previous first_time. Excludes cursor.'),
   cursor: z.string().optional().describe('Previous next_cursor, bound to the same chart target and instrument. Excludes before_time.'),
-  count: z.coerce.number().int().min(1).max(1000).optional().describe('Bars per page; default 500, maximum 1000.'),
+  count: z.coerce.number().int().min(1).max(8000).optional().describe('Bars per page; default 500, max 5000 for rows or 8000 for columns.'),
+  format: z.enum(['rows', 'columns']).optional().describe('Default rows. Columns returns compact bars:{t,o,h,l,c,v} arrays; for large backtests.'),
 }).strict();
+
+// Keep large opt-in responses compact; do not change the legacy JSON envelope.
+const MAX_COMPACT_HISTORY_BYTES = 512 * 1024;
+export function historyResult(result) {
+  if (result.format !== 'columns' && result.requested <= 1000) return jsonResult(result);
+  if (result.format !== 'columns' && result.requested === undefined) return jsonResult(result);
+  const payload = JSON.stringify(result);
+  if (Buffer.byteLength(payload, 'utf8') > MAX_COMPACT_HISTORY_BYTES)
+    throw new Error('HISTORY_OUTPUT_TOO_LARGE: retry the same cursor or before_time with a smaller count');
+  return { content: [{ type:'text', text:payload }] };
+}
 
 async function readVerifiedHistory(args) {
   const attached=await getTargetInfo();
@@ -31,7 +43,7 @@ async function readVerifiedHistory(args) {
 }
 
 export function registerDataTools(server) {
-  server.tool('data_get_ohlcv', 'Primary TradingView Desktop candles for intraday analysis and backtests when the selected feed covers the symbol and session. Standard reads return up to 500 bars. For deeper history, use history.count=1000 on a verified chart with the exact expected_symbol and expected_resolution. Continue with next_cursor. Verify chart identity and coverage. Use summary=true for compact stats.', {
+  server.tool('data_get_ohlcv', 'Primary TradingView Desktop candles for intraday analysis and backtests when the selected feed covers the symbol and session. Standard reads return up to 500 bars. For deeper history, use history.count up to 5000 (rows) or up to 8000 with history.format=columns on a verified chart with exact expected_symbol and expected_resolution. Continue with next_cursor. Verify chart identity and coverage. Use summary=true for compact stats.', {
     count: z.coerce.number().optional().describe('Number of bars to retrieve (max 500, default 100)'),
     summary: z.coerce.boolean().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
     history: historySchema.optional().describe('Page older bars. Omit top-level count/summary. While has_more, pass cursor or before_time.'),
@@ -40,16 +52,16 @@ export function registerDataTools(server) {
       if (history) {
         if (count !== undefined || summary !== undefined)
           throw new Error('History mode cannot be combined with normal count/summary; set history.count instead.');
-        return jsonResult(await readVerifiedHistory(history));
+        return historyResult(await readVerifiedHistory(history));
       }
       return jsonResult(await core.getOhlcv({ count, summary }));
     }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('data_get_ohlcv_history', 'Page older candles on an attached chart; equivalent to data_get_ohlcv(history=...). Repeat while has_more=true.', historySchema.shape, async (args) => {
+  server.tool('data_get_ohlcv_history', 'Page older candles on an attached chart; equivalent to data_get_ohlcv(history=...). Up to 5000 rows or 8000 compact columns. Repeat while has_more=true.', historySchema.shape, async (args) => {
     try {
-      return jsonResult(await readVerifiedHistory(args));
+      return historyResult(await readVerifiedHistory(args));
     }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });

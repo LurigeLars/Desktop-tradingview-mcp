@@ -239,9 +239,11 @@ test('HTTP transport exposes the complete tool surface with explicit safety anno
     assert.match(byName.get('batch_run').description, /explicitly restore/);
     assert.match(byName.get('batch_run').description, /not full candle history/);
     const candles = byName.get('data_get_ohlcv');
-    assert.match(candles.description, /history\.count=1000.*verified chart/);
+    assert.match(candles.description, /history\.count up to 5000.*8000.*verified chart/);
     const history = candles.inputSchema.properties.history;
     assert.deepEqual(history.required, ['expected_symbol', 'expected_resolution']);
+    assert.equal(history.properties.count.maximum, 8000);
+    assert.deepEqual(history.properties.format.enum, ['rows', 'columns']);
     assert.match(history.properties.before_time.description, /previous first_time/);
     assert.match(byName.get('realtime_snapshot').description, /existing resolutions/);
     assert.match(byName.get('worker_status').description, /Direct chart reads do not require worker_status/);
