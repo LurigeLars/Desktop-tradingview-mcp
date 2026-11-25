@@ -1265,12 +1265,28 @@ test('specific Desktop dialog action is bound to one active non-worker tab and v
   assert.equal(r.closed,true);assert.equal(clicks,1);
 });
 test('layout delete refuses open, mismatched and worker layouts; verifies removal',async()=>{
-  let clicks=0,deleted=false,open=true;
-  const args={chart_id:'Test123',expected_layout_name:'QA',_deps:{listLayouts:async()=>({layouts:deleted?[]:[{chart_id:'Test123',name:'QA'}]}),listTabs:async()=>({tabs:open?[{chart_id:'Test123'}]:[],shell_tabs:[]}),evaluate:async()=>{clicks++;deleted=true;return{clicked:true}},wait:async()=>{}}};
+  const host={chart_id:'Host123',name:'Other'};
+  let clicks=0,deleted=false,open=true,invalidReadback=false,otherChanged=false;
+  const args={chart_id:'Test123',expected_layout_name:'QA',worker_state:{},_deps:{
+    listLayouts:async()=>{
+      const layouts=deleted?(otherChanged?[]:[host]):[host,{chart_id:'Test123',name:'QA'}];
+      return {success:true,source:invalidReadback&&deleted?undefined:'internal_api',layout_count:layouts.length,layouts};
+    },
+    listTabs:async()=>({success:true,tabs:[{id:'host',chart_id:'Host123'},...(open?[{chart_id:'Test123'}]:[])],
+      shell_tabs:[{active:true,layout_name:'Other'}]}),
+    getTargetInfo:async()=>({id:'host'}),
+    listTargets:async()=>[{id:'host',type:'page',url:'https://www.tradingview.com/chart/Host123/'}],
+    withTarget:async(id,fn)=>fn(async()=>{
+      clicks++;if(clicks%2===0)deleted=true;return {clicked:true};
+    }),wait:async()=>{}}};
   await assert.rejects(deleteSavedLayout(args),/Close all instances/);
   open=false;
   await assert.rejects(deleteSavedLayout({...args,expected_layout_name:'Other'}),/identity/);
   await assert.rejects(deleteSavedLayout({...args,worker_state:{worker_tabs:[{chart_id:'Test123'}]}}),/Worker/);
   assert.equal(clicks,0);
-  assert.equal((await deleteSavedLayout(args)).deleted,true);assert.equal(clicks,1);
+  assert.equal((await deleteSavedLayout(args)).deleted,true);assert.equal(clicks,2);
+  deleted=false;invalidReadback=true;
+  assert.equal((await deleteSavedLayout(args)).success,false);
+  deleted=false;invalidReadback=false;otherChanged=true;
+  assert.equal((await deleteSavedLayout(args)).error,'OTHER_LAYOUTS_CHANGED');
 });

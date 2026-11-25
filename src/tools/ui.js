@@ -49,7 +49,7 @@ export function registerUiTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('layout_delete', 'Remove an exact closed non-worker saved layout by chart ID and name using the visible layout picker. Verify deletion; never matches by substring. Open layout picker first on a non-worker chart.', {
+  server.tool('layout_delete', 'Remove an exact closed non-worker saved layout by chart ID and name using the visible layout picker. Confirm only a freshly opened exact-name deletion dialog and verify all other saved layouts are unchanged. Open layout picker first on an active non-worker chart.', {
     chart_id: z.string().min(1).max(64),
     expected_layout_name: z.string().min(1).max(200),
   }, async (args) => {
