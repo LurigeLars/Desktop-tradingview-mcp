@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isChartDataReady, waitForChartReady } from '../src/wait.js';
+import { getQuote } from '../src/core/data.js';
 import { resolveQuoteSourceIdentity, matchesChartSeriesIdentity, matchesRequestedQuoteIdentity, requireRequestedQuoteIdentity } from '../src/core/quote-identity.js';
 
 test('quote-get uses actual resident series source, never echoes requested NASDAQ alias', () => {
@@ -128,4 +129,61 @@ test('chart readiness waits for stable matching source rather than reactive labe
   });
   assert.equal(ready,true);
   assert.ok(polls>=5,'must observe stable loaded macro series before ready');
+});
+
+test('quote switch failure still restores the original chart', async () => {
+  const calls = [];
+  await assert.rejects(getQuote({ symbol: 'NASDAQ:NVDA' }, {
+    evaluate: async () => 'NASDAQ:MSFT',
+    evaluateAsync: async () => {
+      calls.push('switch');
+      if (calls.length === 1) throw new Error('CDP interrupted');
+    },
+    waitForChartReady: async symbol => { calls.push(symbol); return true; },
+  }), /CDP interrupted/);
+  assert.deepEqual(calls, ['switch', 'switch', 'NASDAQ:MSFT']);
+});
+
+test('quote load timeout never reads mismatched data and restores chart', async () => {
+  let reads = 0;
+  const waits = [];
+  await assert.rejects(getQuote({ symbol: 'NASDAQ:NVDA' }, {
+    evaluate: async () => { reads++; return 'NASDAQ:MSFT'; },
+    evaluateAsync: async () => {},
+    waitForChartReady: async symbol => { waits.push(symbol); return symbol === 'NASDAQ:MSFT'; },
+  }), /QUOTE_LOAD_TIMEOUT/);
+  assert.equal(reads, 1);
+  assert.deepEqual(waits, ['NASDAQ:NVDA', 'NASDAQ:MSFT']);
+});
+
+test('quote restoration timeout prevents reporting success', async () => {
+  let reads = 0;
+  const quote = { last: 100, _symbol_candidates: { series_symbol: 'NASDAQ:NVDA' } };
+  await assert.rejects(getQuote({ symbol: 'NASDAQ:NVDA' }, {
+    evaluate: async () => ++reads === 1 ? 'NASDAQ:MSFT' : quote,
+    evaluateAsync: async () => {},
+    waitForChartReady: async symbol => symbol === 'NASDAQ:NVDA',
+  }), /QUOTE_RESTORE_FAILED/);
+  assert.equal(reads, 2);
+});
+
+test('quote never switches when original chart identity is unavailable', async () => {
+  let switches = 0;
+  await assert.rejects(getQuote({ symbol: 'NASDAQ:NVDA' }, {
+    evaluate: async () => ({ value: {} }),
+    evaluateAsync: async () => { switches++; },
+  }), /QUOTE_ORIGINAL_SYMBOL_UNVERIFIED/);
+  assert.equal(switches, 0);
+});
+
+test('resident quote does not switch chart and retains identity verification', async () => {
+  let reads = 0;
+  const quote = { last: 100, _symbol_candidates: { series_symbol: 'NASDAQ:NVDA' } };
+  const result = await getQuote({ symbol: 'NASDAQ:NVDA' }, {
+    evaluate: async () => ++reads === 1 ? 'NASDAQ:NVDA' : quote,
+    evaluateAsync: async () => { throw new Error('Unexpected mutation'); },
+  });
+  assert.equal(result.success, true);
+  assert.equal(result.requested_symbol_matches_source, true);
+  assert.equal(reads, 2);
 });
