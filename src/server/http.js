@@ -5,6 +5,8 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { createMcpHandler, isLegacyRequest } from '@modelcontextprotocol/server';
+import { toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
 import { createTradingViewServer, writeStartupNotice } from './create-server.js';
 
 export const DEFAULT_HTTP_HOST = '127.0.0.1';
@@ -201,6 +203,12 @@ export async function startTradingViewHttpServer(overrides = {}) {
   }
   const tokenDigest = digest(token);
   const sessions = new Map();
+  const modern = createMcpHandler(() => createTradingViewServer({ modern: true }), {
+    legacy: 'reject',
+    maxRequestBodySize: config.maxBodyBytes,
+  });
+  const handleModern = toNodeHandler(modern, { maxRequestBodySize: config.maxBodyBytes });
+  let modernInFlight = 0;
 
   async function closeSession(sessionId) {
     const entry = sessions.get(sessionId);
@@ -266,8 +274,6 @@ export async function startTradingViewHttpServer(overrides = {}) {
         return;
       }
 
-      await purgeIdleSessions();
-
       const sessionId = typeof req.headers['mcp-session-id'] === 'string'
         ? req.headers['mcp-session-id']
         : undefined;
@@ -275,6 +281,24 @@ export async function startTradingViewHttpServer(overrides = {}) {
       if (req.method === 'POST') {
         const body = await readJsonBody(req, config.maxBodyBytes);
 
+        // Authentication, host/path validation and body limits are already
+        // applied. Let the v2 SDK classify the envelope, including malformed
+        // modern claims; never fall back to legacy on a modern protocol error.
+        if (!(await isLegacyRequest(await toWebRequest(req, body), body, { maxRequestBodySize: config.maxBodyBytes }))) {
+          if (modernInFlight >= config.maxSessions) {
+            sendProtocolError(res, 503, 'Too many active MCP requests');
+            return;
+          }
+          modernInFlight += 1;
+          try {
+            await handleModern(req, res, body);
+          } finally {
+            modernInFlight -= 1;
+          }
+          return;
+        }
+
+        await purgeIdleSessions();
         if (sessionId) {
           const entry = sessions.get(sessionId);
           if (!entry) {
@@ -337,6 +361,7 @@ export async function startTradingViewHttpServer(overrides = {}) {
       }
 
       if (req.method === 'GET' || req.method === 'DELETE') {
+        await purgeIdleSessions();
         if (!sessionId) {
           sendProtocolError(res, 400, 'Missing MCP session ID');
           return;
@@ -386,6 +411,7 @@ export async function startTradingViewHttpServer(overrides = {}) {
     clearInterval(sweepTimer);
     await sweepPromise;
     await Promise.all([...sessions.keys()].map(closeSession));
+    await modern.close();
     if (!httpServer.listening) return;
     await new Promise((resolvePromise, rejectPromise) => {
       httpServer.close(error => error ? rejectPromise(error) : resolvePromise());
