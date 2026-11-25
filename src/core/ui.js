@@ -527,9 +527,9 @@ export async function uiSequence({target_id,chart_id,steps,_deps}={}) {
   if(protectedIds().has(chart_id))throw new Error('PROTECTED_WORKER_TAB: use the existing protected worker workflow');
   const deadline=now()+UI_SEQUENCE_BUDGET_MS;
   const completed=[];
-  let attempted=0,clickOutcomeUnknown=false;
+  let attempted=0,clickOutcomeUnknown=false,retryCount=0;
   const fail=error=>({success:false,target_id,chart_id,completed_steps:completed.length,failed_step:attempted,
-    results:completed,error,click_outcome_unknown:clickOutcomeUnknown,
+    results:completed,error,click_outcome_unknown:clickOutcomeUnknown,retry_count:retryCount,failed_action:steps[attempted-1]?.action,
     note:'Completed clicks are not rolled back; verify current UI before retrying.'});
   try{
     return await run(target_id,async evaluateStep=>{
@@ -546,7 +546,7 @@ export async function uiSequence({target_id,chart_id,steps,_deps}={}) {
           clickOutcomeUnknown=false;
           // Only retry an explicit pre-click obstruction, never an uncertain or completed click.
           if(step.action==='click'&&result.error==='CLICK_CONTROL_OBSCURED_OR_OFFSCREEN'&&now()+100<stepDeadline){
-            await wait(100);continue;
+            retryCount++;await wait(100);continue;
           }
           if(result.error)return fail(result.error);
           if(step.action==='click'&&result.clicked!==true)return fail('CLICK_NOT_VERIFIED');
@@ -557,7 +557,7 @@ export async function uiSequence({target_id,chart_id,steps,_deps}={}) {
         if(['wait','assert'].includes(step.action)&&result.condition_met!==true)return fail('CONDITION_NOT_MET');
         completed.push({step:attempted,action:step.action,...result});
       }
-      return {success:true,target_id,chart_id,completed_steps:completed.length,results:completed};
+      return {success:true,target_id,chart_id,completed_steps:completed.length,results:completed,retry_count:retryCount};
     },UI_SEQUENCE_BUDGET_MS+2000);
   }catch{
     // Do not retry an uncertain mutation or leak renderer error internals.

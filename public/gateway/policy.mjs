@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 
 export const FULL_ALLOWED_TOOLS = [
-  'tv_health_check', 'tv_discover', 'tv_ui_state', 'tv_launch', 'tv_close', 'tv_update',
+  'tool_usage', 'tv_health_check', 'tv_discover', 'tv_ui_state', 'tv_launch', 'tv_close', 'tv_update',
   'chart_get_state', 'chart_set_symbol', 'chart_set_timeframe', 'chart_set_type',
   'chart_manage_indicator', 'chart_get_visible_range', 'chart_set_visible_range',
   'chart_scroll_to_date', 'symbol_info', 'symbol_search',
@@ -37,7 +37,7 @@ export const FULL_ALLOWED_TOOLS = [
 
 // Optional operator-controlled reduced profile. It is never selected implicitly.
 export const CORE_ALLOWED_TOOLS = [
-  'tv_health_check', 'tv_launch', 'tv_close',
+  'tool_usage', 'tv_health_check', 'tv_launch', 'tv_close',
   'chart_get_state', 'chart_set_symbol', 'chart_set_timeframe', 'chart_set_type',
   'chart_manage_indicator', 'chart_scroll_to_date',
   'symbol_info', 'symbol_search',
