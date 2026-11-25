@@ -1,6 +1,6 @@
 # TradingView Desktop JavaScript API compatibility audit — 2026-11-08
 
-Target: isolated research layout `dUXOqLiw` (BATS:NVDA, 1D). This is **not** a complete validation of all API methods. No worker tabs were modified.
+Target: isolated research layout `<research-layout>` (BATS:NVDA, 1D). This is **not** a complete validation of all API methods. No worker tabs were modified.
 
 ## Inventory
 Own + up to two prototype levels: chart 197 property names, chart collection 298, TradingViewApi 229. These counts include non-functions, inherited Object methods, and private methods. They are *not* counts of working APIs.
@@ -62,7 +62,7 @@ Repeatable presence inventory: `node scripts/audit-live-api.mjs --target <EXPLIC
 The 523-method inventory is now fully status-classified, but **428 remain present/not behavior-tested**. Treat them as unknown, not failed or supported.
 
 ## Follow-up verification — 2026-11-08
-- Reattached to dedicated research target `02AF63D03D43D7ED809684A008714E1A`, chart BATS:NVDA at 1D.
+- Reattached to dedicated research target `<cdp-target>`, chart BATS:NVDA at 1D.
 - Re-enumerated chart 166, collection 184, TradingViewApi 173 methods. Zero additions/removals versus the 523-method inventory.
 - Re-invoked 14 read-only chart methods successfully (studies, shapes, visible ranges, time scale, market/replay status).
 - The remaining untested methods cannot be marked working based solely on presence. Mutating and trading methods require disposable fixtures and appropriate safe test contracts.
@@ -100,7 +100,7 @@ The 523-method inventory is now fully status-classified, but **428 remain presen
 - **Do not describe the audit as fully behavior verified.** Full inventory coverage is achieved; remaining statuses are explicit verification gaps, not established bugs.
 
 ## Isolated sandbox created and exercised
-- Created a new dedicated Desktop layout `API Audit Sandbox 2026-11-08`, CDP target `6CBB540B104EBB0698D9EE42A6BD5D34`, chart `IN9aj8GI`. This is separate from the existing research tab. User authorized expanding the test environment.
+- Created a new dedicated Desktop layout `API Audit Sandbox 2026-11-08`, CDP target `<cdp-target>`, chart `<sandbox-layout>`. This is separate from the existing research tab. User authorized expanding the test environment.
 - Successfully exercised reversible chart/UI mutations: scrolling/zoom toggles, chart timezone, bar spacing, drawing creation/removal, all-shapes/all-studies removal, chart type, resolution, symbol, collection layout, UI preferences, and data refresh. No broker orders or server chart deletions.
 - Awaited 13 additional chart/collection/lazy-loader promises: all fulfilled except `chart.createStudy('MASimple',...)`, which rejected `unexpected study id:masimple` (invalid study identifier; not proof that study creation is broken).
 - **268 methods successfully invoked**, **218 untested**. Final sandbox chart NASDAQ:NVDA 1D, zero shapes and studies. Existing research charts untouched.

@@ -73,15 +73,15 @@ test('bare tickers never suffix-match a formula row', () => {
 
 test('Trade Alert watchlist is refused unless the user explicitly allows it', async () => {
   const { tradeAlertWatchlistId, refuseTradeAlertWatchlist } = await import('../src/core/watchlist.js');
-  assert.equal(tradeAlertWatchlistId({ readConfig: () => '﻿{"dtv_watchlist_id": 341892775}' }), '341892775');
+  assert.equal(tradeAlertWatchlistId({ readConfig: () => '﻿{"dtv_watchlist_id": 100000001}' }), '100000001');
   assert.equal(tradeAlertWatchlistId({ readConfig: () => '{"dtv_watchlist_id": null}' }), null);
   assert.equal(tradeAlertWatchlistId({ readConfig: () => { throw new Error('missing'); } }), null);
-  const list = { id: 341892775, name: 'Alerts' };
-  assert.throws(() => refuseTradeAlertWatchlist(list, false, '341892775'), /TRADE_ALERT_WATCHLIST/);
-  assert.doesNotThrow(() => refuseTradeAlertWatchlist(list, true, '341892775'));
-  assert.doesNotThrow(() => refuseTradeAlertWatchlist({ id: 1, name: 'Other' }, false, '341892775'));
-  assert.throws(() => refuseTradeAlertWatchlist(null, false, '341892775'), /cannot tell which watchlist/);
-  assert.doesNotThrow(() => refuseTradeAlertWatchlist(null, true, '341892775'));
+  const list = { id: 100000001, name: 'Alerts' };
+  assert.throws(() => refuseTradeAlertWatchlist(list, false, '100000001'), /TRADE_ALERT_WATCHLIST/);
+  assert.doesNotThrow(() => refuseTradeAlertWatchlist(list, true, '100000001'));
+  assert.doesNotThrow(() => refuseTradeAlertWatchlist({ id: 1, name: 'Other' }, false, '100000001'));
+  assert.throws(() => refuseTradeAlertWatchlist(null, false, '100000001'), /cannot tell which watchlist/);
+  assert.doesNotThrow(() => refuseTradeAlertWatchlist(null, true, '100000001'));
   assert.doesNotThrow(() => refuseTradeAlertWatchlist(null, false, null));
 });
 
