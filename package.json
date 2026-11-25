@@ -36,6 +36,7 @@
     "eslint": "^10.10.0"
   },
   "overrides": {
+    "@hono/node-server": "2.1.8",
     "body-parser": "2.4.0",
     "iconv-lite": "0.7.3",
     "minimatch": "11.0.1"
