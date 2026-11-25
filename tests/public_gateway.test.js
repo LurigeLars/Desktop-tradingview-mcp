@@ -75,9 +75,9 @@ describe('public gateway configuration', () => {
     assert.equal(headers['content-length'], '12');
   });
 
-  it('preserves the full 101-tool TradingView surface by default', () => {
+  it('preserves the full 102-tool TradingView surface by default', () => {
     const allowed = parseAllowedTools();
-    assert.equal(allowed.size, 101);
+    assert.equal(allowed.size, 102);
     assert.equal(allowed.has('ui_sequence'), true);
     assert.equal(allowed.has('tab_confirm_close'), true);
     assert.equal(allowed.has('layout_delete'), true);
@@ -100,7 +100,7 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit operator-controlled core profile', () => {
     const allowed = parseAllowedTools('core');
-    assert.equal(allowed.size, 57);
+    assert.equal(allowed.size, 58);
     assert.equal(allowed.has('chart_get_state'), true);
     assert.equal(allowed.has('data_get_ohlcv'), true);
     assert.equal(allowed.has('news_flow_get'), true);
@@ -114,7 +114,7 @@ describe('public gateway configuration', () => {
 
   it('supports an explicit full profile', () => {
     const allowed = parseAllowedTools('full');
-    assert.equal(allowed.size, 101);
+    assert.equal(allowed.size, 102);
     assert.equal(allowed.has('ui_sequence'), true);
     assert.equal(allowed.has('tab_confirm_close'), true);
     assert.equal(allowed.has('layout_delete'), true);
