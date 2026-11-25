@@ -1,0 +1,22 @@
+name: Migration lock generation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - package.json
+      - .github/workflows/migration-lock.yml
+permissions:
+  contents: read
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22.x"
+      - run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Emit generated public lockfile for review
+        run: |
+          node --input-type=module -e "import fs from 'node:fs'; const b=fs.readFileSync('package-lock.json').toString('base64'); for(let i=0;i<b.length;i+=1000) console.log('LOCK_CHUNK '+b.slice(i,i+1000)); console.log('LOCK_END')"
