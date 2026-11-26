@@ -36,21 +36,32 @@ function Assert-CleanGuardCheckout {
     }
     return $Head
 }
+# With Docker's containerd store, the tag identifies an OCI index while the
+# container identifies a platform-specific manifest (or a legacy config ID).
+function Get-GuardPlatformImageId {
+    param([string]$ImageRef, [string]$Platform)
+    $InspectArgs = @('image','inspect','--format','{{.Id}}')
+    if ($Platform) { $InspectArgs += @('--platform',$Platform) }
+    $ImageId = Get-GuardDockerValue ($InspectArgs + @($ImageRef))
+    if ($ImageId -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Invalid image identity.' }
+    return $ImageId
+}
 function Get-GuardState {
-    $Format = '{{.Id}}|{{.Image}}|{{.State.Running}}|{{.State.Health.Status}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}'
+    $Format = '{{.Id}}|{{if .ImageManifestDescriptor}}{{.ImageManifestDescriptor.Digest}}{{else}}{{.Image}}{{end}}|{{.State.Running}}|{{.State.Health.Status}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{with .ImageManifestDescriptor}}{{with .Platform}}{{.OS}}/{{.Architecture}}{{if .Variant}}/{{.Variant}}{{end}}{{else}}unknown{{end}}{{end}}'
     $Fields = (Get-GuardDockerValue @('container','inspect','--format',$Format,'dtv-cdp-guard')) -split '\|'
-    if ($Fields.Count -ne 6 -or $Fields[4] -cne 'tradingview-mcp-public' -or
-        $Fields[5] -cne 'cdp-guard' -or $Fields[1] -notmatch '^sha256:[0-9a-f]{64}$') {
+    if ($Fields.Count -ne 7 -or $Fields[4] -cne 'tradingview-mcp-public' -or
+        $Fields[5] -cne 'cdp-guard' -or $Fields[1] -notmatch '^sha256:[0-9a-f]{64}$' -or
+        ($Fields[6] -and $Fields[6] -notmatch '^linux/[a-z0-9]+(/[a-z0-9]+)?$')) {
         throw 'Unexpected CDP guard container identity.'
     }
-    return [pscustomobject]@{ Id=$Fields[0]; Image=$Fields[1]; Running=$Fields[2]; Health=$Fields[3] }
+    return [pscustomobject]@{ Id=$Fields[0]; Image=$Fields[1]; Running=$Fields[2]; Health=$Fields[3]; Platform=$Fields[6] }
 }
 function Wait-GuardHealth {
-    param([string]$ImageId)
+    param([string]$ImageId, [string]$Platform)
     for ($Attempt = 0; $Attempt -lt 45; $Attempt++) {
         try {
             $State = Get-GuardState
-            if ($State.Image -ceq $ImageId -and $State.Running -ceq 'true' -and $State.Health -ceq 'healthy') {
+            if ($State.Image -ceq $ImageId -and $State.Platform -ceq $Platform -and $State.Running -ceq 'true' -and $State.Health -ceq 'healthy') {
                 return $true
             }
         } catch { }
@@ -101,16 +112,24 @@ try {
         throw 'Runtime or checkout changed during staging; no promotion attempted.'
     }
 
-    $RollbackTag = 'dtv-cdp-guard:rollback-' + $Guard.Image.Substring(7,12)
-    Invoke-GuardDocker @('image','tag',$Guard.Image,$RollbackTag)
-    if ((Get-GuardDockerValue @('image','inspect','--format','{{.Id}}',$RollbackTag)) -cne $Guard.Image) {
+    # Resolve the original index only after proving its selected platform is
+    # precisely the running guard. Never tag a container's config digest.
+    $PreviousIndex = Get-GuardPlatformImageId 'dtv-cdp-guard:local' ''
+    if ((Get-GuardPlatformImageId $PreviousIndex $Guard.Platform) -cne $Guard.Image) {
+        throw 'Local guard tag does not match the running platform image; no promotion attempted.'
+    }
+    $CandidatePlatformId = Get-GuardPlatformImageId $CandidateId $Guard.Platform
+    $RollbackTag = 'dtv-cdp-guard:rollback-' + $PreviousIndex.Substring(7,12)
+    Invoke-GuardDocker @('image','tag',$PreviousIndex,$RollbackTag)
+    if ((Get-GuardPlatformImageId $RollbackTag '') -cne $PreviousIndex -or
+        (Get-GuardPlatformImageId $RollbackTag $Guard.Platform) -cne $Guard.Image) {
         throw 'Previous running image could not be preserved; no promotion attempted.'
     }
     $Recreate = $ComposeArgs + @('up','-d','--no-deps','--no-build','--pull','never','--force-recreate','cdp-guard')
     try {
         Invoke-GuardDocker @('image','tag',$CandidateId,'dtv-cdp-guard:local')
         Invoke-GuardDocker $Recreate
-        if (-not (Wait-GuardHealth $CandidateId) -or
+        if (-not (Wait-GuardHealth $CandidatePlatformId $Guard.Platform) -or
             (Get-GuardDockerValue @('container','inspect','--format','{{.Id}}','dtv-mcp-gateway')) -cne $GatewayId) {
             throw 'Guard health or unchanged gateway verification failed.'
         }
@@ -118,7 +137,7 @@ try {
         try {
             Invoke-GuardDocker @('image','tag',$RollbackTag,'dtv-cdp-guard:local')
             Invoke-GuardDocker $Recreate
-            if (-not (Wait-GuardHealth $Guard.Image)) { throw 'Rollback health failed.' }
+            if (-not (Wait-GuardHealth $Guard.Image $Guard.Platform)) { throw 'Rollback health failed.' }
         } catch {
             throw 'Guard promotion and rollback failed; inspect the CDP guard locally immediately.'
         }
