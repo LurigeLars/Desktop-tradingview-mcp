@@ -315,7 +315,7 @@ On Windows, refresh the CDP guard from the clean canonical `main` checkout witho
 pwsh -NoProfile -File .\scripts\windows\refresh-cdp-guard.ps1 -Apply
 ```
 
-Without `-Apply`, the helper builds and scans a separately tagged candidate only. Promotion requires a successful fixable Critical/High Scout gate, unchanged checkout and runtime identities, a preserved rollback image, and a healthy guard after service-only recreation. The helper does not grant remote build or shell access.
+Without `-Apply`, the helper builds and scans a separately tagged candidate only. Promotion requires a successful fixable Critical/High Scout gate, unchanged checkout and runtime identities, a preserved rollback image, and a healthy guard after service-only recreation. The version-scoped [OpenVEX record](security/vex/cdp-guard.openvex.json) corrects the known Scout false positive for Alpine 3.24's already-patched musl 1.2.6-r3 (CVE-2026-107891); all other findings remain blocking under the existing gate. Remove the record once Scout reports the correct branch-specific version. The helper does not grant remote build or shell access.
 
 Cloudflare signing-key refreshes share one in-flight request per gateway. Failed refreshes are throttled for 30 seconds; expired keys cannot be trusted after a failed refresh.
 
