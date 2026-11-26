@@ -78,7 +78,16 @@ try {
     Invoke-GuardDocker ($ComposeArgs + @('-f',$Override.FullName,'build','--no-cache','cdp-guard'))
     $CandidateId = Get-GuardDockerValue @('image','inspect','--format','{{.Id}}',$CandidateTag)
     if ($CandidateId -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Candidate image identity is invalid.' }
-    Invoke-GuardDocker @('scout','cves','--only-severity','critical,high','--only-fixed','--exit-code',("local://" + $CandidateId))
+    # The reviewed VEX covers only the exact stable musl package already fixed by Alpine.
+    # All other fixable Critical/High findings still block promotion.
+    $Vex = Join-Path $Repo 'security\vex\cdp-guard.openvex.json'
+    if (-not (Test-Path -LiteralPath $Vex -PathType Leaf)) { throw 'Reviewed guard VEX missing.' }
+    $VexHash = (Get-FileHash -LiteralPath $Vex -Algorithm SHA256).Hash
+    & docker.exe scout cves --only-severity critical,high --only-fixed --exit-code --vex-location $Vex --vex-author 'DTV maintainers' ("local://" + $CandidateId)
+    if ($LASTEXITCODE -ne 0) { throw 'Guard candidate Scout gate failed; running guard untouched.' }
+    if ((Get-FileHash -LiteralPath $Vex -Algorithm SHA256).Hash -cne $VexHash) {
+        throw 'Reviewed VEX changed during scanning; no promotion attempted.'
+    }
     if ((Get-GuardDockerValue @('image','inspect','--format','{{.Id}}',$CandidateTag)) -cne $CandidateId) {
         throw 'Candidate image changed during scanning.'
     }
