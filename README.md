@@ -309,6 +309,14 @@ Copy `public/gateway.env.example` to the gitignored `public/gateway.env`, replac
 docker compose -f compose.public.yaml up -d
 ```
 
+On Windows, refresh the CDP guard from the clean canonical `main` checkout without changing the gateway or host MCP process:
+
+```powershell
+pwsh -NoProfile -File .\scripts\windows\refresh-cdp-guard.ps1 -Apply
+```
+
+Without `-Apply`, the helper builds and scans a separately tagged candidate only. Promotion requires a successful fixable Critical/High Scout gate, unchanged checkout and runtime identities, a preserved rollback image, and a healthy guard after service-only recreation. The helper does not grant remote build or shell access.
+
 Cloudflare signing-key refreshes share one in-flight request per gateway. Failed refreshes are throttled for 30 seconds; expired keys cannot be trusted after a failed refresh.
 
 The gateway requires a valid Cloudflare Access JWT, strips client credentials before proxying, applies request/rate limits, and exposes the full 93-tool surface by default. Set `ALLOWED_TOOLS=core` to select the smaller reviewed profile.
