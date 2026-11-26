@@ -36,8 +36,14 @@ services:
   cdp-guard:
     build:
       dockerfile_inline: |
-        FROM node:26.13.1-alpine
-        RUN apk add --no-cache iptables
+        FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
+        # The guard only uses shell utilities and iptables, not npm or Node applications.
+        RUN apk upgrade --no-cache \
+          && apk add --no-cache iptables \
+          && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+          && command -v iptables \
+          && command -v getent \
+          && test ! -e /usr/local/lib/node_modules/npm
     image: dtv-cdp-guard:local
     container_name: dtv-cdp-guard
     network_mode: host
