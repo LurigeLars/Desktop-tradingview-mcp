@@ -3,7 +3,7 @@
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 export const EXTENDED_HOURS_GROUP = 'session:extended';
 export function workerRequiresExtendedHours(entry) {

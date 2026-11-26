@@ -55,13 +55,15 @@ function modernToolCatalog() {
         ...(config.inputSchema && { inputSchema: z.object(config.inputSchema) }),
         ...(config.outputSchema && { outputSchema: z.object(config.outputSchema) }),
       }, handler]),
-    });
+    }, 'http_modern');
     modernCatalog = tools;
   }
   return modernCatalog;
 }
 
-export function createTradingViewServer({ modern = false } = {}) {
+/** transport: 'stdio' | 'http_legacy' (2025 sessions) | 'http_modern' (2026-07-28). */
+export function createTradingViewServer({ transport = 'stdio' } = {}) {
+  const modern = transport === 'http_modern';
   const Server = modern ? ModernMcpServer : McpServer;
   const server = new Server(
     SERVER_INFO,
@@ -69,19 +71,19 @@ export function createTradingViewServer({ modern = false } = {}) {
       instructions: SERVER_INSTRUCTIONS,
     }
   );
-  if (!modern) return registerToolCatalog(server);
+  if (!modern) return registerToolCatalog(server, transport);
   for (const tool of modernToolCatalog()) server.registerTool(...tool);
   return server;
 }
 
-function registerToolCatalog(server) {
+function registerToolCatalog(server, transport) {
   // Legacy server.tool registrations must receive explicit safety metadata.
   // This adapter fails closed if a newly added legacy tool is not classified.
   const usageStore=getToolUsageStore();
-  installToolUsage(server,usageStore);
+  installToolUsage(server,usageStore,transport);
   installLegacyToolAnnotationAdapter(server);
   server.registerTool('tool_usage', {
-    description:'Read local 30-day metadata-only tool usage, latency, errors and UI sequence outcomes; includes registered local tools with no observed calls. Default 7 UTC days, top 50.',
+    description:'Read local 30-day metadata-only tool usage, latency, errors, UI sequence outcomes and calls per server transport; includes registered local tools with no observed calls. Default 7 UTC days, top 50.',
     inputSchema:{days:z.number().int().min(1).max(30).optional(),limit:z.number().int().min(1).max(100).optional(),tool:z.string().regex(/^[a-z][a-z0-9_]{0,63}$/).optional()},
     annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
   },async args=>{try{return jsonResult(usageStore.report(args));}catch{return jsonResult({success:false,error:'Tool usage report unavailable'},true);}});

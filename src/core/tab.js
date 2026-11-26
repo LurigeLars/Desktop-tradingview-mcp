@@ -1333,7 +1333,7 @@ export async function newTab({
       chartTarget = await createPersistentTarget(chartUrl, {
         timeoutMs: chartTimeoutMs,
       });
-    } catch (error) {
+    } catch {
       creationVia = 'renderer_window_open';
       chartTarget = await openPersistentViaRenderer(chartUrl, {
         timeoutMs: chartTimeoutMs,

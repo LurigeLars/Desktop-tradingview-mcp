@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { createMcpHandler, isLegacyRequest } from '@modelcontextprotocol/server';
+import { createMcpHandler, isJsonContentType, isLegacyRequest } from '@modelcontextprotocol/server';
 import { toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
 import { createTradingViewServer, writeStartupNotice } from './create-server.js';
 
@@ -93,8 +93,7 @@ function isAllowedHostHeader(hostHeader) {
 }
 
 async function readJsonBody(req, maxBytes) {
-  const contentType = String(req.headers['content-type'] || '').toLowerCase();
-  if (!contentType.startsWith('application/json')) {
+  if (!isJsonContentType(req.headers['content-type'])) {
     throw new HttpError(415, 'Content-Type must be application/json');
   }
 
@@ -203,7 +202,7 @@ export async function startTradingViewHttpServer(overrides = {}) {
   }
   const tokenDigest = digest(token);
   const sessions = new Map();
-  const modern = createMcpHandler(() => createTradingViewServer({ modern: true }), {
+  const modern = createMcpHandler(() => createTradingViewServer({ transport: 'http_modern' }), {
     legacy: 'reject',
     maxRequestBodySize: config.maxBodyBytes,
   });
@@ -325,7 +324,7 @@ export async function startTradingViewHttpServer(overrides = {}) {
           return;
         }
 
-        const server = createTradingViewServer();
+        const server = createTradingViewServer({ transport: 'http_legacy' });
         let transport;
 
         transport = new StreamableHTTPServerTransport({
