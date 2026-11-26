@@ -22,7 +22,9 @@ function Invoke-GuardDocker {
 function Get-GuardDockerValue {
     param([string[]]$DockerArguments)
     $Lines = @(& docker.exe @DockerArguments 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $Lines.Count -ne 1) { throw 'Docker guard state could not be verified.' }
+    if ($LASTEXITCODE -ne 0 -or $Lines.Count -ne 1) {
+        throw "Docker guard inspection failed ($($DockerArguments[0]) $($DockerArguments[1]), exit=$LASTEXITCODE, lines=$($Lines.Count))."
+    }
     return ([string]$Lines[0]).Trim()
 }
 function Assert-CleanGuardCheckout {
@@ -47,21 +49,38 @@ function Get-GuardPlatformImageId {
     return $ImageId
 }
 function Get-GuardState {
-    $Format = '{{.Id}}|{{if .ImageManifestDescriptor}}{{.ImageManifestDescriptor.Digest}}{{else}}{{.Image}}{{end}}|{{.State.Running}}|{{.State.Health.Status}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{with .ImageManifestDescriptor}}{{with .Platform}}{{.OS}}/{{.Architecture}}{{if .Variant}}/{{.Variant}}{{end}}{{else}}unknown{{end}}{{end}}'
-    $Fields = (Get-GuardDockerValue @('container','inspect','--format',$Format,'dtv-cdp-guard')) -split '\|'
-    if ($Fields.Count -ne 7 -or $Fields[4] -cne 'tradingview-mcp-public' -or
-        $Fields[5] -cne 'cdp-guard' -or $Fields[1] -notmatch '^sha256:[0-9a-f]{64}$' -or
-        ($Fields[6] -and $Fields[6] -notmatch '^linux/[a-z0-9]+(/[a-z0-9]+)?$')) {
+    # Docker's JSON descriptor uses lowercase OCI field names. Parse the actual
+    # JSON instead of evaluating nested Go-template fields (including optional variant).
+    $Inspect = (Get-GuardDockerValue @('container','inspect','--format','{{json .}}','dtv-cdp-guard')) | ConvertFrom-Json -ErrorAction Stop
+    $Descriptor = $Inspect.ImageManifestDescriptor
+    $Image = [string]$Inspect.Image
+    $Platform = ''
+    if ($null -ne $Descriptor) {
+        $Image = [string]$Descriptor.digest
+        $Platform = "$($Descriptor.platform.os)/$($Descriptor.platform.architecture)"
+        if ($Descriptor.platform.variant) { $Platform += "/$($Descriptor.platform.variant)" }
+        if ($Platform -cnotmatch '^linux/[a-z0-9]+(/[a-z0-9]+)?$') {
+            throw 'Unexpected CDP guard manifest platform.'
+        }
+    }
+    if ($Inspect.Config.Labels.'com.docker.compose.project' -cne 'tradingview-mcp-public' -or
+        $Inspect.Config.Labels.'com.docker.compose.service' -cne 'cdp-guard' -or
+        $Image -cnotmatch '^sha256:[0-9a-f]{64}$' -or
+        [string]$Inspect.Id -cnotmatch '^[0-9a-f]{64}$' -or
+        $Inspect.State.Running -isnot [bool]) {
         throw 'Unexpected CDP guard container identity.'
     }
-    return [pscustomobject]@{ Id=$Fields[0]; Image=$Fields[1]; Running=$Fields[2]; Health=$Fields[3]; Platform=$Fields[6] }
+    return [pscustomobject]@{
+        Id=[string]$Inspect.Id; Image=$Image; Running=$Inspect.State.Running
+        Health=[string]$Inspect.State.Health.Status; Platform=$Platform
+    }
 }
 function Wait-GuardHealth {
     param([string]$ImageId, [string]$Platform)
     for ($Attempt = 0; $Attempt -lt 45; $Attempt++) {
         try {
             $State = Get-GuardState
-            if ($State.Image -ceq $ImageId -and $State.Platform -ceq $Platform -and $State.Running -ceq 'true' -and $State.Health -ceq 'healthy') {
+            if ($State.Image -ceq $ImageId -and $State.Platform -ceq $Platform -and $State.Running -and $State.Health -ceq 'healthy') {
                 return $true
             }
         } catch { }
@@ -75,11 +94,19 @@ $Compose = Join-Path $Repo 'compose.public.yaml'
 $ComposeHash = (Get-FileHash -LiteralPath $Compose -Algorithm SHA256).Hash
 $ComposeArgs = @('compose','--project-directory',$Repo,'-f',$Compose)
 $Guard = Get-GuardState
-if ($Guard.Running -cne 'true' -or $Guard.Health -cne 'healthy') {
+if (-not $Guard.Running -or $Guard.Health -cne 'healthy') {
     throw 'Existing CDP guard is not healthy; recover it before routine maintenance.'
 }
 $GatewayId = Get-GuardDockerValue @('container','inspect','--format','{{.Id}}','dtv-mcp-gateway')
 Invoke-GuardDocker ($ComposeArgs + @('config','--quiet'))
+
+# Prove the existing tag really contains the running platform before spending
+# time building. Recheck the immutable index at the actual promotion boundary.
+$PreviousIndex = Get-GuardPlatformImageId 'dtv-cdp-guard:local' ''
+if ((Get-GuardPlatformImageId 'dtv-cdp-guard:local' $Guard.Platform) -cne $Guard.Image -or
+    (Get-GuardPlatformImageId 'dtv-cdp-guard:local' '') -cne $PreviousIndex) {
+    throw 'Local guard tag does not match the running platform image; no promotion attempted.'
+}
 
 # A separate tag keeps the running image and its normal local tag unchanged during the scan.
 $CandidateTag = 'dtv-cdp-guard:reviewed-' + $Head.Substring(0,12)
@@ -114,8 +141,8 @@ try {
 
     # Resolve the original index only after proving its selected platform is
     # precisely the running guard. Never tag a container's config digest.
-    $PreviousIndex = Get-GuardPlatformImageId 'dtv-cdp-guard:local' ''
-    if ((Get-GuardPlatformImageId $PreviousIndex $Guard.Platform) -cne $Guard.Image) {
+    if ((Get-GuardPlatformImageId 'dtv-cdp-guard:local' '') -cne $PreviousIndex -or
+        (Get-GuardPlatformImageId 'dtv-cdp-guard:local' $Guard.Platform) -cne $Guard.Image) {
         throw 'Local guard tag does not match the running platform image; no promotion attempted.'
     }
     $CandidatePlatformId = Get-GuardPlatformImageId $CandidateId $Guard.Platform
